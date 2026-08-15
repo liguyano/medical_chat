@@ -1,0 +1,8 @@
+tmp/
+.env
+.DS_Store
+Thumbs.db
+
+# 医疗资料
+docs/文档
+

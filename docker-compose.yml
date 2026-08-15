@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: medical-evaluate-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: medical_evaluate
+      POSTGRES_USER: medical
+      POSTGRES_PASSWORD: medical_dev_password
+      TZ: Asia/Shanghai
+    ports:
+      - "15432:5432"
+    volumes:
+      - medical_evaluate_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medical -d medical_evaluate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  medical_evaluate_pgdata:
