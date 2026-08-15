@@ -1,0 +1,79 @@
+{
+  "id": "nrs2002",
+  "title": "住院患者营养风险筛查表",
+  "source_file": "docs/文档/评估表/10.1和2营养风险筛查表（NRS2002）.pdf",
+  "status": "pending_review",
+  "form_type": "risk_scale",
+  "patient_fields": [
+    "department",
+    "patient_name",
+    "age",
+    "sex",
+    "bed_no",
+    "inpatient_no",
+    "admission_time",
+    "diagnosis"
+  ],
+  "measurement_fields": [
+    {"id": "height_cm", "label": "身高", "type": "decimal", "unit": "cm", "precision": "0.1cm"},
+    {"id": "weight_kg", "label": "体重", "type": "decimal", "unit": "kg", "precision": "0.1kg"},
+    {"id": "bmi", "label": "BMI", "type": "decimal", "unit": "kg/m2"},
+    {"id": "bedridden", "label": "卧床", "type": "boolean"}
+  ],
+  "initial_screening": {
+    "rule": "任意一项回答是，进入第二步正式筛查；全部回答否，说明患者目前无营养风险，1周后复查。",
+    "items": [
+      {"id": "bmi_lt_18_5", "label": "BMI<18.5kg/m2", "type": "boolean"},
+      {"id": "weight_loss_3_months", "label": "过去3个月有体重下降", "type": "boolean"},
+      {"id": "intake_reduced_last_week", "label": "过去一周有摄食减少", "type": "boolean"},
+      {"id": "severe_disease_icu", "label": "有严重疾病（如需ICU治疗）", "type": "boolean"}
+    ]
+  },
+  "scoring": {
+    "formula": "disease_severity_score + nutrition_impairment_score + age_score",
+    "components": [
+      {
+        "id": "disease_severity_score",
+        "label": "疾病严重程度评分",
+        "options": [
+          {"score": 0, "label": "未达到1分、2分、3分标准"},
+          {"score": 1, "label": "一般肿瘤；髋关节骨折；血液透析；糖尿病；慢性病有急性并发症（如肝硬化、COPD）；或慢性病患者因并发症住院、虚弱但不需卧床"},
+          {"score": 2, "label": "血液恶性肿瘤；严重肺炎；腹部大手术；脑卒中；或卧床患者，如大手术后"},
+          {"score": 3, "label": "颅脑损伤；骨髓移植；重症监护患者（APACHE>10）；或加强病房机械通气支持患者"}
+        ]
+      },
+      {
+        "id": "nutrition_impairment_score",
+        "label": "营养状态受损评分",
+        "options": [
+          {"score": 0, "label": "未达到1分、2分、3分标准"},
+          {"score": 1, "label": "近3个月内体重减轻>5%；或最近1周进食量较需要量减少25%~50%"},
+          {"score": 2, "label": "近2个月内体重减轻>5%；或BMI 18.5~20.5；或最近1周进食量较需要量减少50%~75%"},
+          {"score": 3, "label": "近1个月内体重减轻>5%；或3个月内减轻>15%；或BMI<18.5；或血清白蛋白<35g/L；或最近1周进食量较需要量减少75%~100%"}
+        ],
+        "supporting_fields": [
+          {"id": "previous_weight_kg", "label": "原体重", "type": "decimal", "unit": "kg"},
+          {"id": "current_weight_kg", "label": "现体重", "type": "decimal", "unit": "kg"},
+          {"id": "weight_loss_percent", "label": "体重减轻", "type": "decimal", "unit": "%"}
+        ]
+      },
+      {
+        "id": "age_score",
+        "label": "年龄评分",
+        "options": [
+          {"score": 0, "label": "年龄<=70岁"},
+          {"score": 1, "label": "年龄>70岁"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score >= 3", "result": "患者有营养不良风险，需营养支持治疗"},
+    {"condition": "total_score < 3", "result": "若患者将接受重大手术，则每周重新评估营养状况"}
+  ],
+  "signature_fields": ["screener_signature", "screening_time"],
+  "review_notes": [
+    "PDF标题未直接写NRS2002，但文件名包含NRS2002。",
+    "源文件中“过去3个月有体重下降码？”疑似OCR/原文错字，结构化为“过去3个月有体重下降”。"
+  ]
+}

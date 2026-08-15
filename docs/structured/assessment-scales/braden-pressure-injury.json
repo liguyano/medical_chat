@@ -1,0 +1,61 @@
+{
+  "id": "braden_pressure_injury",
+  "title": "Braden压疮评估量表（GDSY）",
+  "source_file": "docs/文档/评估表/Braden压疮评估量表.pdf",
+  "status": "pending_review",
+  "form_type": "risk_scale",
+  "patient_fields": ["patient_name", "sex", "age", "ward", "bed_no", "inpatient_no", "diagnosis"],
+  "assessment_fields": ["assessment_date", "assessment_time"],
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 6, "max": 23},
+    "items": [
+      {"id": "sensory_perception", "label": "感觉", "options": [{"score": 1, "label": "完全受限"}, {"score": 2, "label": "非常受限"}, {"score": 3, "label": "轻度受限"}, {"score": 4, "label": "未受损害"}]},
+      {"id": "moisture", "label": "潮湿", "options": [{"score": 1, "label": "持续潮湿"}, {"score": 2, "label": "非常潮湿"}, {"score": 3, "label": "偶尔潮湿"}, {"score": 4, "label": "很少潮湿"}]},
+      {"id": "activity", "label": "活动", "options": [{"score": 1, "label": "活动（评估表）"}, {"score": 2, "label": "局限于椅"}, {"score": 3, "label": "偶尔步行"}, {"score": 4, "label": "经常步行"}]},
+      {"id": "mobility", "label": "移动", "options": [{"score": 1, "label": "完全不能"}, {"score": 2, "label": "严重受限"}, {"score": 3, "label": "轻度受限"}, {"score": 4, "label": "不受限"}]},
+      {"id": "nutrition", "label": "营养", "options": [{"score": 1, "label": "非常差"}, {"score": 2, "label": "可能不足"}, {"score": 3, "label": "适当"}, {"score": 4, "label": "良好"}]},
+      {"id": "friction_shear", "label": "摩擦和剪切力", "options": [{"score": 1, "label": "有问题"}, {"score": 2, "label": "有潜在问题"}, {"score": 3, "label": "无明显问题"}]}
+    ]
+  },
+  "risk_level": {
+    "source_status": "pending_review",
+    "note": "PDF保留风险等级填写栏，但未列出各等级分值阈值。"
+  },
+  "nursing_measures": [
+    "鼓励转动体位",
+    "帮助变换体位",
+    "每天下床坐椅子",
+    "其他（体位转换）",
+    "移动患者时正确使用移动技巧",
+    "摩擦点处黏贴保护膜",
+    "保持半卧位，床头摇起≤30°，特殊情况除外",
+    "其他（减少摩擦力和剪切力）",
+    "气垫床、翻身床、悬浮床、波浪床",
+    "肘部和足后跟使用压力减缓装置",
+    "翻身枕",
+    "水垫",
+    "其他（压力减缓用具的使用）",
+    "每天定时检查皮肤情况，特别是受压部位",
+    "帮助搞个人卫生，例如床上浴、更换衣物",
+    "当皮肤弄脏时及时清洁",
+    "干性皮肤使用皮肤润肤霜",
+    "受刺激物浸润区域使用皮肤保护物",
+    "使用纸尿片或纸尿裤",
+    "使用尿套",
+    "留置导尿管",
+    "大便失禁者安装造口袋或收集器材",
+    "其他（皮肤护理）",
+    "合适的热量和蛋白质的摄入",
+    "请营养师会诊",
+    "鼻饲",
+    "静脉高营养",
+    "监测饮食摄入和排出",
+    "其他（营养支持）"
+  ],
+  "signature_fields": ["nurse_signature", "patient_signature", "family_signature"],
+  "review_notes": [
+    "活动项目的1分选项在PDF中显示为“活动（评估表）”，需审批确认是否应为“卧床”。",
+    "风险等级阈值未出现在PDF正文，暂不补充外部通用规则。"
+  ]
+}

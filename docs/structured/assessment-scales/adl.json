@@ -1,0 +1,35 @@
+{
+  "id": "adl",
+  "title": "日常生活能力(ADL)评价表",
+  "source_file": "docs/文档/评估表/日常生活能力(ADL)评价表GD(1.0).pdf",
+  "status": "pending_review",
+  "form_type": "ability_scale",
+  "patient_fields": ["patient_name", "sex", "age", "department", "inpatient_no", "clinical_diagnosis"],
+  "assessment_fields": ["assessment_date", "assessment_time", "evaluator"],
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 100},
+    "items": [
+      {"id": "feeding", "label": "进食", "options": [{"score": 0, "label": "依赖"}, {"score": 5, "label": "需部分帮助（如切面包、抹黄油、夹菜、盛饭等）"}, {"score": 10, "label": "全部自理"}]},
+      {"id": "bathing", "label": "洗澡", "options": [{"score": 0, "label": "依赖"}, {"score": 5, "label": "能自理"}]},
+      {"id": "grooming", "label": "修饰", "options": [{"score": 0, "label": "需帮助"}, {"score": 5, "label": "能独立洗脸、梳头、刷牙、剃须"}]},
+      {"id": "dressing", "label": "穿衣", "options": [{"score": 0, "label": "依赖"}, {"score": 5, "label": "需一半帮助"}, {"score": 10, "label": "自理（系纽扣、开关拉链、穿脱鞋及乳罩）"}]},
+      {"id": "bowel_control", "label": "控制大便", "options": [{"score": 0, "label": "失禁或昏迷"}, {"score": 5, "label": "偶尔失禁（每周<1次）"}, {"score": 10, "label": "能控制"}]},
+      {"id": "bladder_control", "label": "控制小便", "options": [{"score": 0, "label": "失禁、昏迷或需导尿"}, {"score": 5, "label": "偶尔失禁（每24h<1次，每周>1次）"}, {"score": 10, "label": "能控制"}]},
+      {"id": "toilet_use", "label": "上厕所", "options": [{"score": 0, "label": "依赖"}, {"score": 5, "label": "需部分帮助"}, {"score": 10, "label": "能自理"}]},
+      {"id": "bed_chair_transfer", "label": "床椅转移", "options": [{"score": 0, "label": "完全依赖（需2人以上帮助）"}, {"score": 5, "label": "需2人或1个强壮、动作熟练的人帮助或指导"}, {"score": 10, "label": "需少量帮助"}, {"score": 15, "label": "能自理"}]},
+      {"id": "walking_45m", "label": "行走(45m)", "options": [{"score": 0, "label": "不能活动"}, {"score": 5, "label": "在轮椅上独立活动"}, {"score": 10, "label": "需1人帮助（体力或语言指导）"}, {"score": 15, "label": "独立行走（可用辅助器）"}]},
+      {"id": "stairs", "label": "上下楼梯", "options": [{"score": 0, "label": "不能"}, {"score": 5, "label": "需帮助（体力或语言指导）"}, {"score": 10, "label": "能自理"}]}
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score >= 0 and total_score <= 20", "result": "功能严重障碍，日常生活完全依赖"},
+    {"condition": "total_score >= 21 and total_score <= 40", "result": "生活需要很大帮助，属重度依赖"},
+    {"condition": "total_score >= 41 and total_score <= 60", "result": "生活需要中等程度帮助"},
+    {"condition": "total_score > 60 and total_score < 100", "result": "生活大部分能自理，轻度依赖"},
+    {"condition": "total_score == 100", "result": "基本生活独立自理，不需他人照顾"}
+  ],
+  "review_notes": [
+    "PDF中文本“体力活语言指导”疑似为“体力或语言指导”，结构化文件按语义整理为“体力或语言指导”。"
+  ]
+}

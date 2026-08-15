@@ -1,0 +1,43 @@
+{
+  "schema_version": "draft-2026-08-13",
+  "status": "pending_review",
+  "source_directory": "docs/文档/评估表",
+  "generated_at": "2026-08-13",
+  "forms": [
+    {
+      "id": "nrs2002",
+      "title": "住院患者营养风险筛查表",
+      "source_file": "10.1和2营养风险筛查表（NRS2002）.pdf",
+      "structured_file": "nrs2002.json",
+      "form_type": "risk_scale"
+    },
+    {
+      "id": "braden_pressure_injury",
+      "title": "Braden压疮评估量表（GDSY）",
+      "source_file": "Braden压疮评估量表.pdf",
+      "structured_file": "braden-pressure-injury.json",
+      "form_type": "risk_scale"
+    },
+    {
+      "id": "admission_assessment",
+      "title": "入院评估单",
+      "source_file": "入院评估单.pdf",
+      "structured_file": "admission-assessment.json",
+      "form_type": "assessment_form"
+    },
+    {
+      "id": "fall_risk",
+      "title": "广东省人民医院患者跌倒/坠床风险评估单",
+      "source_file": "广东省人民医院患者跌倒坠床风险评估单.pdf",
+      "structured_file": "fall-risk.json",
+      "form_type": "risk_scale"
+    },
+    {
+      "id": "adl",
+      "title": "日常生活能力(ADL)评价表",
+      "source_file": "日常生活能力(ADL)评价表GD(1.0).pdf",
+      "structured_file": "adl.json",
+      "form_type": "ability_scale"
+    }
+  ]
+}
