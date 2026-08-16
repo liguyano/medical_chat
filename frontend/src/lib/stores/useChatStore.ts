@@ -21,6 +21,7 @@ interface ChatStore {
   streamingTaskId: string | null;
   setSession: (taskId: string, session: InteractionSession) => void;
   addMessage: (taskId: string, message: InteractionMessage) => void;
+  upsertMessage: (taskId: string, message: InteractionMessage) => void;
   updateMessage: (
     taskId: string,
     messageId: string,
@@ -69,6 +70,26 @@ export const useChatStore = create<ChatStore>()(
           };
         }),
 
+      upsertMessage: (taskId, message) =>
+        set((state) => {
+          const session = state.sessions[taskId];
+          if (!session) return state;
+          const exists = session.messages.some((item) => item.id === message.id);
+          return {
+            sessions: {
+              ...state.sessions,
+              [taskId]: {
+                ...session,
+                messages: exists
+                  ? session.messages.map((item) =>
+                      item.id === message.id ? { ...item, ...message } : item
+                    )
+                  : [...session.messages, message],
+              },
+            },
+          };
+        }),
+
       updateMessage: (taskId, messageId, updates) =>
         set((state) => {
           const session = state.sessions[taskId];
@@ -111,7 +132,13 @@ export const useChatStore = create<ChatStore>()(
         set((state) => ({
           events: {
             ...state.events,
-            [taskId]: [...(state.events[taskId] ?? []), event],
+            [taskId]: (state.events[taskId] ?? []).some(
+              (item) => item.id === event.id
+            )
+              ? (state.events[taskId] ?? []).map((item) =>
+                  item.id === event.id ? { ...item, ...event } : item
+                )
+              : [...(state.events[taskId] ?? []), event],
           },
         })),
 

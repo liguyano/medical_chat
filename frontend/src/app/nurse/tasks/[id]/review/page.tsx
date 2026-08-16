@@ -7,7 +7,9 @@ import NurseLayout from '@/components/layout/NurseLayout';
 import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { prototypeQuestions } from '@/lib/mock/assessment';
+import { careRepository } from '@/lib/repositories';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type { AssessmentReview } from '@/lib/types';
@@ -67,6 +69,7 @@ export default function NurseReviewPage() {
     existingReview?.supplementaryInquiry ?? ''
   );
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   if (!task) {
     return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
@@ -76,7 +79,7 @@ export default function NurseReviewPage() {
     (question) => nurseAnswers[question.id] !== sourceAnswers[question.id]
   );
 
-  const persistReview = (status: AssessmentReview['status']) => {
+  const persistReview = async (status: AssessmentReview['status']) => {
     const missingReason = differences.find((question) => !reasons[question.id]?.trim());
     if (status === 'confirmed' && missingReason) {
       setError(`请填写“${missingReason.questionText}”的修改原因`);
@@ -91,11 +94,23 @@ export default function NurseReviewPage() {
       status,
       reviewedAt: new Date().toISOString(),
     };
-    saveReview(review);
-    if (status === 'confirmed') {
-      router.push(`/nurse/quality/${taskId}`);
-    } else {
-      router.push(`/nurse/tasks/${taskId}`);
+    setSubmitting(true);
+    try {
+      await careRepository.submitAssessmentReview(review);
+      saveReview(review);
+      if (status === 'confirmed') {
+        router.push(`/nurse/quality/${taskId}`);
+      } else {
+        router.push(`/nurse/tasks/${taskId}`);
+      }
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : '复核结果保存失败'
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -114,6 +129,7 @@ export default function NurseReviewPage() {
             </p>
           </div>
           <div className="flex gap-2">
+            <IntegrationStatus compact />
             <Badge variant="info">{reviewQuestions.length}项答案</Badge>
             <Badge variant={differences.length ? 'warning' : 'success'}>{differences.length}项差异</Badge>
           </div>
@@ -216,9 +232,25 @@ export default function NurseReviewPage() {
       )}
 
       <div className="mt-5 flex flex-col sm:flex-row justify-end gap-3">
-        <Button variant="outline" onClick={() => persistReview('draft')}>保存草稿</Button>
-        <Button variant="danger" onClick={() => persistReview('returned')}>退回患者重评</Button>
-        <Button onClick={() => persistReview('confirmed')} disabled={!reviewQuestions.length}>
+        <Button
+          variant="outline"
+          disabled={submitting}
+          onClick={() => void persistReview('draft')}
+        >
+          保存草稿
+        </Button>
+        <Button
+          variant="danger"
+          disabled={submitting}
+          onClick={() => void persistReview('returned')}
+        >
+          退回患者重评
+        </Button>
+        <Button
+          loading={submitting}
+          onClick={() => void persistReview('confirmed')}
+          disabled={!reviewQuestions.length}
+        >
           <CheckCircleIcon className="w-5 h-5 mr-2" />
           确认最终结果
         </Button>

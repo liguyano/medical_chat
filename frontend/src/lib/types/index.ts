@@ -57,6 +57,7 @@ export type PrototypeAnswerValue = string | string[] | number | boolean | null;
 export interface CareTask {
   id: string;
   taskNo: string;
+  sessionId?: string;
   patientId: string;
   encounterId: string;
   encounterNo?: string;
@@ -296,6 +297,7 @@ export interface ConsentClause {
   deliveryStatus: 'pending' | 'delivering' | 'delivered' | 'skipped';
   listened: boolean;
   confirmed: boolean;
+  understandingStatus?: 'pending' | 'understood' | 'not_understood' | 'refused';
 }
 
 export interface InteractionEvent {

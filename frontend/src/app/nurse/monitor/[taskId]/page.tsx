@@ -9,8 +9,13 @@ import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { useRealtimeStream } from '@/hooks/useRealtimeStream';
+import { careRepository } from '@/lib/repositories';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { useUserStore } from '@/lib/stores/useUserStore';
+import { createMonitorSsePath } from '@/lib/transports/sseClient';
 import type { MessageFeedback } from '@/lib/types';
 import {
   ArrowLeftIcon,
@@ -23,6 +28,7 @@ export default function NurseMonitorDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const resolveHandoff = useTaskStore((state) => state.resolveHandoff);
+  const user = useUserStore((state) => state.user);
   const session = useChatStore((state) => state.sessions[taskId]);
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
   const interactionEvents = useChatStore((state) => state.events);
@@ -33,23 +39,76 @@ export default function NurseMonitorDetailPage() {
   const markEventHandled = useChatStore((state) => state.markEventHandled);
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   const [comment, setComment] = useState('');
+  const [actionError, setActionError] = useState('');
+  const { status: streamStatus, error: streamError } = useRealtimeStream({
+    path: createMonitorSsePath(
+      user?.id ?? task?.assignedNurseId ?? 'current'
+    ),
+    enabled: Boolean(task),
+  });
 
   if (!task) {
     return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
   }
 
-  const submitFeedback = (type: MessageFeedback['feedbackType']) => {
+  const submitFeedback = async (type: MessageFeedback['feedbackType']) => {
     if (!feedbackMessageId) return;
-    saveFeedback({
+    const nextFeedback: MessageFeedback = {
       messageId: feedbackMessageId,
       taskId,
       feedbackType: type,
       issueTags: type === 'dislike' ? ['追问或表达需优化'] : [],
       comment,
       reviewedAt: new Date().toISOString(),
-    });
-    setFeedbackMessageId(null);
-    setComment('');
+    };
+    try {
+      await careRepository.submitMessageFeedback(nextFeedback);
+      saveFeedback(nextFeedback);
+      setFeedbackMessageId(null);
+      setComment('');
+      setActionError('');
+    } catch (feedbackError) {
+      setActionError(
+        feedbackError instanceof Error
+          ? feedbackError.message
+          : '反馈保存失败'
+      );
+    }
+  };
+
+  const handleResolveHandoff = async () => {
+    try {
+      await careRepository.resolveHandoff(taskId);
+      resolveHandoff(taskId);
+      setActionError('');
+    } catch (handoffError) {
+      setActionError(
+        handoffError instanceof Error
+          ? handoffError.message
+          : '接管操作失败'
+      );
+    }
+  };
+
+  const submitLike = async (messageId: string) => {
+    const nextFeedback: MessageFeedback = {
+      messageId,
+      taskId,
+      feedbackType: 'like',
+      issueTags: [],
+      reviewedAt: new Date().toISOString(),
+    };
+    try {
+      await careRepository.submitMessageFeedback(nextFeedback);
+      saveFeedback(nextFeedback);
+      setActionError('');
+    } catch (feedbackError) {
+      setActionError(
+        feedbackError instanceof Error
+          ? feedbackError.message
+          : '反馈保存失败'
+      );
+    }
   };
 
   return (
@@ -64,8 +123,12 @@ export default function NurseMonitorDetailPage() {
           <p className="text-foreground-muted">{task.taskNo} · {task.collectionMode === 'ai_dialogue' ? 'AI对话采集' : '传统问卷'}</p>
         </div>
         <div className="flex gap-2">
+          <IntegrationStatus streamStatus={streamStatus} compact />
           {task.handoffRequired && (
-            <Button variant="danger" onClick={() => resolveHandoff(taskId)}>
+            <Button
+              variant="danger"
+              onClick={() => void handleResolveHandoff()}
+            >
               <UserPlusIcon className="w-5 h-5 mr-2" />
               接管并标记已处理
             </Button>
@@ -110,15 +173,7 @@ export default function NurseMonitorDetailPage() {
                   <div className="flex justify-start gap-2 -mt-3 mb-4 ml-14">
                     <button
                       type="button"
-                      onClick={() => {
-                        saveFeedback({
-                          messageId: message.id,
-                          taskId,
-                          feedbackType: 'like',
-                          issueTags: [],
-                          reviewedAt: new Date().toISOString(),
-                        });
-                      }}
+                      onClick={() => void submitLike(message.id)}
                       className={`p-1.5 rounded-full ${feedback[message.id]?.feedbackType === 'like' ? 'bg-green-100 text-green-700' : 'text-foreground-muted hover:bg-surface-secondary'}`}
                       aria-label="点赞此AI回复"
                     >
@@ -197,6 +252,12 @@ export default function NurseMonitorDetailPage() {
         </div>
       </div>
 
+      {(actionError || streamError) && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {actionError || streamError}
+        </div>
+      )}
+
       {feedbackMessageId && (
         <div className="fixed inset-0 z-[70] bg-black/30 flex items-center justify-center p-4">
           <Card padding="lg" className="w-full max-w-md">
@@ -210,7 +271,12 @@ export default function NurseMonitorDetailPage() {
             />
             <div className="flex justify-end gap-2 mt-4">
               <Button variant="ghost" onClick={() => setFeedbackMessageId(null)}>取消</Button>
-              <Button variant="danger" onClick={() => submitFeedback('dislike')}>保存点踩意见</Button>
+              <Button
+                variant="danger"
+                onClick={() => void submitFeedback('dislike')}
+              >
+                保存点踩意见
+              </Button>
             </div>
           </Card>
         </div>

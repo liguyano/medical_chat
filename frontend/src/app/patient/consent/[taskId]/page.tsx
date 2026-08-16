@@ -8,6 +8,8 @@ import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { careRepository } from '@/lib/repositories';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type { ConsentClause, ConsentProgress } from '@/lib/types';
 import {
@@ -66,6 +68,7 @@ export default function PatientConsentPage() {
   const [clauses, setClauses] = useState(savedConsent?.clauses ?? initialClauses);
   const [signatureData, setSignatureData] = useState(savedConsent?.signatureData);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const completedCount = clauses.filter((clause) => clause.confirmed).length;
   const currentIndex = Math.min(
@@ -95,27 +98,53 @@ export default function PatientConsentPage() {
     setClauses((items) =>
       items.map((item) =>
         item.id === current.id
-          ? { ...item, listened: true, confirmed: true, deliveryStatus: 'delivered' }
+          ? {
+              ...item,
+              listened: true,
+              confirmed: true,
+              understandingStatus: 'understood',
+              deliveryStatus: 'delivered',
+            }
           : item
       )
     );
     setError('');
   };
 
-  const needExplanation = () => {
-    requestHandoff(taskId, `患者对知情同意条款“${current.clauseName}”表示不理解`);
+  const needExplanation = async () => {
+    const reason = `患者对知情同意条款“${current.clauseName}”表示不理解`;
+    const nextClauses = clauses.map((item) =>
+      item.id === current.id
+        ? { ...item, understandingStatus: 'not_understood' as const }
+        : item
+    );
     const progress: ConsentProgress = {
       taskId,
-      clauses,
+      clauses: nextClauses,
       participantName: task?.participantName ?? task?.patientName ?? '患者',
       decision: 'needs_explanation',
       signatureData,
     };
-    saveConsent(progress);
-    setError('已通知护士进行人工解释，当前进度已保存。');
+    setSubmitting(true);
+    try {
+      await careRepository.requestHandoff(taskId, reason);
+      await careRepository.submitConsent(progress);
+      requestHandoff(taskId, reason);
+      setClauses(nextClauses);
+      saveConsent(progress);
+      setError('已通知护士进行人工解释，当前进度已保存。');
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : '通知护士失败，请重试'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!allConfirmed) {
       setError('请先完成所有关键条款确认');
       return;
@@ -124,16 +153,29 @@ export default function PatientConsentPage() {
       setError('请完成演示手写签名');
       return;
     }
-    saveConsent({
+    const progress: ConsentProgress = {
       taskId,
       clauses,
       participantName: task?.participantName ?? task?.patientName ?? '患者',
       decision: 'agreed',
       signatureData,
       completedAt: new Date().toISOString(),
-    });
-    updateTask(taskId, { taskStatus: 'pending_review' });
-    router.push(`/patient/complete/${taskId}`);
+    };
+    setSubmitting(true);
+    try {
+      await careRepository.submitConsent(progress);
+      saveConsent(progress);
+      updateTask(taskId, { taskStatus: 'pending_review' });
+      router.push(`/patient/complete/${taskId}`);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : '知情同意提交失败，请重试'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -145,7 +187,10 @@ export default function PatientConsentPage() {
               <Badge variant="primary" size="sm">入院须知 v1.0</Badge>
               <h1 className="text-2xl mt-2">关键条款宣讲</h1>
             </div>
-            <span className="text-sm text-foreground-muted">{completedCount}/{clauses.length}</span>
+            <div className="flex flex-col items-end gap-2">
+              <IntegrationStatus compact />
+              <span className="text-sm text-foreground-muted">{completedCount}/{clauses.length}</span>
+            </div>
           </div>
           <Progress value={completedCount} max={clauses.length} size="sm" />
           <p className="text-xs text-foreground-muted mt-3">
@@ -170,7 +215,11 @@ export default function PatientConsentPage() {
               {current.listened ? '重新播放条款' : '播放条款（原型模拟）'}
             </button>
             <div className="grid grid-cols-2 gap-3 mt-4">
-              <Button variant="outline" onClick={needExplanation}>
+              <Button
+                variant="outline"
+                loading={submitting}
+                onClick={() => void needExplanation()}
+              >
                 我不理解
               </Button>
               <Button onClick={confirmCurrent} disabled={!current.listened}>
@@ -199,7 +248,12 @@ export default function PatientConsentPage() {
         )}
 
         {allConfirmed && (
-          <Button className="w-full" size="lg" onClick={submit}>
+          <Button
+            className="w-full"
+            size="lg"
+            loading={submitting}
+            onClick={() => void submit()}
+          >
             确认同意并提交
           </Button>
         )}

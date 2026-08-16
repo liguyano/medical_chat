@@ -9,8 +9,17 @@ import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
 import { Progress } from '@/components/shared/Progress';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { useRealtimeStream } from '@/hooks/useRealtimeStream';
+import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { createDialogueSsePath } from '@/lib/transports/sseClient';
+import {
+  VoiceSocketClient,
+  type VoiceConnectionState,
+} from '@/lib/transports/voiceSocket';
 import type {
   CicareStage,
   InteractionEvent,
@@ -182,6 +191,7 @@ export default function PatientDialoguePage() {
   const { taskId } = useParams<{ taskId: string }>();
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const voiceClientRef = useRef<VoiceSocketClient | undefined>(undefined);
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const updateTask = useTaskStore((state) => state.updateTask);
   const requestHandoff = useTaskStore((state) => state.requestHandoff);
@@ -198,47 +208,104 @@ export default function PatientDialoguePage() {
   const addEvent = useChatStore((state) => state.addEvent);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const [isRecording, setIsRecording] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [connectionError, setConnectionError] = useState('');
+  const [voiceState, setVoiceState] =
+    useState<VoiceConnectionState>('idle');
   const [editingAnswerId, setEditingAnswerId] = useState<string | null>(null);
   const [correction, setCorrection] = useState('');
 
   useEffect(() => {
     if (session || !task) return;
-    const timestamp = Date.now();
-    const sessionId = `SESSION-${taskId}-${timestamp}`;
-    const welcome: InteractionMessage = {
-      id: `MSG-${timestamp}`,
-      messageNo: `MSG-${timestamp}`,
-      sessionId,
-      turnNo: 1,
-      role: 'ai',
-      cicareStage: 'connect',
-      intentType: 'greeting',
-      contentText: `您好，${task.participantName ?? task.patientName}。我是AI护理评估助手小医，请确认您现在方便开始评估吗？`,
-      occurredAt: new Date().toISOString(),
-    };
-    const nextSession: InteractionSession = {
-      id: sessionId,
-      sessionNo: sessionId,
-      taskId,
-      patientId: task.patientId,
-      encounterId: task.encounterId,
-      interactionType: 'assessment',
-      channelType: 'mixed',
-      sessionStatus: 'active',
-      startedAt: new Date().toISOString(),
-      currentCicareStage: 'connect',
-      answeredQuestionCount: 0,
-      totalQuestionCount: totalQuestions,
-      messages: [welcome],
-    };
-    setSession(taskId, nextSession);
-    updateTask(taskId, {
-      taskStatus: 'in_progress',
-      currentStage: 'connect',
-      progress: { current: 0, total: totalQuestions },
-    });
+    if (runtimeConfig.dataMode === 'mock') {
+      const timestamp = Date.now();
+      const sessionId = task.sessionId ?? `SESSION-${taskId}-${timestamp}`;
+      const welcome: InteractionMessage = {
+        id: `MSG-${timestamp}`,
+        messageNo: `MSG-${timestamp}`,
+        sessionId,
+        turnNo: 1,
+        role: 'ai',
+        cicareStage: 'connect',
+        intentType: 'greeting',
+        contentText: `您好，${task.participantName ?? task.patientName}。我是AI护理评估助手小医，请确认您现在方便开始评估吗？`,
+        occurredAt: new Date().toISOString(),
+      };
+      const nextSession: InteractionSession = {
+        id: sessionId,
+        sessionNo: sessionId,
+        taskId,
+        patientId: task.patientId,
+        encounterId: task.encounterId,
+        interactionType: 'assessment',
+        channelType: 'mixed',
+        sessionStatus: 'active',
+        startedAt: new Date().toISOString(),
+        currentCicareStage: 'connect',
+        answeredQuestionCount: 0,
+        totalQuestionCount: totalQuestions,
+        messages: [welcome],
+      };
+      setSession(taskId, nextSession);
+      updateTask(taskId, {
+        sessionId,
+        taskStatus: 'in_progress',
+        currentStage: 'connect',
+        progress: { current: 0, total: totalQuestions },
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    void careRepository
+      .getDialogueSnapshot(task, controller.signal)
+      .then((snapshot) => {
+        setSession(taskId, snapshot.session);
+        useChatStore
+          .getState()
+          .setStructuredAnswers(taskId, snapshot.answers);
+        updateTask(taskId, {
+          sessionId: snapshot.session.id,
+          taskStatus: 'in_progress',
+          currentStage: snapshot.session.currentCicareStage,
+          progress: {
+            current: snapshot.session.answeredQuestionCount ?? 0,
+            total:
+              snapshot.session.totalQuestionCount ??
+              task.progress?.total ??
+              totalQuestions,
+          },
+        });
+      })
+      .catch((loadError) => {
+        if (controller.signal.aborted) return;
+        setConnectionError(
+          loadError instanceof Error
+            ? `会话加载失败：${loadError.message}`
+            : '会话加载失败'
+        );
+      });
+    return () => controller.abort();
   }, [session, setSession, task, taskId, updateTask]);
+
+  const streamPath = session?.id
+    ? createDialogueSsePath(session.id)
+    : task?.sessionId
+      ? createDialogueSsePath(task.sessionId)
+      : undefined;
+  const { status: streamStatus, error: streamError } = useRealtimeStream({
+    path: streamPath,
+    enabled: Boolean(task),
+  });
+
+  useEffect(
+    () => () => {
+      void voiceClientRef.current?.close();
+      voiceClientRef.current = undefined;
+    },
+    []
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -248,7 +315,7 @@ export default function PatientDialoguePage() {
     () => session?.messages.filter((message) => message.role === 'patient').length ?? 0,
     [session?.messages]
   );
-  const isStreaming = streamingTaskId === taskId;
+  const isStreaming = streamingTaskId === taskId || isSending;
   const completed = session?.sessionStatus === 'completed';
 
   const streamAssistantMessage = async (result: ScriptResult) => {
@@ -296,6 +363,29 @@ export default function PatientDialoguePage() {
     };
     addMessage(taskId, patientMessage);
 
+    if (runtimeConfig.dataMode === 'api') {
+      setIsSending(true);
+      setConnectionError('');
+      try {
+        await careRepository.sendDialogMessage({
+          taskId,
+          sessionId: currentSession.id,
+          content,
+          clientMessageId: messageId,
+          inputMode: 'text',
+        });
+      } catch (sendError) {
+        setConnectionError(
+          sendError instanceof Error
+            ? `发送失败：${sendError.message}`
+            : '消息发送失败'
+        );
+      } finally {
+        setIsSending(false);
+      }
+      return;
+    }
+
     const result = buildScriptResult(patientAnswerCount, content);
     if (result.answer) {
       upsertAnswer(taskId, {
@@ -342,8 +432,18 @@ export default function PatientDialoguePage() {
     });
   };
 
-  const askNurse = () => {
+  const askNurse = async () => {
     const reason = '患者在AI对话评估中主动请求护士协助';
+    try {
+      await careRepository.requestHandoff(taskId, reason);
+    } catch (handoffError) {
+      setConnectionError(
+        handoffError instanceof Error
+          ? `呼叫护士失败：${handoffError.message}`
+          : '呼叫护士失败'
+      );
+      return;
+    }
     requestHandoff(taskId, reason);
     addEvent(taskId, {
       id: `EVENT-${Date.now()}`,
@@ -355,6 +455,82 @@ export default function PatientDialoguePage() {
       handled: false,
       occurredAt: new Date().toISOString(),
     });
+  };
+
+  const togglePause = async () => {
+    const current = useChatStore.getState().sessions[taskId];
+    if (!current) return;
+    const nextPaused = !isPaused;
+    try {
+      if (nextPaused) {
+        await careRepository.pauseDialogue(current.id);
+        voiceClientRef.current?.pause();
+      } else {
+        await careRepository.resumeDialogue(current.id);
+        voiceClientRef.current?.resume();
+      }
+      setIsPaused(nextPaused);
+      setSession(taskId, {
+        ...current,
+        sessionStatus: nextPaused ? 'paused' : 'active',
+      });
+    } catch (pauseError) {
+      setConnectionError(
+        pauseError instanceof Error
+          ? pauseError.message
+          : '会话状态更新失败'
+      );
+    }
+  };
+
+  const startVoice = async () => {
+    if (runtimeConfig.dataMode === 'mock') {
+      setIsRecording(true);
+      setVoiceState('listening');
+      return;
+    }
+    const currentSession = useChatStore.getState().sessions[taskId];
+    if (!currentSession) {
+      setConnectionError('会话尚未准备完成，请稍后重试');
+      return;
+    }
+    await voiceClientRef.current?.close();
+    const client = new VoiceSocketClient({
+      taskId,
+      sessionId: currentSession.id,
+      onStateChange: (state) => {
+        setVoiceState(state);
+        setIsRecording(state === 'listening');
+      },
+      onError: setConnectionError,
+    });
+    voiceClientRef.current = client;
+    try {
+      await client.start();
+    } catch {
+      setIsRecording(false);
+      setVoiceState('text_fallback');
+    }
+  };
+
+  const stopVoice = async () => {
+    setIsRecording(false);
+    if (runtimeConfig.dataMode === 'mock') {
+      setVoiceState('transcribing');
+      await handleSendMessage('我通过语音回答：目前情况还可以');
+      setVoiceState('idle');
+      return;
+    }
+    try {
+      await voiceClientRef.current?.commit();
+    } catch (voiceError) {
+      setVoiceState('text_fallback');
+      setConnectionError(
+        voiceError instanceof Error
+          ? voiceError.message
+          : '语音提交失败，已切换文字输入'
+      );
+    }
   };
 
   const saveCorrection = () => {
@@ -395,22 +571,17 @@ export default function PatientDialoguePage() {
                 className="mt-2"
               />
             </div>
+            <IntegrationStatus
+              streamStatus={streamStatus}
+              voiceState={voiceState}
+            />
             <Badge variant={isStreaming ? 'info' : 'primary'} size="sm">
               {session?.answeredQuestionCount ?? 0}/{totalQuestions}
             </Badge>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setIsPaused((value) => !value);
-                const current = useChatStore.getState().sessions[taskId];
-                if (current) {
-                  setSession(taskId, {
-                    ...current,
-                    sessionStatus: isPaused ? 'active' : 'paused',
-                  });
-                }
-              }}
+              onClick={() => void togglePause()}
             >
               {isPaused ? <PlayIcon className="w-4 h-4 mr-1" /> : <PauseIcon className="w-4 h-4 mr-1" />}
               {isPaused ? '继续' : '暂停'}
@@ -581,16 +752,22 @@ export default function PatientDialoguePage() {
                 </div>
                 <ChatInput
                   onSend={handleSendMessage}
-                  onVoiceStart={() => setIsRecording(true)}
-                  onVoiceStop={() => {
-                    setIsRecording(false);
-                    void handleSendMessage('我通过语音回答：目前情况还可以');
-                  }}
+                  onVoiceStart={() => void startVoice()}
+                  onVoiceStop={() => void stopVoice()}
                   placeholder={isPaused ? '评估已暂停' : '输入您的回答...'}
                   disabled={isPaused || isStreaming}
                   isRecording={isRecording}
                 />
               </>
+            )}
+            {(connectionError || streamError) && (
+              <div
+                role="alert"
+                className="mx-4 mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+              >
+                {connectionError || streamError}
+                {voiceState === 'text_fallback' && '，您仍可继续使用文字输入。'}
+              </div>
             )}
           </div>
         </div>

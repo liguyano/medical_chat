@@ -1,12 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import QuestionCard from '@/components/assessment/QuestionCard';
 import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
 import { Badge } from '@/components/shared/Badge';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { careRepository } from '@/lib/repositories';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { getVisibleQuestions, prototypeQuestions } from '@/lib/mock/assessment';
 import type { PrototypeAnswerValue } from '@/lib/types';
@@ -32,6 +34,28 @@ export default function PatientFormPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [currentSection, setCurrentSection] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [submitError, setSubmitError] = useState('');
+
+  useEffect(() => {
+    if (!Object.keys(answers).length) return;
+    const controller = new AbortController();
+    const timer = globalThis.setTimeout(() => {
+      setDraftStatus('saving');
+      void careRepository
+        .saveQuestionnaireDraft(taskId, answers, controller.signal)
+        .then(() => setDraftStatus('saved'))
+        .catch(() => {
+          if (!controller.signal.aborted) setDraftStatus('error');
+        });
+    }, 600);
+    return () => {
+      globalThis.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [answers, taskId]);
 
   const visibleQuestions = useMemo(
     () =>
@@ -131,15 +155,24 @@ export default function PatientFormPage() {
       return;
     }
     setIsSubmitting(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    submitForm(taskId, requiredQuestions.length);
-    if (task?.consentRequired) {
-      updateTask(taskId, { taskStatus: 'in_progress' });
+    setSubmitError('');
+    try {
+      await careRepository.submitQuestionnaire(taskId, answers);
+      submitForm(taskId, requiredQuestions.length);
+      if (task?.consentRequired) {
+        updateTask(taskId, { taskStatus: 'in_progress' });
+      }
+      const nextPath = task?.consentRequired
+        ? `/patient/consent/${taskId}`
+        : `/patient/complete/${taskId}`;
+      router.push(nextPath);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : '问卷提交失败，请重试'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-    const nextPath = task?.consentRequired
-      ? `/patient/consent/${taskId}`
-      : `/patient/complete/${taskId}`;
-    router.push(nextPath);
   };
 
   if (!task) {
@@ -160,19 +193,31 @@ export default function PatientFormPage() {
                 <DocumentTextIcon className="w-5 h-5 text-primary" />
                 <span className="text-sm font-medium">{sectionNames[safeSectionIndex]}</span>
               </div>
-              <Badge variant="primary" size="sm">
-                {answeredCount}/{requiredQuestions.length}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <IntegrationStatus compact />
+                <Badge variant="primary" size="sm">
+                  {answeredCount}/{requiredQuestions.length}
+                </Badge>
+              </div>
             </div>
             <Progress value={answeredCount} max={requiredQuestions.length} size="sm" />
             <div className="mt-2 flex items-center gap-1 text-xs text-green-700">
               <CloudArrowUpIcon className="w-4 h-4" />
-              回答已自动保存，可退出后继续
+              {draftStatus === 'saving'
+                ? '正在保存草稿...'
+                : draftStatus === 'error'
+                  ? '云端保存失败，本机草稿仍保留'
+                  : '回答已自动保存，可退出后继续'}
             </div>
           </div>
         </div>
 
         <div className="max-w-xl mx-auto p-4 space-y-4">
+          {submitError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {submitError}
+            </div>
+          )}
           {currentQuestions.map((question) => (
             <QuestionCard
               key={question.id}

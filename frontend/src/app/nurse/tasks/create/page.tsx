@@ -1,19 +1,24 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { mockEncounters, mockPatients, mockScales } from '@/lib/mock/data';
+import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import type {
   AssessmentScene,
-  CareTask,
+  AssessmentScale,
   CollectionMode,
+  Patient,
+  PatientEncounter,
   ParticipantType,
 } from '@/lib/types';
 import {
@@ -51,13 +56,56 @@ function CreateTaskContent() {
   const [plannedStartTime, setPlannedStartTime] = useState('2026-08-16T14:00');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+  const [dataNotice, setDataNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [patients, setPatients] = useState<Patient[]>(mockPatients);
+  const [encounters, setEncounters] =
+    useState<PatientEncounter[]>(mockEncounters);
+  const [scales, setScales] = useState<AssessmentScale[]>(mockScales);
 
-  const patient = mockPatients.find((item) => item.id === selectedPatientId) ?? mockPatients[0];
-  const encounter = mockEncounters.find((item) => item.patientId === patient.id) ?? mockEncounters[0];
+  useEffect(() => {
+    if (runtimeConfig.dataMode !== 'api') return;
+    const controller = new AbortController();
+    void Promise.all([
+      careRepository.listInHospitalPatients(controller.signal),
+      careRepository.listScales(controller.signal),
+    ])
+      .then(([patientRecords, scaleRecords]) => {
+        if (!patientRecords.length) {
+          throw new Error('后端未返回在院患者');
+        }
+        if (!scaleRecords.length) {
+          throw new Error('后端未返回可用量表');
+        }
+        setPatients(patientRecords.map((item) => item.patient));
+        setEncounters(patientRecords.map((item) => item.encounter));
+        setScales(scaleRecords);
+        const firstPatient = patientRecords[0]?.patient;
+        setSelectedPatientId((current) =>
+          patientRecords.some((item) => item.patient.id === current)
+            ? current
+            : firstPatient?.id ?? current
+        );
+        setDataNotice('');
+      })
+      .catch((loadError) => {
+        if (controller.signal.aborted) return;
+        setDataNotice(
+          `后端基础数据暂不可用，当前保留本地演示数据：${
+            loadError instanceof Error ? loadError.message : '未知错误'
+          }`
+        );
+      });
+    return () => controller.abort();
+  }, []);
+
+  const patient =
+    patients.find((item) => item.id === selectedPatientId) ?? patients[0];
+  const encounter =
+    encounters.find((item) => item.patientId === patient?.id) ?? encounters[0];
   const selectedScales = useMemo(
-    () => mockScales.filter((scale) => selectedScaleIds.includes(scale.id)),
-    [selectedScaleIds]
+    () => scales.filter((scale) => selectedScaleIds.includes(scale.id)),
+    [scales, selectedScaleIds]
   );
 
   const next = () => {
@@ -74,6 +122,10 @@ function CreateTaskContent() {
   };
 
   const createTask = async () => {
+    if (!patient || !encounter) {
+      setError('患者或住院记录不完整，暂时无法创建任务');
+      return;
+    }
     const duplicate = tasks.some(
       (task) =>
         task.patientId === patient.id &&
@@ -86,40 +138,40 @@ function CreateTaskContent() {
       return;
     }
     setLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 650));
-    const timestamp = Date.now();
-    const task: CareTask = {
-      id: `T-${timestamp}`,
-      taskNo: `TASK-${String(timestamp).slice(-8)}`,
-      patientId: patient.id,
-      encounterId: encounter.id,
-      encounterNo: encounter.inpatientNo,
-      patientName: patient.name,
-      bedNo: encounter.bedNo,
-      department: encounter.department,
-      wardName: encounter.ward,
-      taskType: '入院评估任务包',
-      collectionMode,
-      taskStatus: 'pending',
-      assignedNurseId: user?.id ?? 'N001',
-      assignedNurseName: user?.name ?? '张护士',
-      scaleName: '入院评估任务包',
-      scaleVersion: 'v1.0',
-      scaleIds: selectedScales.map((scale) => scale.id),
-      scaleNames: selectedScales.map((scale) => scale.scaleName),
-      participantType,
-      participantName: participantType === 'patient' ? patient.name : `${patient.name}家属`,
-      relationshipToPatient: participantType === 'patient' ? undefined : relationship,
-      assessmentScene: scene,
-      consentRequired,
-      educationTopics,
-      plannedStartTime,
-      notes,
-      createdAt: new Date().toISOString(),
-      progress: { current: 0, total: 12 },
-    };
-    addTask(task);
-    router.push(`/nurse/tasks/${task.id}`);
+    setError('');
+    try {
+      const task = await careRepository.createTask({
+        patient,
+        encounter,
+        nurseId: user?.id ?? 'N001',
+        nurseName: user?.name ?? '张护士',
+        scaleIds: selectedScales.map((scale) => scale.id),
+        scaleNames: selectedScales.map((scale) => scale.scaleName),
+        collectionMode,
+        participantType,
+        participantName:
+          participantType === 'patient'
+            ? patient.name
+            : `${patient.name}家属`,
+        relationshipToPatient:
+          participantType === 'patient' ? undefined : relationship,
+        assessmentScene: scene,
+        consentRequired,
+        educationTopics,
+        plannedStartTime,
+        notes,
+      });
+      addTask(task);
+      router.push(`/nurse/tasks/${task.id}`);
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : '任务创建失败，请重试'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -131,7 +183,10 @@ function CreateTaskContent() {
 
       <div className="max-w-5xl mx-auto">
         <div className="mb-6">
-          <Badge variant="primary">步骤 {step}/4</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="primary">步骤 {step}/4</Badge>
+            <IntegrationStatus compact />
+          </div>
           <h1 className="text-3xl mt-2">创建<span className="text-primary italic">评估任务包</span></h1>
           <p className="text-foreground-muted mt-1">选择患者、量表、采集方式和配套宣教内容</p>
         </div>
@@ -157,8 +212,8 @@ function CreateTaskContent() {
           <Card padding="lg">
             <h2 className="text-xl mb-4">选择在院患者</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {mockPatients.map((item) => {
-                const currentEncounter = mockEncounters.find((record) => record.patientId === item.id);
+              {patients.map((item) => {
+                const currentEncounter = encounters.find((record) => record.patientId === item.id);
                 return (
                   <button
                     key={item.id}
@@ -213,7 +268,7 @@ function CreateTaskContent() {
           <Card padding="lg">
             <h2 className="text-xl mb-4">选择评估量表</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {mockScales.map((scale) => {
+              {scales.map((scale) => {
                 const selected = selectedScaleIds.includes(scale.id);
                 return (
                   <button
@@ -384,6 +439,11 @@ function CreateTaskContent() {
         {error && (
           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+        {dataNotice && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            {dataNotice}
           </div>
         )}
 

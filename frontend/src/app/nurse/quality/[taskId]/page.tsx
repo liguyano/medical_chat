@@ -7,6 +7,8 @@ import NurseLayout from '@/components/layout/NurseLayout';
 import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
+import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { careRepository } from '@/lib/repositories';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import {
   ArrowLeftIcon,
@@ -31,6 +33,8 @@ export default function NurseQualityDetailPage() {
   );
   const [comment, setComment] = useState(existing?.comment ?? '');
   const [saved, setSaved] = useState(Boolean(existing?.submittedAt));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   if (!task) return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
 
@@ -64,15 +68,29 @@ export default function NurseQualityDetailPage() {
     </div>
   );
 
-  const submit = () => {
-    saveQualityReview({
+  const submit = async () => {
+    const review = {
       taskId,
       dialogueScores,
       assessmentScores,
       comment,
       submittedAt: new Date().toISOString(),
-    });
-    setSaved(true);
+    };
+    setSubmitting(true);
+    try {
+      await careRepository.submitQualityReview(review);
+      saveQualityReview(review);
+      setSaved(true);
+      setError('');
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : '质量评价提交失败'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -86,7 +104,10 @@ export default function NurseQualityDetailPage() {
           <h1 className="text-3xl">AI质量评价</h1>
           <p className="text-foreground-muted">{task.patientName} · {task.taskNo}</p>
         </div>
-        {saved && <Badge variant="success">评价已保存</Badge>}
+        <div className="flex items-center gap-2">
+          <IntegrationStatus compact />
+          {saved && <Badge variant="success">评价已保存</Badge>}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
@@ -117,11 +138,19 @@ export default function NurseQualityDetailPage() {
         />
       </Card>
 
+      {error && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {error}
+        </div>
+      )}
+
       <div className="mt-5 flex justify-end gap-3">
         <Button variant="outline" onClick={() => router.push(`/nurse/monitor/${taskId}`)}>
           查看对话证据
         </Button>
-        <Button onClick={submit}>提交质量评价</Button>
+        <Button loading={submitting} onClick={() => void submit()}>
+          提交质量评价
+        </Button>
       </div>
     </NurseLayout>
   );
