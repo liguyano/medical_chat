@@ -8,7 +8,7 @@
 
 | 技术 | 版本/方案 | 用途 |
 |------|----------|------|
-| **框架** | Next.js 15 (App Router) | SSR/SSG、路由、API Routes模拟后端 |
+| **框架** | Next.js 16.3.1 (App Router) | SSR/SSG、路由、API Routes模拟后端 |
 | **语言** | TypeScript 5.x | 类型安全 |
 | **样式** | Tailwind CSS 4.x | 原子化CSS、响应式设计 |
 | **状态管理** | Zustand + React Context | 全局状态（用户/任务）+ 局部状态（对话） |

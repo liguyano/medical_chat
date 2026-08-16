@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { getTaskById } from '@/lib/mock/data';
 import type { CareTask } from '@/lib/types';
 import {
   ArrowLeftIcon,
@@ -21,23 +22,13 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 
-interface PageProps {
-  params: {
-    id: string;
-  };
-}
-
-export default function TaskDetailPage({ params }: PageProps) {
+export default function TaskDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { tasks, updateTaskStatus } = useTaskStore();
-  const [task, setTask] = useState<CareTask | null>(null);
   const [loading, setLoading] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
-
-  useEffect(() => {
-    const foundTask = tasks.find((t) => t.id === params.id);
-    setTask(foundTask || null);
-  }, [params.id, tasks]);
+  const task: CareTask | null = tasks.find((item) => item.id === id) ?? getTaskById(id) ?? null;
 
   if (!task) {
     return (
@@ -96,8 +87,6 @@ export default function TaskDetailPage({ params }: PageProps) {
   const handleGenerateQRCode = () => {
     setShowQRCode(true);
   };
-
-  const patientUrl = `${window.location.origin}/patient?taskNo=${task.taskNo}`;
 
   return (
     <NurseLayout>

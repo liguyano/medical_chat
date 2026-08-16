@@ -3,7 +3,7 @@
 ## 项目信息
 - **开始时间**: 2026-08-16
 - **项目类型**: 前端交互原型
-- **技术栈**: Next.js 15, TypeScript, Tailwind CSS 4, Zustand, Framer Motion
+- **技术栈**: Next.js 16.3.1, TypeScript, Tailwind CSS 4, Zustand, Framer Motion
 - **开发服务器**: http://localhost:3000
 
 ---
@@ -11,7 +11,7 @@
 ## 已完成功能 ✅
 
 ### 1. 项目基础架构
-- [x] Next.js 15 项目初始化
+- [x] Next.js 16.3.1 项目初始化
 - [x] TypeScript 配置
 - [x] Tailwind CSS 4 自定义主题配置（暖色系设计）
 - [x] 全局样式和字体配置（DM Serif Display + Inter）
@@ -28,7 +28,7 @@
 ### 3. 状态管理 (Zustand)
 - [x] `useUserStore` - 用户认证状态
 - [x] `useTaskStore` - 任务管理状态
-- [x] `useDialogueStore` - 对话会话状态
+- [x] `useChatStore` - 对话会话状态
 
 ### 4. 工具函数 (`src/lib/utils.ts`)
 - [x] `cn()` - Tailwind 类名合并
@@ -256,7 +256,7 @@ frontend/
 │       ├── stores/                   # Zustand 状态管理
 │       │   ├── useUserStore.ts
 │       │   ├── useTaskStore.ts
-│       │   └── useDialogueStore.ts
+│       │   └── useChatStore.ts
 │       └── mock/                     # Mock 数据
 │           └── data.ts
 ├── public/                           # 静态资源

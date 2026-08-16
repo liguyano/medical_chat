@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { useParams, useRouter } from 'next/navigation';
+import { motion, type Variants } from 'framer-motion';
 import PatientLayout from '@/components/layout/PatientLayout';
 import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
@@ -13,13 +13,8 @@ import {
   HomeIcon,
 } from '@heroicons/react/24/outline';
 
-interface PageProps {
-  params: {
-    taskId: string;
-  };
-}
-
-export default function PatientCompletePage({ params }: PageProps) {
+export default function PatientCompletePage() {
+  const { taskId } = useParams<{ taskId: string }>();
   const router = useRouter();
   const [showConfetti, setShowConfetti] = useState(true);
 
@@ -29,7 +24,7 @@ export default function PatientCompletePage({ params }: PageProps) {
     return () => clearTimeout(timer);
   }, []);
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -40,7 +35,7 @@ export default function PatientCompletePage({ params }: PageProps) {
     },
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 20 },
     visible: {
       opacity: 1,
@@ -188,7 +183,7 @@ export default function PatientCompletePage({ params }: PageProps) {
           {/* 任务编号 */}
           <motion.div variants={itemVariants} className="mt-6 text-center">
             <p className="text-xs text-foreground-muted">
-              任务编号: {params.taskId}
+              任务编号: {taskId}
             </p>
           </motion.div>
         </motion.div>

@@ -55,7 +55,7 @@
 
 ### 技术栈
 ```
-- Next.js 15 (App Router)
+- Next.js 16.3.1 (App Router)
 - TypeScript
 - Tailwind CSS 4
 - Zustand (状态管理)
@@ -229,7 +229,7 @@ npm run dev
 
 ## 💡 技术亮点
 
-1. **现代化技术栈**: Next.js 15 + TypeScript + Tailwind 4
+1. **现代化技术栈**: Next.js 16.3.1 + TypeScript + Tailwind 4
 2. **模块化设计**: 高度可复用的组件库
 3. **类型安全**: 完整的 TypeScript 类型定义
 4. **状态管理**: 轻量级 Zustand + 持久化

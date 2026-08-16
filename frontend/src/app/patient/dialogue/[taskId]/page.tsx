@@ -1,52 +1,76 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import ChatBubble from '@/components/chat/ChatBubble';
 import ChatInput from '@/components/chat/ChatInput';
-import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
-import { useDialogueStore } from '@/lib/stores/useDialogueStore';
-import type { InteractionMessage } from '@/lib/types';
+import { useChatStore } from '@/lib/stores/useChatStore';
+import type {
+  CicareStage,
+  InteractionMessage,
+  InteractionSession,
+} from '@/lib/types';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 
-interface PageProps {
-  params: {
-    taskId: string;
-  };
+interface MockAiResponse {
+  cicareStage: CicareStage;
+  content: string;
+  structuredAnswer?: Record<string, string | number | boolean>;
 }
 
-export default function PatientDialoguePage({ params }: PageProps) {
+const EMPTY_MESSAGES: InteractionMessage[] = [];
+
+export default function PatientDialoguePage() {
+  const { taskId } = useParams<{ taskId: string }>();
   const router = useRouter();
-  const { messages, addMessage, setSessionId } = useDialogueStore();
+  const { session, addMessage, setSession } = useChatStore();
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 15 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messages = session?.messages ?? EMPTY_MESSAGES;
 
   useEffect(() => {
+    if (useChatStore.getState().session?.taskId === taskId) {
+      return;
+    }
+
     // 初始化会话
-    const sessionId = `SESSION-${params.taskId}-${Date.now()}`;
-    setSessionId(sessionId);
+    const timestamp = Date.now();
+    const sessionId = `SESSION-${taskId}-${timestamp}`;
 
     // 添加欢迎消息
     const welcomeMessage: InteractionMessage = {
-      id: `MSG-${Date.now()}`,
-      messageNo: `MSG-${Date.now()}`,
+      id: `MSG-${timestamp}`,
+      messageNo: `MSG-${timestamp}`,
       sessionId,
       turnNo: 1,
-      roleType: 'ai',
+      role: 'ai',
       cicareStage: 'connect',
       intentType: 'greeting',
       contentText: '您好！我是您的智能护理助手小医。很高兴为您服务，接下来我会通过对话的方式协助您完成入院评估。\n\n评估过程大约需要 10-15 分钟，您可以随时暂停或继续。准备好了吗？',
       occurredAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
     };
 
-    addMessage(welcomeMessage);
-  }, [params.taskId, setSessionId, addMessage]);
+    const newSession: InteractionSession = {
+      id: sessionId,
+      sessionNo: sessionId,
+      taskId,
+      patientId: 'MOCK-PATIENT',
+      encounterId: 'MOCK-ENCOUNTER',
+      interactionType: 'assessment',
+      channelType: 'mixed',
+      sessionStatus: 'active',
+      startedAt: new Date().toISOString(),
+      currentCicareStage: 'connect',
+      messages: [welcomeMessage],
+    };
+
+    setSession(newSession);
+  }, [taskId, setSession]);
 
   useEffect(() => {
     // 自动滚动到底部
@@ -54,17 +78,21 @@ export default function PatientDialoguePage({ params }: PageProps) {
   }, [messages]);
 
   const handleSendMessage = async (content: string) => {
+    if (!session) {
+      return;
+    }
+
     // 添加患者消息
     const patientMessage: InteractionMessage = {
       id: `MSG-${Date.now()}`,
       messageNo: `MSG-${Date.now()}`,
-      sessionId: messages[0]?.sessionId || '',
+      sessionId: session.id,
       turnNo: messages.length + 1,
-      roleType: 'patient',
+      role: 'patient',
+      cicareStage: session.currentCicareStage,
       intentType: 'answer',
       contentText: content,
       occurredAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
     };
 
     addMessage(patientMessage);
@@ -73,7 +101,7 @@ export default function PatientDialoguePage({ params }: PageProps) {
     // 模拟 AI 流式回复
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    const aiResponses = [
+    const aiResponses: MockAiResponse[] = [
       {
         cicareStage: 'ask',
         content: '好的，我了解了。请问您今年多大年龄？',
@@ -95,15 +123,14 @@ export default function PatientDialoguePage({ params }: PageProps) {
     const aiMessage: InteractionMessage = {
       id: `MSG-${Date.now() + 1}`,
       messageNo: `MSG-${Date.now() + 1}`,
-      sessionId: messages[0]?.sessionId || '',
+      sessionId: session.id,
       turnNo: messages.length + 2,
-      roleType: 'ai',
-      cicareStage: randomResponse.cicareStage as any,
+      role: 'ai',
+      cicareStage: randomResponse.cicareStage,
       intentType: 'question',
       contentText: randomResponse.content,
       structuredAnswer: randomResponse.structuredAnswer,
       occurredAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
     };
 
     addMessage(aiMessage);

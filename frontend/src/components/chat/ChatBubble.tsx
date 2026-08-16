@@ -1,6 +1,6 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { motion, type Variants } from 'framer-motion';
 import { Badge } from '@/components/shared/Badge';
 import type { InteractionMessage } from '@/lib/types';
 import { formatDateTime } from '@/lib/utils';
@@ -24,10 +24,10 @@ export default function ChatBubble({
   showTime = false,
   animate = true,
 }: ChatBubbleProps) {
-  const isAI = message.roleType === 'ai';
-  const isPatient = message.roleType === 'patient';
+  const isAI = message.role === 'ai';
+  const isPatient = message.role === 'patient';
 
-  const bubbleVariants = {
+  const bubbleVariants: Variants = {
     hidden: { opacity: 0, y: 20, scale: 0.95 },
     visible: {
       opacity: 1,

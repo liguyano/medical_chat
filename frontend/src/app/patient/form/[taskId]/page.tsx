@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import QuestionCard from '@/components/assessment/QuestionCard';
 import { Button } from '@/components/shared/Button';
@@ -15,67 +15,67 @@ import {
   ArrowLeftIcon,
 } from '@heroicons/react/24/outline';
 
-interface PageProps {
-  params: {
-    taskId: string;
-  };
-}
+type AnswerValue = string | string[] | number | boolean | null;
 
 // 模拟量表题目数据
 const mockQuestions: AssessmentQuestion[] = [
   {
     id: 'Q1',
-    questionNo: 'Q1',
-    scaleId: 'S001',
+    questionCode: 'Q1',
     sectionId: 'SEC1',
     sectionName: '基本信息',
     questionText: '您的年龄是多少？',
-    questionType: 'number_input',
-    isRequired: true,
+    questionType: 'number',
+    required: true,
+    scored: false,
+    derived: false,
     displayOrder: 1,
     unit: '岁',
-    validationRules: { min: 0, max: 150 },
+    validationRule: { min: 0, max: 150 },
   },
   {
     id: 'Q2',
-    questionNo: 'Q2',
-    scaleId: 'S001',
+    questionCode: 'Q2',
     sectionId: 'SEC1',
     sectionName: '基本信息',
     questionText: '您的性别是？',
     questionType: 'single_choice',
-    isRequired: true,
+    required: true,
+    scored: false,
+    derived: false,
     displayOrder: 2,
     options: [
-      { optionNo: 'A', optionText: '男', displayOrder: 1 },
-      { optionNo: 'B', optionText: '女', displayOrder: 2 },
+      { optionCode: 'A', optionLabel: '男', displayOrder: 1 },
+      { optionCode: 'B', optionLabel: '女', displayOrder: 2 },
     ],
   },
   {
     id: 'Q3',
-    questionNo: 'Q3',
-    scaleId: 'S001',
+    questionCode: 'Q3',
     sectionId: 'SEC2',
     sectionName: '过敏史',
     questionText: '您是否有药物过敏史？',
     questionType: 'single_choice',
-    isRequired: true,
+    required: true,
+    scored: true,
+    derived: false,
     displayOrder: 3,
     options: [
-      { optionNo: 'A', optionText: '无', displayOrder: 1, score: 0 },
-      { optionNo: 'B', optionText: '有', displayOrder: 2, score: 1 },
+      { optionCode: 'A', optionLabel: '无', displayOrder: 1, clinicalScore: 0 },
+      { optionCode: 'B', optionLabel: '有', displayOrder: 2, clinicalScore: 1 },
     ],
   },
   {
     id: 'Q4',
-    questionNo: 'Q4',
-    scaleId: 'S001',
+    questionCode: 'Q4',
     sectionId: 'SEC2',
     sectionName: '过敏史',
     questionText: '如果有过敏史，请详细描述过敏药物及反应：',
     description: '请详细描述您对哪些药物过敏，以及出现过什么样的过敏反应',
-    questionType: 'text_input',
-    isRequired: false,
+    questionType: 'text',
+    required: false,
+    scored: false,
+    derived: false,
     displayOrder: 4,
     placeholder: '例如：青霉素过敏，出现皮疹和呼吸困难',
     conditionalLogic: {
@@ -84,74 +84,79 @@ const mockQuestions: AssessmentQuestion[] = [
   },
   {
     id: 'Q5',
-    questionNo: 'Q5',
-    scaleId: 'S001',
+    questionCode: 'Q5',
     sectionId: 'SEC3',
     sectionName: '既往病史',
     questionText: '您是否患有以下慢性疾病？（可多选）',
     questionType: 'multiple_choice',
-    isRequired: true,
+    required: true,
+    scored: false,
+    derived: false,
     displayOrder: 5,
     options: [
-      { optionNo: 'A', optionText: '高血压', displayOrder: 1 },
-      { optionNo: 'B', optionText: '糖尿病', displayOrder: 2 },
-      { optionNo: 'C', optionText: '冠心病', displayOrder: 3 },
-      { optionNo: 'D', optionText: '慢性肾病', displayOrder: 4 },
-      { optionNo: 'E', optionText: '以上都没有', displayOrder: 5 },
+      { optionCode: 'A', optionLabel: '高血压', displayOrder: 1 },
+      { optionCode: 'B', optionLabel: '糖尿病', displayOrder: 2 },
+      { optionCode: 'C', optionLabel: '冠心病', displayOrder: 3 },
+      { optionCode: 'D', optionLabel: '慢性肾病', displayOrder: 4 },
+      { optionCode: 'E', optionLabel: '以上都没有', displayOrder: 5 },
     ],
   },
   {
     id: 'Q6',
-    questionNo: 'Q6',
-    scaleId: 'S001',
+    questionCode: 'Q6',
     sectionId: 'SEC4',
     sectionName: '生活习惯',
     questionText: '您是否吸烟？',
     questionType: 'single_choice',
-    isRequired: true,
+    required: true,
+    scored: true,
+    derived: false,
     displayOrder: 6,
     options: [
-      { optionNo: 'A', optionText: '从不吸烟', displayOrder: 1, score: 0 },
-      { optionNo: 'B', optionText: '已戒烟', displayOrder: 2, score: 1 },
-      { optionNo: 'C', optionText: '偶尔吸烟', displayOrder: 3, score: 2 },
-      { optionNo: 'D', optionText: '经常吸烟', displayOrder: 4, score: 3 },
+      { optionCode: 'A', optionLabel: '从不吸烟', displayOrder: 1, clinicalScore: 0 },
+      { optionCode: 'B', optionLabel: '已戒烟', displayOrder: 2, clinicalScore: 1 },
+      { optionCode: 'C', optionLabel: '偶尔吸烟', displayOrder: 3, clinicalScore: 2 },
+      { optionCode: 'D', optionLabel: '经常吸烟', displayOrder: 4, clinicalScore: 3 },
     ],
   },
   {
     id: 'Q7',
-    questionNo: 'Q7',
-    scaleId: 'S001',
+    questionCode: 'Q7',
     sectionId: 'SEC4',
     sectionName: '生活习惯',
     questionText: '您是否饮酒？',
     questionType: 'single_choice',
-    isRequired: true,
+    required: true,
+    scored: true,
+    derived: false,
     displayOrder: 7,
     options: [
-      { optionNo: 'A', optionText: '从不饮酒', displayOrder: 1, score: 0 },
-      { optionNo: 'B', optionText: '已戒酒', displayOrder: 2, score: 1 },
-      { optionNo: 'C', optionText: '偶尔饮酒', displayOrder: 3, score: 2 },
-      { optionNo: 'D', optionText: '经常饮酒', displayOrder: 4, score: 3 },
+      { optionCode: 'A', optionLabel: '从不饮酒', displayOrder: 1, clinicalScore: 0 },
+      { optionCode: 'B', optionLabel: '已戒酒', displayOrder: 2, clinicalScore: 1 },
+      { optionCode: 'C', optionLabel: '偶尔饮酒', displayOrder: 3, clinicalScore: 2 },
+      { optionCode: 'D', optionLabel: '经常饮酒', displayOrder: 4, clinicalScore: 3 },
     ],
   },
   {
     id: 'Q8',
-    questionNo: 'Q8',
-    scaleId: 'S001',
+    questionCode: 'Q8',
     sectionId: 'SEC5',
     sectionName: '当前症状',
     questionText: '请描述您目前的主要不适症状：',
     description: '请尽可能详细地描述您的症状、持续时间和严重程度',
-    questionType: 'text_input',
-    isRequired: true,
+    questionType: 'text',
+    required: true,
+    scored: false,
+    derived: false,
     displayOrder: 8,
     placeholder: '例如：胸痛已持续3天，活动后加重...',
   },
 ];
 
-export default function PatientFormPage({ params }: PageProps) {
+export default function PatientFormPage() {
+  const { taskId } = useParams<{ taskId: string }>();
   const router = useRouter();
-  const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [currentSection, setCurrentSection] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -182,7 +187,7 @@ export default function PatientFormPage({ params }: PageProps) {
         case 'not_equals':
           return answer !== condition.value;
         case 'contains':
-          return Array.isArray(answer) && answer.includes(condition.value);
+          return Array.isArray(answer) && answer.includes(String(condition.value));
         case 'greater_than':
           return Number(answer) > Number(condition.value);
         case 'less_than':
@@ -195,7 +200,7 @@ export default function PatientFormPage({ params }: PageProps) {
 
   const visibleQuestions = currentQuestions.filter(shouldShowQuestion);
 
-  const handleAnswerChange = (questionId: string, value: any) => {
+  const handleAnswerChange = (questionId: string, value: AnswerValue) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
     // 清除该题目的错误
     if (errors[questionId]) {
@@ -211,7 +216,7 @@ export default function PatientFormPage({ params }: PageProps) {
     const newErrors: Record<string, string> = {};
 
     visibleQuestions.forEach((question) => {
-      if (question.isRequired) {
+      if (question.required) {
         const answer = answers[question.id];
         if (answer === undefined || answer === null || answer === '') {
           newErrors[question.id] = '此题为必填项';
@@ -221,9 +226,9 @@ export default function PatientFormPage({ params }: PageProps) {
       }
 
       // 数值验证
-      if (question.questionType === 'number_input' && answers[question.id]) {
+      if (question.questionType === 'number' && answers[question.id]) {
         const value = Number(answers[question.id]);
-        const rules = question.validationRules;
+        const rules = question.validationRule;
         if (rules?.min !== undefined && value < rules.min) {
           newErrors[question.id] = `数值不能小于 ${rules.min}`;
         }
@@ -269,7 +274,7 @@ export default function PatientFormPage({ params }: PageProps) {
 
     // TODO: 提交到后端
     // 跳转到完成页面
-    router.push(`/patient/complete/${params.taskId}`);
+    router.push(`/patient/complete/${taskId}`);
   };
 
   const progress = Math.round(((currentSection + 1) / totalSections) * 100);

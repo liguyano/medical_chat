@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import { Card } from '@/components/shared/Card';
-import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import TaskCard from '@/components/task/TaskCard';
 import { useUserStore } from '@/lib/stores/useUserStore';

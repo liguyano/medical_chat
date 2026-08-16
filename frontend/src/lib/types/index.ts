@@ -56,14 +56,23 @@ export interface CareTask {
   taskNo: string;
   patientId: string;
   encounterId: string;
+  encounterNo?: string;
+  parentTaskId?: string;
   patientName: string;
   bedNo: string;
+  department?: string;
+  wardName?: string;
   taskType: string;
   collectionMode: CollectionMode;
   taskStatus: TaskStatus;
   assignedNurseId: string;
   assignedNurseName: string;
+  scaleId?: string;
+  scaleName?: string;
+  scaleVersion?: string;
   createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
   progress?: {
     current: number;
     total: number;
@@ -103,29 +112,62 @@ export type QuestionType =
   | 'text'
   | 'number'
   | 'date'
+  | 'boolean'
   | 'derived';
+
+export type ConditionalOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'greater_than'
+  | 'less_than';
+
+export interface QuestionDisplayCondition {
+  questionId: string;
+  operator: ConditionalOperator;
+  value: string | number | boolean;
+}
+
+export interface QuestionValidationRule {
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+}
 
 // 量表题目
 export interface AssessmentQuestion {
   id: string;
   questionCode: string;
+  sectionId?: string;
+  sectionName?: string;
   questionText: string;
+  description?: string;
   questionType: QuestionType;
   required: boolean;
   scored: boolean;
   derived: boolean;
+  displayOrder?: number;
+  placeholder?: string;
+  unit?: string;
   options?: AssessmentOption[];
-  validationRule?: Record<string, any>;
+  validationRule?: QuestionValidationRule;
+  conditionalLogic?: {
+    showIf: QuestionDisplayCondition[];
+  };
   calculationExpression?: string;
 }
 
 // 题目选项
 export interface AssessmentOption {
-  id: string;
+  id?: string;
   optionCode: string;
   optionLabel: string;
-  clinicalScore: number;
-  requiresFollowUp: boolean;
+  description?: string;
+  displayOrder?: number;
+  clinicalScore?: number;
+  requiresFollowUp?: boolean;
 }
 
 // CICARE 阶段
@@ -147,11 +189,13 @@ export interface InteractionMessage {
   messageNo: string;
   turnNo: number;
   role: MessageRole;
-  cicareStage: CicareStage;
+  cicareStage?: CicareStage;
+  intentType?: 'greeting' | 'question' | 'answer' | 'follow_up' | 'education' | 'confirmation';
   contentText: string;
   audioUrl?: string;
   occurredAt: string;
   relatedQuestionIds?: string[];
+  structuredAnswer?: Record<string, string | number | boolean>;
   isStreaming?: boolean; // 前端状态：是否正在流式输出
 }
 

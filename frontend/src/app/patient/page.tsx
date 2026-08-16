@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import { Card } from '@/components/shared/Card';
@@ -14,19 +14,29 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function PatientPage() {
+  return (
+    <Suspense fallback={<PatientPageFallback />}>
+      <PatientEntryContent />
+    </Suspense>
+  );
+}
+
+function PatientPageFallback() {
+  return (
+    <PatientLayout>
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <p className="text-sm text-foreground-muted">正在加载患者任务入口...</p>
+      </div>
+    </PatientLayout>
+  );
+}
+
+function PatientEntryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [taskNo, setTaskNo] = useState('');
+  const [taskNo, setTaskNo] = useState(() => searchParams.get('taskNo') ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    // 从 URL 读取任务编号
-    const taskNoParam = searchParams.get('taskNo');
-    if (taskNoParam) {
-      setTaskNo(taskNoParam);
-    }
-  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

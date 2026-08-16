@@ -5,6 +5,7 @@ interface TaskStore {
   tasks: CareTask[];
   currentTask: CareTask | null;
   setTasks: (tasks: CareTask[]) => void;
+  addTask: (task: CareTask) => void;
   setCurrentTask: (task: CareTask | null) => void;
   updateTaskStatus: (taskId: string, status: CareTask['taskStatus']) => void;
   updateTaskProgress: (taskId: string, current: number, total: number) => void;
@@ -15,6 +16,12 @@ export const useTaskStore = create<TaskStore>((set) => ({
   currentTask: null,
 
   setTasks: (tasks) => set({ tasks }),
+
+  addTask: (task) =>
+    set((state) => ({
+      tasks: [task, ...state.tasks],
+      currentTask: task,
+    })),
 
   setCurrentTask: (task) => set({ currentTask: task }),
 
