@@ -1,0 +1,145 @@
+import type {
+  InteractionEvent,
+  InteractionMessage,
+  InteractionSession,
+  StructuredAnswer,
+} from '@/lib/types';
+
+const now = '2026-08-16T08:45:00';
+
+const reviewMessages: InteractionMessage[] = [
+  {
+    id: 'MSG-REVIEW-1',
+    messageNo: 'MSG-REVIEW-1',
+    sessionId: 'SESSION-3',
+    turnNo: 1,
+    role: 'ai',
+    cicareStage: 'connect',
+    intentType: 'greeting',
+    contentText: '您好，我是AI护理评估助手。请问您是王秀英女士的家属吗？',
+    occurredAt: now,
+  },
+  {
+    id: 'MSG-REVIEW-2',
+    messageNo: 'MSG-REVIEW-2',
+    sessionId: 'SESSION-3',
+    turnNo: 2,
+    role: 'patient',
+    cicareStage: 'connect',
+    intentType: 'answer',
+    contentText: '是的，我是她女儿，她晚上起床有点不稳。',
+    occurredAt: '2026-08-16T08:45:18',
+  },
+  {
+    id: 'MSG-REVIEW-3',
+    messageNo: 'MSG-REVIEW-3',
+    sessionId: 'SESSION-3',
+    turnNo: 3,
+    role: 'ai',
+    cicareStage: 'ask',
+    intentType: 'follow_up',
+    contentText: '最近一年有跌倒过吗？夜间下床时是否需要他人协助？',
+    structuredAnswer: { 夜间下床: '需要协助' },
+    occurredAt: '2026-08-16T08:45:25',
+  },
+  {
+    id: 'MSG-REVIEW-4',
+    messageNo: 'MSG-REVIEW-4',
+    sessionId: 'SESSION-3',
+    turnNo: 4,
+    role: 'patient',
+    cicareStage: 'ask',
+    intentType: 'answer',
+    contentText: '半年内摔过一次，现在起床最好有人扶一下。',
+    occurredAt: '2026-08-16T08:45:43',
+  },
+  {
+    id: 'MSG-REVIEW-5',
+    messageNo: 'MSG-REVIEW-5',
+    sessionId: 'SESSION-3',
+    turnNo: 5,
+    role: 'ai',
+    cicareStage: 'respond',
+    intentType: 'education',
+    contentText: '为了防止再次跌倒，夜间下床前请先按呼叫铃，穿好防滑鞋，等待护士或家属协助。',
+    occurredAt: '2026-08-16T08:45:51',
+  },
+];
+
+export const mockSessions: Record<string, InteractionSession> = {
+  '3': {
+    id: 'SESSION-3',
+    sessionNo: 'SESSION-3',
+    taskId: '3',
+    patientId: '3',
+    encounterId: '3',
+    interactionType: 'assessment',
+    channelType: 'mixed',
+    sessionStatus: 'completed',
+    startedAt: now,
+    completedAt: '2026-08-16T09:03:00',
+    currentCicareStage: 'exit',
+    answeredQuestionCount: 15,
+    totalQuestionCount: 15,
+    aiSummary: '患者由女儿协助完成评估，半年内曾跌倒一次，夜间下床需要协助，已完成防跌倒宣教。',
+    messages: reviewMessages,
+  },
+};
+
+export const mockStructuredAnswers: Record<string, StructuredAnswer[]> = {
+  '3': [
+    {
+      questionId: 'age',
+      questionCode: 'AGE',
+      questionText: '年龄',
+      answerNumber: 72,
+      sourceMessageIds: ['MSG-REVIEW-2'],
+      extractionConfidence: 0.99,
+      corrected: false,
+    },
+    {
+      questionId: 'fall_history',
+      questionCode: 'FALL_HISTORY',
+      questionText: '近一年是否跌倒',
+      answerText: '是，半年内跌倒一次',
+      sourceMessageIds: ['MSG-REVIEW-4'],
+      extractionConfidence: 0.93,
+      corrected: false,
+    },
+    {
+      questionId: 'mobility',
+      questionCode: 'MOBILITY',
+      questionText: '夜间下床是否需要协助',
+      answerText: '需要他人协助',
+      sourceMessageIds: ['MSG-REVIEW-2', 'MSG-REVIEW-4'],
+      extractionConfidence: 0.96,
+      corrected: false,
+    },
+  ],
+};
+export const mockInteractionEvents: Record<string, InteractionEvent[]> = {
+  '3': [
+    {
+      id: 'EVENT-3-1',
+      taskId: '3',
+      messageId: 'MSG-REVIEW-4',
+      eventType: 'risk',
+      title: '跌倒风险',
+      description: '患者半年内有跌倒史，且夜间下床需要协助。',
+      priority: 'high',
+      handled: false,
+      occurredAt: '2026-08-16T08:45:44',
+    },
+    {
+      id: 'EVENT-3-2',
+      taskId: '3',
+      messageId: 'MSG-REVIEW-5',
+      eventType: 'education',
+      title: '已触发防跌倒宣教',
+      description: '已向患者家属说明呼叫铃、防滑鞋和下床协助要求。',
+      priority: 'medium',
+      handled: true,
+      occurredAt: '2026-08-16T08:45:52',
+    },
+  ],
+};

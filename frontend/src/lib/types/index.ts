@@ -49,6 +49,9 @@ export type TaskStatus =
 
 // 采集模式
 export type CollectionMode = 'traditional_form' | 'ai_dialogue';
+export type ParticipantType = 'patient' | 'family' | 'agent';
+export type AssessmentScene = 'admission' | 'reassessment' | 'transfer' | 'discharge';
+export type PrototypeAnswerValue = string | string[] | number | boolean | null;
 
 // 护理任务
 export interface CareTask {
@@ -70,6 +73,20 @@ export interface CareTask {
   scaleId?: string;
   scaleName?: string;
   scaleVersion?: string;
+  scaleIds?: string[];
+  scaleNames?: string[];
+  participantType?: ParticipantType;
+  participantName?: string;
+  relationshipToPatient?: string;
+  assessmentScene?: AssessmentScene;
+  consentRequired?: boolean;
+  educationTopics?: string[];
+  plannedStartTime?: string;
+  notes?: string;
+  handoffRequired?: boolean;
+  handoffReason?: string;
+  currentStage?: CicareStage;
+  aiSummary?: string;
   createdAt: string;
   updatedAt?: string;
   completedAt?: string;
@@ -212,6 +229,11 @@ export interface InteractionSession {
   startedAt?: string;
   completedAt?: string;
   currentCicareStage: CicareStage;
+  answeredQuestionCount?: number;
+  totalQuestionCount?: number;
+  handoffRequired?: boolean;
+  handoffReason?: string;
+  aiSummary?: string;
   messages: InteractionMessage[];
 }
 
@@ -259,6 +281,7 @@ export interface EducationCard {
   triggerReason: string;
   sourceQuestionId?: string;
   acknowledged: boolean;
+  understandingStatus?: 'pending' | 'understood' | 'not_understood';
 }
 
 // 知情同意条款
@@ -273,4 +296,52 @@ export interface ConsentClause {
   deliveryStatus: 'pending' | 'delivering' | 'delivered' | 'skipped';
   listened: boolean;
   confirmed: boolean;
+}
+
+export interface InteractionEvent {
+  id: string;
+  taskId: string;
+  messageId?: string;
+  eventType: 'risk' | 'follow_up' | 'education' | 'handoff' | 'refusal';
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high';
+  handled: boolean;
+  occurredAt: string;
+}
+
+export interface MessageFeedback {
+  messageId: string;
+  taskId: string;
+  feedbackType: 'like' | 'dislike';
+  issueTags: string[];
+  comment?: string;
+  reviewedAt: string;
+}
+
+export interface AssessmentReview {
+  taskId: string;
+  nurseAnswers: Record<string, string>;
+  finalAnswers: Record<string, string>;
+  correctionReasons: Record<string, string>;
+  supplementaryInquiry?: string;
+  status: 'draft' | 'returned' | 'confirmed';
+  reviewedAt?: string;
+}
+
+export interface QualityReview {
+  taskId: string;
+  dialogueScores: Record<string, number>;
+  assessmentScores: Record<string, number>;
+  comment?: string;
+  submittedAt?: string;
+}
+
+export interface ConsentProgress {
+  taskId: string;
+  clauses: ConsentClause[];
+  participantName: string;
+  decision: 'pending' | 'agreed' | 'refused' | 'needs_explanation';
+  signatureData?: string;
+  completedAt?: string;
 }

@@ -1,14 +1,17 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import {
   HomeIcon,
   ClipboardDocumentListIcon,
-  ChartBarIcon,
+  UserGroupIcon,
+  ComputerDesktopIcon,
+  StarIcon,
+  Cog6ToothIcon,
   UserCircleIcon,
 } from '@heroicons/react/24/outline';
 
@@ -18,13 +21,43 @@ interface NurseLayoutProps {
 
 const navigation = [
   { name: '工作台', href: '/nurse/dashboard', icon: HomeIcon },
+  { name: '患者管理', href: '/nurse/patients', icon: UserGroupIcon },
   { name: '任务管理', href: '/nurse/tasks', icon: ClipboardDocumentListIcon },
-  { name: '数据统计', href: '/nurse/statistics', icon: ChartBarIcon },
+  { name: '实时监控', href: '/nurse/monitor', icon: ComputerDesktopIcon },
+  { name: 'AI质评', href: '/nurse/quality', icon: StarIcon },
+  { name: '系统配置', href: '/nurse/config', icon: Cog6ToothIcon },
 ];
+
+const subscribeToHydration = () => () => undefined;
 
 export default function NurseLayout({ children }: NurseLayoutProps) {
   const pathname = usePathname();
-  const { user, logout } = useUserStore();
+  const router = useRouter();
+  const { user, logout, isAuthenticated } = useUserStore();
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    () => true,
+    () => false
+  );
+
+  useEffect(() => {
+    if (hydrated && !isAuthenticated) {
+      router.replace('/nurse/login');
+    }
+  }, [hydrated, isAuthenticated, router]);
+
+  const handleLogout = () => {
+    logout();
+    router.push('/nurse/login');
+  };
+
+  if (!hydrated || !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-foreground-muted">正在验证医护身份...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -42,7 +75,7 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
               </Link>
 
               {/* 导航菜单 */}
-              <div className="hidden md:flex space-x-1">
+              <div className="hidden xl:flex space-x-1">
                 {navigation.map((item) => {
                   const isActive = pathname.startsWith(item.href);
                   return (
@@ -71,7 +104,7 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
                 <div className="text-xs text-foreground-muted">{user?.department}</div>
               </div>
               <button
-                onClick={logout}
+                onClick={handleLogout}
                 className="p-2 rounded-full hover:bg-surface-secondary transition-colors"
                 title="退出登录"
               >
@@ -81,6 +114,29 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
           </div>
         </div>
       </nav>
+
+      <div className="xl:hidden overflow-x-auto border-b border-border bg-surface">
+        <div className="flex min-w-max px-3 py-2 gap-1">
+          {navigation.map((item) => {
+            const isActive = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 rounded-full text-sm whitespace-nowrap',
+                  isActive
+                    ? 'bg-primary-tint text-primary'
+                    : 'text-foreground-muted hover:bg-surface-secondary'
+                )}
+              >
+                <item.icon className="w-4 h-4" />
+                {item.name}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
 
       {/* 主内容区 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>

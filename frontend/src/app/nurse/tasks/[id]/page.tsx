@@ -8,6 +8,7 @@ import { Button } from '@/components/shared/Button';
 import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { useChatStore } from '@/lib/stores/useChatStore';
 import { getTaskById } from '@/lib/mock/data';
 import type { CareTask } from '@/lib/types';
 import {
@@ -26,6 +27,10 @@ export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { tasks, updateTaskStatus } = useTaskStore();
+  const structuredAnswersByTask = useChatStore((state) => state.structuredAnswers);
+  const interactionEventsByTask = useChatStore((state) => state.events);
+  const structuredAnswers = structuredAnswersByTask[id] ?? [];
+  const interactionEvents = interactionEventsByTask[id] ?? [];
   const [loading, setLoading] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
   const task: CareTask | null = tasks.find((item) => item.id === id) ?? getTaskById(id) ?? null;
@@ -67,14 +72,6 @@ export default function TaskDetailPage() {
     await new Promise((resolve) => setTimeout(resolve, 800));
     updateTaskStatus(task.id, 'in_progress');
     setLoading(false);
-  };
-
-  const handleApprove = async () => {
-    setLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    updateTaskStatus(task.id, 'completed');
-    setLoading(false);
-    router.push('/nurse/tasks');
   };
 
   const handleReject = async () => {
@@ -255,46 +252,29 @@ export default function TaskDetailPage() {
                 <CardContent>
                   <div className="space-y-4">
                     <div className="p-4 bg-surface-secondary rounded-xl">
-                      <h4 className="text-sm font-medium text-foreground mb-2">
-                        AI 提取的结构化数据
-                      </h4>
-                      <div className="space-y-2 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-foreground-muted">年龄:</span>
-                          <span className="text-foreground font-medium">65 岁</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-foreground-muted">过敏史:</span>
-                          <span className="text-foreground font-medium">青霉素过敏</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-foreground-muted">既往病史:</span>
-                          <span className="text-foreground font-medium">高血压、糖尿病</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-foreground-muted">主要症状:</span>
-                          <span className="text-foreground font-medium">胸痛、气短</span>
-                        </div>
+                      <h4 className="text-sm font-medium text-foreground mb-2">AI评估摘要</h4>
+                      <p className="text-sm leading-6">
+                        {task.aiSummary ?? '患者已完成采集，等待护士查看原始回答并确认最终结果。'}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge variant="info" size="sm">{structuredAnswers.length}项结构化答案</Badge>
+                        <Badge variant={interactionEvents.some((event) => event.priority === 'high') ? 'danger' : 'warning'} size="sm">
+                          {interactionEvents.length}项风险/宣教事件
+                        </Badge>
                       </div>
                     </div>
 
                     <div className="flex items-center space-x-3">
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          // TODO: 查看完整对话记录
-                          console.log('查看完整对话');
-                        }}
+                        onClick={() => router.push(`/nurse/monitor/${task.id}`)}
                         className="flex-1"
                       >
                         查看完整记录
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          // TODO: 对比量表
-                          console.log('对比量表');
-                        }}
+                        onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
                         className="flex-1"
                       >
                         对比量表
@@ -312,12 +292,11 @@ export default function TaskDetailPage() {
                         退回修改
                       </Button>
                       <Button
-                        onClick={handleApprove}
-                        loading={loading}
+                        onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
                         className="flex-1"
                       >
                         <CheckCircleIcon className="w-4 h-4 mr-1" />
-                        通过审核
+                        进入正式复核
                       </Button>
                     </div>
                   </div>
@@ -358,10 +337,7 @@ export default function TaskDetailPage() {
                   {task.taskStatus === 'in_progress' && (
                     <Button
                       variant="outline"
-                      onClick={() => {
-                        // TODO: 查看实时进度
-                        console.log('查看实时进度');
-                      }}
+                      onClick={() => router.push(`/nurse/monitor/${task.id}`)}
                       className="w-full"
                     >
                       查看实时进度
@@ -372,36 +348,27 @@ export default function TaskDetailPage() {
                     <>
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          // TODO: 查看评估报告
-                          console.log('查看评估报告');
-                        }}
+                        onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
                         className="w-full"
                       >
                         查看评估报告
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          // TODO: 生成护理计划
-                          console.log('生成护理计划');
-                        }}
+                        onClick={() => router.push(`/nurse/quality/${task.id}`)}
                         className="w-full"
                       >
-                        生成护理计划
+                        查看AI质量评价
                       </Button>
                     </>
                   )}
 
                   <Button
                     variant="ghost"
-                    onClick={() => {
-                      // TODO: 编辑任务
-                      console.log('编辑任务');
-                    }}
+                    onClick={() => router.push(`/nurse/monitor/${task.id}`)}
                     className="w-full"
                   >
-                    编辑任务
+                    查看任务全过程
                   </Button>
                 </div>
               </CardContent>

@@ -8,7 +8,6 @@ import { Button } from '@/components/shared/Button';
 import TaskCard from '@/components/task/TaskCard';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
-import { mockTasks } from '@/lib/mock/data';
 import type { CareTask } from '@/lib/types';
 import { PlusIcon, FunnelIcon } from '@heroicons/react/24/outline';
 
@@ -17,7 +16,7 @@ type FilterStatus = 'all' | CareTask['taskStatus'];
 export default function NurseTasksPage() {
   const router = useRouter();
   const { isAuthenticated } = useUserStore();
-  const { tasks, setTasks } = useTaskStore();
+  const tasks = useTaskStore((state) => state.tasks);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
 
   useEffect(() => {
@@ -25,8 +24,7 @@ export default function NurseTasksPage() {
       router.push('/nurse/login');
       return;
     }
-    setTasks(mockTasks);
-  }, [isAuthenticated, router, setTasks]);
+  }, [isAuthenticated, router]);
 
   if (!isAuthenticated) {
     return null;

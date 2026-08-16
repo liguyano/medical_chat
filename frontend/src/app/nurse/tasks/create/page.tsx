@@ -1,242 +1,408 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/shared/Card';
+import { Card } from '@/components/shared/Card';
+import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
-import { Badge } from '@/components/shared/Badge';
+import { mockEncounters, mockPatients, mockScales } from '@/lib/mock/data';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
-import type { CareTask } from '@/lib/types';
-import { ArrowLeftIcon } from '@heroicons/react/24/outline';
+import { useUserStore } from '@/lib/stores/useUserStore';
+import type {
+  AssessmentScene,
+  CareTask,
+  CollectionMode,
+  ParticipantType,
+} from '@/lib/types';
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckCircleIcon,
+  ClipboardDocumentCheckIcon,
+} from '@heroicons/react/24/outline';
 
 export default function CreateTaskPage() {
+  return (
+    <Suspense fallback={<NurseLayout><p>正在加载任务创建...</p></NurseLayout>}>
+      <CreateTaskContent />
+    </Suspense>
+  );
+}
+
+function CreateTaskContent() {
   const router = useRouter();
-  const { addTask } = useTaskStore();
+  const searchParams = useSearchParams();
+  const addTask = useTaskStore((state) => state.addTask);
+  const tasks = useTaskStore((state) => state.tasks);
+  const user = useUserStore((state) => state.user);
+  const [step, setStep] = useState(1);
+  const [selectedPatientId, setSelectedPatientId] = useState(
+    () => searchParams.get('patientId') ?? mockPatients.at(-1)?.id ?? mockPatients[0].id
+  );
+  const [participantType, setParticipantType] = useState<ParticipantType>('patient');
+  const [relationship, setRelationship] = useState('女儿');
+  const [scene, setScene] = useState<AssessmentScene>('admission');
+  const [selectedScaleIds, setSelectedScaleIds] = useState<string[]>(['1', '2', '3', '4', '5']);
+  const [collectionMode, setCollectionMode] = useState<CollectionMode>('ai_dialogue');
+  const [consentRequired, setConsentRequired] = useState(true);
+  const [educationTopics, setEducationTopics] = useState<string[]>(['药物过敏安全宣教', '防跌倒宣教']);
+  const [plannedStartTime, setPlannedStartTime] = useState('2026-08-16T14:00');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    patientName: '',
-    gender: 'male' as 'male' | 'female',
-    age: '',
-    bedNo: '',
-    inpatientNo: '',
-    diagnosis: '',
-    taskType: '入院评估',
-    collectionMode: 'ai_dialogue' as 'ai_dialogue' | 'traditional_form',
-  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const patient = mockPatients.find((item) => item.id === selectedPatientId) ?? mockPatients[0];
+  const encounter = mockEncounters.find((item) => item.patientId === patient.id) ?? mockEncounters[0];
+  const selectedScales = useMemo(
+    () => mockScales.filter((scale) => selectedScaleIds.includes(scale.id)),
+    [selectedScaleIds]
+  );
+
+  const next = () => {
+    if (step === 1 && !selectedPatientId) {
+      setError('请选择患者');
+      return;
+    }
+    if (step === 2 && selectedScaleIds.length === 0) {
+      setError('请至少选择一张量表');
+      return;
+    }
+    setError('');
+    setStep((value) => Math.min(value + 1, 4));
+  };
+
+  const createTask = async () => {
+    const duplicate = tasks.some(
+      (task) =>
+        task.patientId === patient.id &&
+        task.assessmentScene === scene &&
+        task.taskStatus !== 'completed' &&
+        task.taskStatus !== 'cancelled'
+    );
+    if (duplicate) {
+      setError('该患者已有相同场景的未完成任务，请先查看现有任务');
+      return;
+    }
     setLoading(true);
-
-    // 模拟创建延迟
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // 创建新任务
-    const newTask: CareTask = {
-      id: `T${Date.now()}`,
-      taskNo: `TASK-${Date.now()}`,
-      patientId: `P${Date.now()}`,
-      patientName: formData.patientName,
-      encounterId: `E${Date.now()}`,
-      encounterNo: formData.inpatientNo,
-      parentTaskId: '',
-      taskType: formData.taskType,
-      collectionMode: formData.collectionMode,
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    const timestamp = Date.now();
+    const task: CareTask = {
+      id: `T-${timestamp}`,
+      taskNo: `TASK-${String(timestamp).slice(-8)}`,
+      patientId: patient.id,
+      encounterId: encounter.id,
+      encounterNo: encounter.inpatientNo,
+      patientName: patient.name,
+      bedNo: encounter.bedNo,
+      department: encounter.department,
+      wardName: encounter.ward,
+      taskType: '入院评估任务包',
+      collectionMode,
       taskStatus: 'pending',
-      assignedNurseId: 'N001',
-      assignedNurseName: '李护士',
-      scaleId: 'S001',
-      scaleName: '入院评估量表',
+      assignedNurseId: user?.id ?? 'N001',
+      assignedNurseName: user?.name ?? '张护士',
+      scaleName: '入院评估任务包',
       scaleVersion: 'v1.0',
-      bedNo: formData.bedNo,
-      department: '心内科',
-      wardName: '心内一病区',
+      scaleIds: selectedScales.map((scale) => scale.id),
+      scaleNames: selectedScales.map((scale) => scale.scaleName),
+      participantType,
+      participantName: participantType === 'patient' ? patient.name : `${patient.name}家属`,
+      relationshipToPatient: participantType === 'patient' ? undefined : relationship,
+      assessmentScene: scene,
+      consentRequired,
+      educationTopics,
+      plannedStartTime,
+      notes,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      progress: { current: 0, total: 12 },
     };
-
-    addTask(newTask);
-    router.push(`/nurse/tasks/${newTask.id}`);
+    addTask(task);
+    router.push(`/nurse/tasks/${task.id}`);
   };
 
   return (
     <NurseLayout>
-      <div className="max-w-3xl mx-auto">
-        {/* 返回按钮 */}
-        <button
-          onClick={() => router.back()}
-          className="flex items-center space-x-2 text-foreground-muted hover:text-foreground transition-colors mb-6"
-        >
-          <ArrowLeftIcon className="w-5 h-5" />
-          <span>返回</span>
-        </button>
+      <button onClick={() => router.back()} className="flex items-center gap-2 text-foreground-muted mb-5">
+        <ArrowLeftIcon className="w-5 h-5" />
+        返回
+      </button>
 
-        {/* 页面标题 */}
+      <div className="max-w-5xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-3xl font-serif font-medium text-foreground mb-2">
-            创建<span className="text-primary italic">护理任务</span>
-          </h1>
-          <p className="text-foreground-muted">为患者创建新的护理评估任务</p>
+          <Badge variant="primary">步骤 {step}/4</Badge>
+          <h1 className="text-3xl mt-2">创建<span className="text-primary italic">评估任务包</span></h1>
+          <p className="text-foreground-muted mt-1">选择患者、量表、采集方式和配套宣教内容</p>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          {/* 患者信息 */}
-          <Card padding="lg" className="mb-6">
-            <CardHeader>
-              <CardTitle>患者信息</CardTitle>
-              <CardDescription>请填写患者基本信息</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="患者姓名"
-                  value={formData.patientName}
-                  onChange={(e) => setFormData({ ...formData, patientName: e.target.value })}
-                  required
-                />
+        <div className="grid grid-cols-4 gap-2 mb-6">
+          {['患者与参与人', '选择量表', '执行配置', '发布确认'].map((label, index) => (
+            <div
+              key={label}
+              className={`rounded-xl px-3 py-3 text-center text-xs md:text-sm ${
+                step === index + 1
+                  ? 'bg-primary text-white'
+                  : step > index + 1
+                    ? 'bg-primary-tint text-primary'
+                    : 'bg-surface-secondary text-foreground-muted'
+              }`}
+            >
+              {label}
+            </div>
+          ))}
+        </div>
+
+        {step === 1 && (
+          <Card padding="lg">
+            <h2 className="text-xl mb-4">选择在院患者</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {mockPatients.map((item) => {
+                const currentEncounter = mockEncounters.find((record) => record.patientId === item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedPatientId(item.id)}
+                    className={`rounded-2xl border-2 p-4 text-left ${
+                      selectedPatientId === item.id ? 'border-primary bg-primary-tint' : 'border-border'
+                    }`}
+                  >
+                    <div className="flex justify-between">
+                      <span className="font-semibold">{item.name}</span>
+                      <span className="text-sm">{currentEncounter?.bedNo}</span>
+                    </div>
+                    <p className="text-sm text-foreground-muted mt-1">
+                      {currentEncounter?.inpatientNo} · {currentEncounter?.diagnosis}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-6">
+              <h3 className="font-medium mb-3">本次参与人</h3>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { value: 'patient', label: '患者本人' },
+                  { value: 'family', label: '家属' },
+                  { value: 'agent', label: '授权代理人' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setParticipantType(item.value as ParticipantType)}
+                    className={`rounded-xl border p-3 ${
+                      participantType === item.value ? 'border-primary bg-primary-tint text-primary' : 'border-border'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {participantType !== 'patient' && (
+                <div className="mt-3 max-w-sm">
+                  <Input label="与患者关系" value={relationship} onChange={(event) => setRelationship(event.target.value)} />
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {step === 2 && (
+          <Card padding="lg">
+            <h2 className="text-xl mb-4">选择评估量表</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {mockScales.map((scale) => {
+                const selected = selectedScaleIds.includes(scale.id);
+                return (
+                  <button
+                    key={scale.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedScaleIds((current) =>
+                        selected
+                          ? current.filter((id) => id !== scale.id)
+                          : [...current, scale.id]
+                      )
+                    }
+                    className={`rounded-2xl border-2 p-4 text-left ${
+                      selected ? 'border-primary bg-primary-tint' : 'border-border'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold">{scale.scaleName}</span>
+                      {selected && <CheckCircleIcon className="w-5 h-5 text-primary" />}
+                    </div>
+                    <p className="text-sm text-foreground-muted mt-2">{scale.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-4">
+            <Card padding="lg">
+              <h2 className="text-xl mb-4">执行方式</h2>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { value: 'ai_dialogue', label: 'AI对话采集', detail: '文字/语音模拟、实时抽取与宣教' },
+                  { value: 'traditional_form', label: '传统问卷', detail: '分组填写、自动保存与断点续答' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setCollectionMode(item.value as CollectionMode)}
+                    className={`rounded-2xl border-2 p-4 text-left ${
+                      collectionMode === item.value ? 'border-primary bg-primary-tint' : 'border-border'
+                    }`}
+                  >
+                    <p className="font-semibold">{item.label}</p>
+                    <p className="text-sm text-foreground-muted mt-1">{item.detail}</p>
+                  </button>
+                ))}
+              </div>
+            </Card>
+
+            <Card padding="lg">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-1.5">性别</label>
-                  <div className="flex space-x-4">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, gender: 'male' })}
-                      className={`flex-1 px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-                        formData.gender === 'male'
-                          ? 'border-primary bg-primary-tint text-primary'
-                          : 'border-border bg-surface hover:border-foreground-muted'
-                      }`}
-                    >
-                      男
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, gender: 'female' })}
-                      className={`flex-1 px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-                        formData.gender === 'female'
-                          ? 'border-primary bg-primary-tint text-primary'
-                          : 'border-border bg-surface hover:border-foreground-muted'
-                      }`}
-                    >
-                      女
-                    </button>
-                  </div>
+                  <label className="block text-sm font-medium mb-2">评估场景</label>
+                  <select
+                    value={scene}
+                    onChange={(event) => setScene(event.target.value as AssessmentScene)}
+                    className="w-full rounded-xl border border-border bg-surface px-4 py-3"
+                  >
+                    <option value="admission">入院评估</option>
+                    <option value="reassessment">复评</option>
+                    <option value="transfer">转科评估</option>
+                    <option value="discharge">出院评估</option>
+                  </select>
                 </div>
                 <Input
-                  label="年龄"
-                  type="number"
-                  value={formData.age}
-                  onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                  required
-                />
-                <Input
-                  label="床号"
-                  value={formData.bedNo}
-                  onChange={(e) => setFormData({ ...formData, bedNo: e.target.value })}
-                  placeholder="如: 01床"
-                  required
-                />
-                <Input
-                  label="住院号"
-                  value={formData.inpatientNo}
-                  onChange={(e) => setFormData({ ...formData, inpatientNo: e.target.value })}
-                  required
-                />
-                <Input
-                  label="诊断"
-                  value={formData.diagnosis}
-                  onChange={(e) => setFormData({ ...formData, diagnosis: e.target.value })}
-                  placeholder="主要诊断"
-                  required
+                  label="计划开始时间"
+                  type="datetime-local"
+                  value={plannedStartTime}
+                  onChange={(event) => setPlannedStartTime(event.target.value)}
                 />
               </div>
-            </CardContent>
-          </Card>
 
-          {/* 任务配置 */}
-          <Card padding="lg" className="mb-6">
-            <CardHeader>
-              <CardTitle>任务配置</CardTitle>
-              <CardDescription>选择评估方式和量表</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-3">
-                    采集方式
-                  </label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, collectionMode: 'ai_dialogue' })}
-                      className={`p-6 rounded-xl border-2 transition-all duration-200 text-left ${
-                        formData.collectionMode === 'ai_dialogue'
-                          ? 'border-primary bg-primary-tint'
-                          : 'border-border bg-surface hover:border-foreground-muted'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="text-2xl">🤖</div>
-                        {formData.collectionMode === 'ai_dialogue' && (
-                          <Badge variant="primary" size="sm">
-                            已选择
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="font-medium text-foreground mb-1">AI 对话采集</div>
-                      <div className="text-sm text-foreground-muted">
-                        通过智能对话引导患者完成评估
-                      </div>
-                    </button>
+              <label className="mt-5 flex items-center gap-3 rounded-xl bg-surface-secondary p-4">
+                <input
+                  type="checkbox"
+                  checked={consentRequired}
+                  onChange={(event) => setConsentRequired(event.target.checked)}
+                  className="w-5 h-5 accent-primary"
+                />
+                <span>
+                  <span className="font-medium block">包含入院须知与知情同意</span>
+                  <span className="text-xs text-foreground-muted">患者需逐条确认并完成演示手写签名</span>
+                </span>
+              </label>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFormData({ ...formData, collectionMode: 'traditional_form' })
-                      }
-                      className={`p-6 rounded-xl border-2 transition-all duration-200 text-left ${
-                        formData.collectionMode === 'traditional_form'
-                          ? 'border-primary bg-primary-tint'
-                          : 'border-border bg-surface hover:border-foreground-muted'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="text-2xl">📝</div>
-                        {formData.collectionMode === 'traditional_form' && (
-                          <Badge variant="primary" size="sm">
-                            已选择
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="font-medium text-foreground mb-1">传统表单</div>
-                      <div className="text-sm text-foreground-muted">
-                        使用传统量表表单直接填写
-                      </div>
-                    </button>
-                  </div>
+              <div className="mt-5">
+                <p className="text-sm font-medium mb-2">配套宣教</p>
+                <div className="flex flex-wrap gap-2">
+                  {['药物过敏安全宣教', '防跌倒宣教', '住院禁烟宣教', '用药安全宣教'].map((topic) => {
+                    const selected = educationTopics.includes(topic);
+                    return (
+                      <button
+                        key={topic}
+                        type="button"
+                        onClick={() =>
+                          setEducationTopics((current) =>
+                            selected ? current.filter((item) => item !== topic) : [...current, topic]
+                          )
+                        }
+                        className={`rounded-full border px-4 py-2 text-sm ${
+                          selected ? 'border-primary bg-primary-tint text-primary' : 'border-border'
+                        }`}
+                      >
+                        {topic}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
-                <Input
-                  label="任务类型"
-                  value={formData.taskType}
-                  onChange={(e) => setFormData({ ...formData, taskType: e.target.value })}
-                  disabled
+              <div className="mt-5">
+                <label className="block text-sm font-medium mb-2">护士备注</label>
+                <textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-border bg-surface p-3"
+                  placeholder="例如：听力下降，请放慢语速"
                 />
               </div>
-            </CardContent>
-          </Card>
-
-          {/* 提交按钮 */}
-          <div className="flex items-center justify-end space-x-4">
-            <Button variant="outline" onClick={() => router.back()} type="button">
-              取消
-            </Button>
-            <Button type="submit" loading={loading}>
-              创建任务
-            </Button>
+            </Card>
           </div>
-        </form>
+        )}
+
+        {step === 4 && (
+          <Card padding="lg">
+            <div className="flex items-center gap-2 mb-5">
+              <ClipboardDocumentCheckIcon className="w-7 h-7 text-primary" />
+              <h2 className="text-2xl">发布前确认</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="rounded-xl bg-surface-secondary p-4">
+                <p className="text-foreground-muted">患者与参与人</p>
+                <p className="font-medium mt-1">{patient.name} · {participantType === 'patient' ? '患者本人' : `${relationship}协助`}</p>
+              </div>
+              <div className="rounded-xl bg-surface-secondary p-4">
+                <p className="text-foreground-muted">住院信息</p>
+                <p className="font-medium mt-1">{encounter.ward} · {encounter.bedNo} · {encounter.inpatientNo}</p>
+              </div>
+              <div className="rounded-xl bg-surface-secondary p-4">
+                <p className="text-foreground-muted">采集方式</p>
+                <p className="font-medium mt-1">{collectionMode === 'ai_dialogue' ? 'AI对话采集' : '传统问卷'}</p>
+              </div>
+              <div className="rounded-xl bg-surface-secondary p-4">
+                <p className="text-foreground-muted">负责护士</p>
+                <p className="font-medium mt-1">{user?.name ?? '张护士'}</p>
+              </div>
+            </div>
+            <div className="mt-5">
+              <p className="text-sm text-foreground-muted mb-2">量表任务</p>
+              <div className="flex flex-wrap gap-2">
+                {selectedScales.map((scale) => <Badge key={scale.id}>{scale.scaleName}</Badge>)}
+              </div>
+            </div>
+            <div className="mt-5">
+              <p className="text-sm text-foreground-muted mb-2">宣教与知情同意</p>
+              <p className="text-sm">
+                {consentRequired ? '包含入院须知签名；' : '不包含知情同意；'}
+                {educationTopics.length ? educationTopics.join('、') : '无额外宣教'}
+              </p>
+            </div>
+          </Card>
+        )}
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-between">
+          <Button variant="outline" disabled={step === 1} onClick={() => setStep((value) => Math.max(1, value - 1))}>
+            <ArrowLeftIcon className="w-4 h-4 mr-1" />
+            上一步
+          </Button>
+          {step < 4 ? (
+            <Button onClick={next}>
+              下一步
+              <ArrowRightIcon className="w-4 h-4 ml-1" />
+            </Button>
+          ) : (
+            <Button loading={loading} onClick={createTask}>
+              发布任务
+            </Button>
+          )}
+        </div>
       </div>
     </NurseLayout>
   );

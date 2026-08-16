@@ -6,6 +6,7 @@ import { motion, type Variants } from 'framer-motion';
 import PatientLayout from '@/components/layout/PatientLayout';
 import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
+import { useTaskStore } from '@/lib/stores/useTaskStore';
 import {
   CheckCircleIcon,
   ClockIcon,
@@ -16,6 +17,8 @@ import {
 export default function PatientCompletePage() {
   const { taskId } = useParams<{ taskId: string }>();
   const router = useRouter();
+  const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
+  const consent = useTaskStore((state) => state.consents[taskId]);
   const [showConfetti, setShowConfetti] = useState(true);
 
   useEffect(() => {
@@ -136,7 +139,7 @@ export default function PatientCompletePage() {
                       后续流程
                     </h3>
                     <p className="text-xs text-foreground-muted leading-relaxed">
-                      护士会根据评估结果为您制定个性化的护理计划，并在必要时与您进一步沟通
+                      护士会核对您的原始回答、AI整理结果和风险提示，并在必要时与您进一步沟通
                     </p>
                   </div>
                 </div>
@@ -161,7 +164,7 @@ export default function PatientCompletePage() {
           {/* 操作按钮 */}
           <motion.div variants={itemVariants} className="space-y-3">
             <Button
-              onClick={() => router.push('/patient')}
+              onClick={() => router.push('/patient/home')}
               className="w-full"
             >
               <HomeIcon className="w-4 h-4 mr-2" />
@@ -170,10 +173,7 @@ export default function PatientCompletePage() {
 
             <Button
               variant="outline"
-              onClick={() => {
-                // TODO: 查看评估详情
-                console.log('查看评估详情');
-              }}
+              onClick={() => router.push('/patient/tasks')}
               className="w-full"
             >
               查看评估记录
@@ -184,6 +184,13 @@ export default function PatientCompletePage() {
           <motion.div variants={itemVariants} className="mt-6 text-center">
             <p className="text-xs text-foreground-muted">
               任务编号: {taskId}
+            </p>
+            <p className="text-xs text-foreground-muted mt-1">
+              {task?.consentRequired
+                ? consent?.decision === 'agreed'
+                  ? '知情同意：已确认并完成演示签名'
+                  : '知情同意：等待护士进一步处理'
+                : '本任务不要求知情同意签名'}
             </p>
           </motion.div>
         </motion.div>

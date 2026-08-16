@@ -1,64 +1,152 @@
 import { create } from 'zustand';
-import type { InteractionSession, InteractionMessage, StructuredAnswer } from '@/lib/types';
+import { persist } from 'zustand/middleware';
+import {
+  mockInteractionEvents,
+  mockSessions,
+  mockStructuredAnswers,
+} from '@/lib/mock/dialogue';
+import type {
+  InteractionEvent,
+  InteractionMessage,
+  InteractionSession,
+  MessageFeedback,
+  StructuredAnswer,
+} from '@/lib/types';
 
 interface ChatStore {
-  session: InteractionSession | null;
-  structuredAnswers: StructuredAnswer[];
-  isStreaming: boolean;
-
-  setSession: (session: InteractionSession) => void;
-  addMessage: (message: InteractionMessage) => void;
-  updateMessage: (messageId: string, updates: Partial<InteractionMessage>) => void;
-  setStructuredAnswers: (answers: StructuredAnswer[]) => void;
-  updateStructuredAnswer: (questionId: string, updates: Partial<StructuredAnswer>) => void;
-  setStreaming: (isStreaming: boolean) => void;
-  clearSession: () => void;
+  sessions: Record<string, InteractionSession>;
+  structuredAnswers: Record<string, StructuredAnswer[]>;
+  events: Record<string, InteractionEvent[]>;
+  feedback: Record<string, MessageFeedback>;
+  streamingTaskId: string | null;
+  setSession: (taskId: string, session: InteractionSession) => void;
+  addMessage: (taskId: string, message: InteractionMessage) => void;
+  updateMessage: (
+    taskId: string,
+    messageId: string,
+    updates: Partial<InteractionMessage>
+  ) => void;
+  setStructuredAnswers: (taskId: string, answers: StructuredAnswer[]) => void;
+  upsertStructuredAnswer: (taskId: string, answer: StructuredAnswer) => void;
+  addEvent: (taskId: string, event: InteractionEvent) => void;
+  markEventHandled: (taskId: string, eventId: string) => void;
+  saveFeedback: (feedback: MessageFeedback) => void;
+  setStreaming: (taskId: string | null) => void;
+  clearSession: (taskId: string) => void;
+  resetDemoData: () => void;
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
-  session: null,
-  structuredAnswers: [],
-  isStreaming: false,
+const initialState = {
+  sessions: mockSessions,
+  structuredAnswers: mockStructuredAnswers,
+  events: mockInteractionEvents,
+  feedback: {},
+  streamingTaskId: null,
+};
 
-  setSession: (session) => set({ session }),
+export const useChatStore = create<ChatStore>()(
+  persist(
+    (set) => ({
+      ...initialState,
 
-  addMessage: (message) =>
-    set((state) => ({
-      session: state.session
-        ? {
-            ...state.session,
-            messages: [...state.session.messages, message],
-          }
-        : null,
-    })),
+      setSession: (taskId, session) =>
+        set((state) => ({
+          sessions: { ...state.sessions, [taskId]: session },
+        })),
 
-  updateMessage: (messageId, updates) =>
-    set((state) => ({
-      session: state.session
-        ? {
-            ...state.session,
-            messages: state.session.messages.map((msg) =>
-              msg.id === messageId ? { ...msg, ...updates } : msg
+      addMessage: (taskId, message) =>
+        set((state) => {
+          const session = state.sessions[taskId];
+          if (!session) return state;
+          return {
+            sessions: {
+              ...state.sessions,
+              [taskId]: {
+                ...session,
+                messages: [...session.messages, message],
+              },
+            },
+          };
+        }),
+
+      updateMessage: (taskId, messageId, updates) =>
+        set((state) => {
+          const session = state.sessions[taskId];
+          if (!session) return state;
+          return {
+            sessions: {
+              ...state.sessions,
+              [taskId]: {
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === messageId ? { ...message, ...updates } : message
+                ),
+              },
+            },
+          };
+        }),
+
+      setStructuredAnswers: (taskId, answers) =>
+        set((state) => ({
+          structuredAnswers: { ...state.structuredAnswers, [taskId]: answers },
+        })),
+
+      upsertStructuredAnswer: (taskId, answer) =>
+        set((state) => {
+          const current = state.structuredAnswers[taskId] ?? [];
+          const exists = current.some((item) => item.questionId === answer.questionId);
+          return {
+            structuredAnswers: {
+              ...state.structuredAnswers,
+              [taskId]: exists
+                ? current.map((item) =>
+                    item.questionId === answer.questionId ? answer : item
+                  )
+                : [...current, answer],
+            },
+          };
+        }),
+
+      addEvent: (taskId, event) =>
+        set((state) => ({
+          events: {
+            ...state.events,
+            [taskId]: [...(state.events[taskId] ?? []), event],
+          },
+        })),
+
+      markEventHandled: (taskId, eventId) =>
+        set((state) => ({
+          events: {
+            ...state.events,
+            [taskId]: (state.events[taskId] ?? []).map((event) =>
+              event.id === eventId ? { ...event, handled: true } : event
             ),
-          }
-        : null,
-    })),
+          },
+        })),
 
-  setStructuredAnswers: (answers) => set({ structuredAnswers: answers }),
+      saveFeedback: (feedback) =>
+        set((state) => ({
+          feedback: { ...state.feedback, [feedback.messageId]: feedback },
+        })),
 
-  updateStructuredAnswer: (questionId, updates) =>
-    set((state) => ({
-      structuredAnswers: state.structuredAnswers.map((answer) =>
-        answer.questionId === questionId ? { ...answer, ...updates } : answer
-      ),
-    })),
+      setStreaming: (taskId) => set({ streamingTaskId: taskId }),
 
-  setStreaming: (isStreaming) => set({ isStreaming }),
+      clearSession: (taskId) =>
+        set((state) => {
+          const sessions = { ...state.sessions };
+          const structuredAnswers = { ...state.structuredAnswers };
+          const events = { ...state.events };
+          delete sessions[taskId];
+          delete structuredAnswers[taskId];
+          delete events[taskId];
+          return { sessions, structuredAnswers, events, streamingTaskId: null };
+        }),
 
-  clearSession: () =>
-    set({
-      session: null,
-      structuredAnswers: [],
-      isStreaming: false,
+      resetDemoData: () => set(initialState),
     }),
-}));
+    {
+      name: 'medical-evaluate-chat-storage',
+    }
+  )
+);

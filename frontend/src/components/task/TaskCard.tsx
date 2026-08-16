@@ -55,6 +55,9 @@ export default function TaskCard({ task, href }: TaskCardProps) {
               <Badge variant={statusInfo.variant} size="sm">
                 {statusInfo.label}
               </Badge>
+              {task.handoffRequired && (
+                <Badge variant="danger" size="sm">需人工介入</Badge>
+              )}
             </div>
             <div className="flex items-center space-x-4 text-sm text-foreground-muted">
               <span>{task.bedNo}</span>

@@ -6,6 +6,7 @@ import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/shared/Card';
 import { useUserStore } from '@/lib/stores/useUserStore';
+import { FaceSmileIcon } from '@heroicons/react/24/outline';
 
 export default function NurseLoginPage() {
   const router = useRouter();
@@ -58,6 +59,7 @@ export default function NurseLoginPage() {
               <Input
                 label="工号"
                 type="text"
+                autoComplete="username"
                 placeholder="请输入工号"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -66,6 +68,7 @@ export default function NurseLoginPage() {
               <Input
                 label="密码"
                 type="password"
+                autoComplete="current-password"
                 placeholder="请输入密码"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -77,9 +80,26 @@ export default function NurseLoginPage() {
             </form>
 
             {/* 快速登录提示 */}
-            <div className="mt-6 p-4 bg-primary-tint rounded-xl">
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setUsername('N001');
+                  setPassword('123456');
+                }}
+              >
+                填充演示账号
+              </Button>
+              <Button type="button" variant="outline" size="sm" disabled>
+                <FaceSmileIcon className="w-4 h-4 mr-1" />
+                人脸识别占位
+              </Button>
+            </div>
+            <div className="mt-4 p-3 bg-primary-tint rounded-xl">
               <p className="text-xs text-foreground-muted text-center">
-                演示模式：输入任意工号密码即可登录
+                演示账号 N001 / 123456；原型不执行真实身份认证
               </p>
             </div>
           </CardContent>

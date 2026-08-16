@@ -8,7 +8,6 @@ import { Badge } from '@/components/shared/Badge';
 import TaskCard from '@/components/task/TaskCard';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
-import { mockTasks } from '@/lib/mock/data';
 import {
   ClipboardDocumentListIcon,
   ClockIcon,
@@ -19,17 +18,14 @@ import {
 export default function NurseDashboardPage() {
   const router = useRouter();
   const { user, isAuthenticated } = useUserStore();
-  const { tasks, setTasks } = useTaskStore();
+  const tasks = useTaskStore((state) => state.tasks);
 
   useEffect(() => {
     if (!isAuthenticated) {
       router.push('/nurse/login');
       return;
     }
-
-    // 加载任务数据
-    setTasks(mockTasks);
-  }, [isAuthenticated, router, setTasks]);
+  }, [isAuthenticated, router]);
 
   if (!isAuthenticated) {
     return null;
@@ -52,7 +48,7 @@ export default function NurseDashboardPage() {
       {/* 欢迎信息 */}
       <div className="mb-8">
         <h1 className="text-3xl font-serif font-medium text-foreground mb-2">
-          早上好，<span className="text-primary italic">{user?.name}</span>
+          您好，<span className="text-primary italic">{user?.name}</span>
         </h1>
         <p className="text-foreground-muted">今天有 {myTasks.length} 项待处理任务</p>
       </div>
