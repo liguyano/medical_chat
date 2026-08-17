@@ -2,7 +2,7 @@
 作用：从 interaction_rule 表加载规则，匹配患者输入，命中则追加约束。
 """
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import DialogMiddleware
 
@@ -32,7 +32,7 @@ class KeywordInterceptMiddleware(DialogMiddleware):
         }
         logger.info("[KeywordInterceptMiddleware] 初始化完成")
 
-    async def before_agent(self, context: Dict[str, Any]) -> None:
+    async def before_agent(self, context: dict[str, Any]) -> None:
         """执行前钩子：检测关键词并注入约束
         Args:
             - context: 上下文字典，包含 patient_input、constraints 等
@@ -43,9 +43,19 @@ class KeywordInterceptMiddleware(DialogMiddleware):
 
         # TODO: 从 interaction_rule 表加载规则（批次B）
         # 当前使用内置关键词库
-        matched_constraints = []
+        negative_phrases = {
+            "抽烟": ("不抽烟", "从不抽烟", "已经戒烟"),
+            "吸烟": ("不吸烟", "从不吸烟", "已经戒烟"),
+            "喝酒": ("不喝酒", "从不喝酒", "已经戒酒"),
+            "饮酒": ("不饮酒", "从不饮酒", "已经戒酒"),
+            "手术": ("不做手术", "无需手术"),
+        }
+        matched_constraints: list[str] = []
         for keyword, constraint in self.builtin_keywords.items():
-            if keyword in patient_input:
+            negatives = negative_phrases.get(keyword, ())
+            if keyword in patient_input and not any(
+                phrase in patient_input for phrase in negatives
+            ):
                 matched_constraints.append(constraint)
                 logger.info(
                     f"[KeywordInterceptMiddleware] 命中关键词: {keyword} "
@@ -56,12 +66,16 @@ class KeywordInterceptMiddleware(DialogMiddleware):
             # 追加到 context.constraints 列表
             if "constraints" not in context:
                 context["constraints"] = []
-            context["constraints"].extend(matched_constraints)
+            existing = context["constraints"]
+            existing.extend(
+                constraint
+                for constraint in matched_constraints
+                if constraint not in existing
+            )
 
-    async def after_agent(self, context: Dict[str, Any], output: Any) -> None:
+    async def after_agent(self, context: dict[str, Any], output: Any) -> None:
         """执行后钩子：关键词拦截无需 after 处理
         Args:
             - context: 上下文字典
             - output: 智能体输出
         """
-        pass
