@@ -170,11 +170,69 @@ def _create_interaction_session(db: Session, task: CareTask, scale_ids: list[int
     db.commit()
     db.refresh(session)
 
-    # 派发四个后台 worker（第一期占位，#26 实现）
-    # TODO: 派发 preheat + dialog_agent_worker + schedule_agent_worker + extraction_agent_worker
-    logger.info(f"预建交互会话: session_no={session_no} task_no={task.task_no}")
+    # 派发四个后台 worker
+    _dispatch_ai_dialog_workers(task, session_no, scale_ids)
+    logger.info(f"预建交互会话并派发worker: session_no={session_no} task_no={task.task_no}")
 
     return session_no
+
+
+def _dispatch_ai_dialog_workers(task: CareTask, session_no: str, scale_ids: list[int]) -> None:
+    """派发 AI 对话四个后台 worker
+    作用：派发 preheat + dialog_agent_worker + schedule_agent_worker + extraction_agent_worker
+    Args:
+        - task: 关联任务
+        - session_no: 会话编号
+        - scale_ids: 量表 ID 列表
+    """
+    from app.celery_app.tasks import (
+        dialog_agent_preheat,
+        dialog_agent_worker,
+        extraction_agent_worker,
+        schedule_agent_worker,
+    )
+    from app.models.assessment_template import AssessmentScale
+    from app.models.base import SessionLocal
+
+    # 查询 scale_codes（从 scale_ids）
+    with SessionLocal() as db:
+        scales = db.execute(
+            select(AssessmentScale.scale_code).where(AssessmentScale.id.in_(scale_ids))
+        ).scalars().all()
+        scale_codes = list(scales)
+
+    if not scale_codes:
+        logger.warning(f"未找到量表编码: scale_ids={scale_ids}")
+        return
+
+    # 构造患者信息（简化版，从 task 获取）
+    patient_info = {
+        "patient_id": task.patient_id,
+        "encounter_id": task.encounter_id,
+        "participant_type": task.participant_type or "patient",
+    }
+
+    # 公共配置
+    task_config = {
+        "scale_codes": scale_codes,
+        "check_interval": 5,
+    }
+
+    # 1. Dialog Agent Preheat（预热，初始化状态）
+    dialog_agent_preheat.delay(session_no, patient_info, task_config)
+    logger.info(f"派发 dialog_agent_preheat: session={session_no}")
+
+    # 2. Dialog Agent Worker（主导问诊循环）
+    dialog_agent_worker.delay(session_no, patient_info, task_config)
+    logger.info(f"派发 dialog_agent_worker: session={session_no}")
+
+    # 3. Schedule Agent Worker（约束检查与追加）
+    schedule_agent_worker.delay(session_no, task_config)
+    logger.info(f"派发 schedule_agent_worker: session={session_no}")
+
+    # 4. Extraction Agent Worker（字段抽取与写库）
+    extraction_agent_worker.delay(session_no, task_config)
+    logger.info(f"派发 extraction_agent_worker: session={session_no}")
 
 
 def get_task(db: Session, task_no: str) -> BackendTaskDto:
