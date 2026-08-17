@@ -1,8 +1,8 @@
 """数据库模型基础设施
 作用：定义 SQLAlchemy 2.0 声明基类、统一业务字段和数据库会话。
 """
-from datetime import datetime
-from typing import Generator, Optional
+from collections.abc import Generator
+from datetime import UTC, datetime
 
 from sqlalchemy import BigInteger, DateTime, Integer, String, create_engine, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -18,20 +18,20 @@ class BusinessBaseMixin:
     """
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    creator: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="创建人账号或系统标识")
-    updator: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="最后更新人账号或系统标识")
+    creator: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="创建人账号或系统标识")
+    updator: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="最后更新人账号或系统标识")
     create_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.now,
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
         comment="创建时间",
     )
     update_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.now,
-        onupdate=datetime.now,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         server_default=func.now(),
         comment="更新时间",
     )
@@ -45,7 +45,7 @@ class BusinessBaseMixin:
 
 
 engine = None
-SessionLocal: Optional[sessionmaker[Session]] = None
+SessionLocal: sessionmaker[Session] | None = None
 
 
 def init_db(

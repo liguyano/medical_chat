@@ -3,9 +3,21 @@
 """
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, Time, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,19 +57,19 @@ class AssessmentInstance(BusinessBaseMixin, Base):
     )
     assessment_scene: Mapped[str] = mapped_column(String(32), nullable=False)
     instance_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    assessed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    assessor_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    assessor_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assessor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    assessor_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     patient_name_snapshot: Mapped[str] = mapped_column(String(128), nullable=False)
-    sex_snapshot: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    age_snapshot: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    department_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    ward_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    bed_no_snapshot: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    inpatient_no_snapshot: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    diagnosis_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    sex_snapshot: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    age_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    department_name_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ward_name_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    bed_no_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    inpatient_no_snapshot: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    diagnosis_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     form_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
     __table_args__ = (
@@ -80,20 +92,20 @@ class AssessmentSubmission(BusinessBaseMixin, Base):
     )
     submission_type: Mapped[str] = mapped_column(String(32), nullable=False)
     submitter_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    submitter_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    interaction_session_id: Mapped[Optional[int]] = mapped_column(
+    submitter_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    interaction_session_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("interaction_session.id", ondelete="SET NULL"),
         nullable=True,
     )
     submission_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    total_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
-    risk_level: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    result_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    confidence_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 6), nullable=True)
+    total_score: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    risk_level: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(7, 6), nullable=True)
     total_question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     answered_question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("idx_submission_instance_type", "assessment_instance_id", "submission_type", "deleted"),
@@ -118,19 +130,19 @@ class AssessmentAnswer(BusinessBaseMixin, Base):
         nullable=False,
     )
     answer_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    answer_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    answer_number: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
-    answer_boolean: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    answer_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    answer_time: Mapped[Optional[time]] = mapped_column(Time(timezone=True), nullable=True)
-    answer_datetime: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    answer_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    clinical_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
-    source_message_ids: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
-    extraction_confidence: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 6), nullable=True)
+    answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    answer_number: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    answer_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    answer_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    answer_time: Mapped[time | None] = mapped_column(Time(timezone=True), nullable=True)
+    answer_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    answer_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    clinical_score: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    source_message_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    extraction_confidence: Mapped[Decimal | None] = mapped_column(Numeric(7, 6), nullable=True)
     value_source: Mapped[str] = mapped_column(String(32), nullable=False)
     abnormal_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    risk_tags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    risk_tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("submission_id", "question_id", name="uq_answer_submission_question"),
@@ -156,10 +168,10 @@ class AssessmentAnswerOption(BusinessBaseMixin, Base):
     )
     option_code_snapshot: Mapped[str] = mapped_column(String(64), nullable=False)
     option_label_snapshot: Mapped[str] = mapped_column(String(256), nullable=False)
-    clinical_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
-    extra_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    extra_number: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
-    extra_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    clinical_score: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    extra_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra_number: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    extra_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     selected_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
@@ -181,11 +193,11 @@ class AssessmentScore(BusinessBaseMixin, Base):
     score_code: Mapped[str] = mapped_column(String(64), nullable=False)
     score_name: Mapped[str] = mapped_column(String(128), nullable=False)
     score_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    score_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
-    max_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
-    risk_level: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    interpretation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    calculation_detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    score_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    max_score: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    risk_level: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    interpretation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    calculation_detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("submission_id", "score_code", name="uq_submission_score_code"),
@@ -204,26 +216,26 @@ class AssessmentReview(BusinessBaseMixin, Base):
         ForeignKey("assessment_instance.id", ondelete="CASCADE"),
         nullable=False,
     )
-    ai_submission_id: Mapped[Optional[int]] = mapped_column(
+    ai_submission_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_submission.id", ondelete="RESTRICT"),
         nullable=True,
     )
-    nurse_submission_id: Mapped[Optional[int]] = mapped_column(
+    nurse_submission_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_submission.id", ondelete="RESTRICT"),
         nullable=True,
     )
-    final_submission_id: Mapped[Optional[int]] = mapped_column(
+    final_submission_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_submission.id", ondelete="RESTRICT"),
         nullable=True,
     )
     reviewer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     review_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    supplementary_inquiry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    correction_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    supplementary_inquiry: Mapped[str | None] = mapped_column(Text, nullable=True)
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("idx_assessment_review_instance", "assessment_instance_id", "deleted"),

@@ -2,7 +2,7 @@
 name = "medical-evaluate-backend"
 version = "0.1.0"
 description = "医疗评估系统后端服务"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",

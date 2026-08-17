@@ -2,9 +2,17 @@
 作用：定义患者、住院记录和护理任务三张核心业务表。
 """
 from datetime import date, datetime
-from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,12 +25,12 @@ class Patient(BusinessBaseMixin, Base):
     __tablename__ = "patient"
 
     patient_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="系统患者唯一编号")
-    his_patient_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True, comment="HIS患者主索引")
+    his_patient_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True, comment="HIS患者主索引")
     patient_name: Mapped[str] = mapped_column(String(128), nullable=False, comment="患者姓名")
-    sex: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, comment="性别")
-    birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True, comment="出生日期")
-    phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="联系方式")
-    id_card_ciphertext: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="加密后的身份证号")
+    sex: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="性别")
+    birthday: Mapped[date | None] = mapped_column(Date, nullable=True, comment="出生日期")
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="联系方式")
+    id_card_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True, comment="加密后的身份证号")
 
     __table_args__ = (
         Index("idx_patient_name", "patient_name"),
@@ -42,14 +50,14 @@ class PatientEncounter(BusinessBaseMixin, Base):
         nullable=False,
         comment="患者ID",
     )
-    inpatient_no: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True, comment="医院住院号")
-    department_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="科室编码")
-    department_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, comment="科室名称快照")
-    ward_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, comment="病区")
-    bed_no: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, comment="床号")
+    inpatient_no: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True, comment="医院住院号")
+    department_code: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="科室编码")
+    department_name: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="科室名称快照")
+    ward_name: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="病区")
+    bed_no: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="床号")
     admission_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="入院时间")
-    discharge_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, comment="出院时间")
-    diagnosis_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="诊断快照")
+    discharge_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="出院时间")
+    diagnosis_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="诊断快照")
     encounter_status: Mapped[str] = mapped_column(String(32), nullable=False, comment="住院状态")
 
     __table_args__ = (
@@ -76,7 +84,7 @@ class CareTask(BusinessBaseMixin, Base):
         nullable=False,
         comment="住院记录ID",
     )
-    parent_task_id: Mapped[Optional[int]] = mapped_column(
+    parent_task_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("care_task.id", ondelete="RESTRICT"),
         nullable=True,
@@ -85,18 +93,18 @@ class CareTask(BusinessBaseMixin, Base):
     task_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="任务类型")
     task_name: Mapped[str] = mapped_column(String(128), nullable=False, comment="任务名称")
     task_source: Mapped[str] = mapped_column(String(32), nullable=False, comment="任务来源")
-    collection_mode: Mapped[Optional[str]] = mapped_column(
+    collection_mode: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
         comment="采集模式：traditional_form或ai_dialogue；子任务从父任务继承",
     )
     task_status: Mapped[str] = mapped_column(String(32), nullable=False, comment="任务状态")
-    assigned_nurse_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, comment="负责护士ID")
-    planned_start_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    assigned_nurse_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="负责护士ID")
+    planned_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     need_manual_intervention: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    intervention_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    intervention_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("idx_care_task_patient", "patient_id", "deleted"),

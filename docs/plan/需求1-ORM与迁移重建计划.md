@@ -87,6 +87,21 @@ Codex 审查发现：`backend/app/models/*` 的 ORM 与 `backend/alembic/version
 - [X] 提交（遵守 Git 规范前缀 `refactor(backend-db)`）
 - [X] 输出需测试的代码位置 + 测试描述，移交 GPT（按既定分工，我不写测试代码）
 
+### 步骤 7：自动化测试（用户于 2026-08-17 追加授权）
+- [X] ORM 元数据与关键约束单元测试（不连接外部服务）
+- [X] PostgreSQL 领域链路 CRUD 集成测试（外层事务回滚，不污染开发数据）
+- [X] `DialogHistoryManager` 保存、查询、排序、格式化、逻辑删除集成测试
+- [X] Alembic 临时数据库 upgrade/downgrade 可逆性测试
+- [X] 补充 `unit-test/Readme.md` 与 `integ-test/Readme.md`
+- [X] 执行测试、修复缺陷并提交
+
+测试结果（2026-08-17）：
+
+- 完整单元测试与领域持久化集成测试：21 项通过。
+- Alembic 独立临时数据库迁移测试：1 项通过，临时数据库已自动删除。
+- `alembic current` 为 `26533d4669bd (head)`，`alembic check` 无模型差异。
+- 批次 A 新增 ORM、迁移、管理器与测试文件通过 Ruff 静态检查。
+
 ## 已确认的执行决策
 
 - **D1｜重建范围**：批次 A（需求1直接依赖约 22 张表）。

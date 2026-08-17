@@ -2,9 +2,18 @@
 作用：定义交互会话、消息、事件、规则、话术和逐轮反馈。
 """
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,16 +44,16 @@ class InteractionSession(BusinessBaseMixin, Base):
     participant_type: Mapped[str] = mapped_column(String(32), nullable=False)
     interaction_type: Mapped[str] = mapped_column(String(32), nullable=False)
     channel_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    model_provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    model_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    script_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    script_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     session_status: Mapped[str] = mapped_column(String(32), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     handoff_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ai_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    handoff_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("idx_interaction_session_task", "task_id", "deleted"),
@@ -64,7 +73,7 @@ class InteractionMessage(BusinessBaseMixin, Base):
         nullable=False,
     )
     message_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    parent_message_id: Mapped[Optional[int]] = mapped_column(
+    parent_message_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("interaction_message.id", ondelete="SET NULL"),
         nullable=True,
@@ -72,20 +81,20 @@ class InteractionMessage(BusinessBaseMixin, Base):
     turn_no: Mapped[int] = mapped_column(Integer, nullable=False)
     role_type: Mapped[str] = mapped_column(String(32), nullable=False)
     message_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    cicare_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    intent_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    content_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    audio_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    asr_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tts_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    related_question_id: Mapped[Optional[int]] = mapped_column(
+    cicare_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    intent_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audio_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    asr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tts_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    related_question_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_question.id", ondelete="SET NULL"),
         nullable=True,
     )
     # 知情同意与宣教域属于批次 B；先保留可追溯 ID，后续迁移再补外键。
-    related_clause_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    related_material_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    related_clause_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    related_material_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
@@ -103,7 +112,7 @@ class InteractionRule(BusinessBaseMixin, Base):
     rule_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     rule_name: Mapped[str] = mapped_column(String(128), nullable=False)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    scope_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    scope_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     trigger_condition: Mapped[dict] = mapped_column(JSONB, nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     action_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -123,21 +132,21 @@ class InteractionEvent(BusinessBaseMixin, Base):
         ForeignKey("interaction_session.id", ondelete="CASCADE"),
         nullable=False,
     )
-    message_id: Mapped[Optional[int]] = mapped_column(
+    message_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("interaction_message.id", ondelete="SET NULL"),
         nullable=True,
     )
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    rule_id: Mapped[Optional[int]] = mapped_column(
+    rule_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("interaction_rule.id", ondelete="SET NULL"),
         nullable=True,
     )
     event_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     handled_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    handled_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    handled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    handled_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("idx_interaction_event_session", "interaction_session_id", "deleted"),
@@ -152,7 +161,7 @@ class DialogueScript(BusinessBaseMixin, Base):
 
     script_code: Mapped[str] = mapped_column(String(64), nullable=False)
     script_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    cicare_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    cicare_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
     audience_type: Mapped[str] = mapped_column(String(32), nullable=False)
     language_code: Mapped[str] = mapped_column(String(16), nullable=False, default="zh-CN")
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -182,8 +191,8 @@ class InteractionMessageFeedback(BusinessBaseMixin, Base):
     turn_no: Mapped[int] = mapped_column(Integer, nullable=False)
     reviewer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     feedback_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    issue_tags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (

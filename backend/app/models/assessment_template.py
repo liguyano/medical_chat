@@ -3,9 +3,19 @@
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,9 +30,9 @@ class AssessmentScale(BusinessBaseMixin, Base):
     scale_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     scale_name: Mapped[str] = mapped_column(String(128), nullable=False)
     scale_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    clinical_purpose: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    applicable_scope: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    source_file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    clinical_purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applicable_scope: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
 
     __table_args__ = (Index("idx_assessment_scale_status", "status", "deleted"),)
@@ -41,8 +51,8 @@ class AssessmentScaleVersion(BusinessBaseMixin, Base):
     version_code: Mapped[str] = mapped_column(String(64), nullable=False)
     version_name: Mapped[str] = mapped_column(String(128), nullable=False)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    effective_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    expire_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expire_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scale_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
 
@@ -62,15 +72,15 @@ class AssessmentSection(BusinessBaseMixin, Base):
         ForeignKey("assessment_scale_version.id", ondelete="CASCADE"),
         nullable=False,
     )
-    parent_section_id: Mapped[Optional[int]] = mapped_column(
+    parent_section_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_section.id", ondelete="RESTRICT"),
         nullable=True,
     )
     section_code: Mapped[str] = mapped_column(String(64), nullable=False)
     section_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    section_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    display_condition: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    section_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_condition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     sort_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
@@ -89,7 +99,7 @@ class AssessmentQuestion(BusinessBaseMixin, Base):
         ForeignKey("assessment_scale_version.id", ondelete="CASCADE"),
         nullable=False,
     )
-    section_id: Mapped[Optional[int]] = mapped_column(
+    section_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_section.id", ondelete="RESTRICT"),
         nullable=True,
@@ -98,17 +108,17 @@ class AssessmentQuestion(BusinessBaseMixin, Base):
     question_name: Mapped[str] = mapped_column(String(256), nullable=False)
     original_text: Mapped[str] = mapped_column(Text, nullable=False)
     patient_text: Mapped[str] = mapped_column(Text, nullable=False)
-    nurse_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    nurse_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     question_type: Mapped[str] = mapped_column(String(32), nullable=False)
     value_type: Mapped[str] = mapped_column(String(32), nullable=False)
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     scored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    value_precision: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    value_precision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     allow_other: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     derived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    calculation_expression: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    validation_rule: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    calculation_expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validation_rule: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     sort_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
@@ -131,11 +141,11 @@ class AssessmentOption(BusinessBaseMixin, Base):
     option_code: Mapped[str] = mapped_column(String(64), nullable=False)
     option_label: Mapped[str] = mapped_column(String(256), nullable=False)
     option_value: Mapped[str] = mapped_column(String(256), nullable=False)
-    clinical_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
-    risk_tag: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    clinical_score: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    risk_tag: Mapped[str | None] = mapped_column(String(64), nullable=True)
     requires_follow_up: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    extra_input_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    extra_input_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    extra_input_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    extra_input_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sort_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
@@ -178,12 +188,12 @@ class AssessmentActionDefinition(BusinessBaseMixin, Base):
         nullable=False,
     )
     action_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    action_group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    action_group: Mapped[str | None] = mapped_column(String(64), nullable=True)
     action_name: Mapped[str] = mapped_column(String(256), nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     input_type: Mapped[str] = mapped_column(String(32), nullable=False)
     allow_other: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    trigger_rule_id: Mapped[Optional[int]] = mapped_column(
+    trigger_rule_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("assessment_rule.id", ondelete="SET NULL"),
         nullable=True,

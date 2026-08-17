@@ -2,8 +2,7 @@
 作用：基于 interaction_session / interaction_message 保存、查询和格式化对话消息。
 """
 import logging
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import func, select, update
@@ -20,7 +19,7 @@ class DialogHistoryManager:
     作用：提供消息级 CRUD、分页查询和 LangChain 消息格式转换。
     """
 
-    def __init__(self, session_factory: Optional[sessionmaker[Session]] = None):
+    def __init__(self, session_factory: sessionmaker[Session] | None = None):
         """初始化管理器
         Args:
             - session_factory: 可选会话工厂；为空时使用 init_db() 初始化的全局工厂
@@ -54,19 +53,19 @@ class DialogHistoryManager:
         turn_no: int,
         role_type: str,
         message_type: str,
-        content_text: Optional[str] = None,
-        message_no: Optional[str] = None,
-        parent_message_id: Optional[int] = None,
-        cicare_stage: Optional[str] = None,
-        intent_type: Optional[str] = None,
-        audio_url: Optional[str] = None,
-        asr_text: Optional[str] = None,
-        tts_text: Optional[str] = None,
-        related_question_id: Optional[int] = None,
-        related_clause_id: Optional[int] = None,
-        related_material_id: Optional[int] = None,
-        occurred_at: Optional[datetime] = None,
-        creator: Optional[str] = None,
+        content_text: str | None = None,
+        message_no: str | None = None,
+        parent_message_id: int | None = None,
+        cicare_stage: str | None = None,
+        intent_type: str | None = None,
+        audio_url: str | None = None,
+        asr_text: str | None = None,
+        tts_text: str | None = None,
+        related_question_id: int | None = None,
+        related_clause_id: int | None = None,
+        related_material_id: int | None = None,
+        occurred_at: datetime | None = None,
+        creator: str | None = None,
     ) -> InteractionMessage:
         """保存一条交互消息。"""
         with self._new_session() as db:
@@ -88,7 +87,7 @@ class DialogHistoryManager:
                     related_question_id=related_question_id,
                     related_clause_id=related_clause_id,
                     related_material_id=related_material_id,
-                    occurred_at=occurred_at or datetime.now(),
+                    occurred_at=occurred_at or datetime.now(UTC),
                     creator=creator,
                     updator=creator,
                 )
@@ -106,7 +105,7 @@ class DialogHistoryManager:
         self,
         session_no: str,
         *,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
     ) -> list[InteractionMessage]:
         """按发生时间正序分页查询对话历史。"""
@@ -193,7 +192,7 @@ class DialogHistoryManager:
                 or 0
             )
 
-    async def delete_session_history(self, session_no: str, *, updator: Optional[str] = None) -> int:
+    async def delete_session_history(self, session_no: str, *, updator: str | None = None) -> int:
         """逻辑删除会话历史，禁止物理删除临床数据。"""
         with self._new_session() as db:
             try:
@@ -204,7 +203,7 @@ class DialogHistoryManager:
                         InteractionMessage.interaction_session_id == session_id,
                         InteractionMessage.deleted == 0,
                     )
-                    .values(deleted=1, updator=updator, update_time=datetime.now())
+                    .values(deleted=1, updator=updator, update_time=datetime.now(UTC))
                 )
                 db.commit()
                 return int(result.rowcount or 0)
