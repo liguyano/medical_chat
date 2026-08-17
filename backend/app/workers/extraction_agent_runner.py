@@ -84,11 +84,8 @@ class ExtractionAgentRunner:
             )
             return {"status": "failed", "reason": "no_questions_loaded"}
 
-        # 构建 scale_version 信息（简化处理）
-        scale_version = {
-            "scale_name": "入院评估量表",  # TODO: 从数据库读取
-            "version_code": "v1.0",
-        }
+        # 构建 scale_version 信息（从数据库读取真实版本）
+        scale_version = await self._get_scale_version_dict(scale_codes)
 
         # 创建 Agent
         agent = create_extraction_agent(
@@ -103,10 +100,11 @@ class ExtractionAgentRunner:
         # 摘要缓存键
         summary_cache_key = f"dialog_summary:{session_id}"
 
-        # 获取提交记录ID（假设已由 API 创建 assessment_instance）
-        # TODO: 从数据库查询 assessment_instance_id 和 interaction_session_id
-        assessment_instance_id = 1  # 占位
-        interaction_session_id = 1  # 占位
+        # 获取提交记录ID（从数据库查询真实关联）
+        assessment_instance_id = await self._get_assessment_instance_id(
+            session_id, scale_codes
+        )
+        interaction_session_id = await self._get_interaction_session_id(session_id)
 
         submission_id = None
         total_extracted = 0
@@ -130,17 +128,22 @@ class ExtractionAgentRunner:
                     # 超时无新消息，继续等待
                     continue
 
-                # 解析事件
+                # 解析事件（Redis Stream 字段是 FLAT 的，需逐字段解码）
                 for stream, msg_list in messages:
                     for msg_id, msg_data in msg_list:
-                        event = json.loads(msg_data[b"data"].decode("utf-8"))
+                        from app.workers.schedule_agent_runner import decode_stream_fields
 
-                        if event.get("event_type") != "dialog_turn":
+                        fields = decode_stream_fields(
+                            msg_data, json_fields={"metadata"}
+                        )
+                        event_type = fields.get("event_type")
+
+                        if event_type != "dialog_turn":
                             # 忽略非对话轮次事件
                             continue
 
                         logger.info(
-                            f"[Extraction Runner] 收到对话事件: turn={event.get('turn_number')}"
+                            f"[Extraction Runner] 收到对话事件: turn={fields.get('turn_number')}"
                         )
 
                         # 1. 读取历史抽取字段
@@ -166,9 +169,9 @@ class ExtractionAgentRunner:
                         # 3. 获取新对话
                         new_dialog = [
                             {
-                                "turn": event.get("turn_number"),
-                                "patient": event.get("question", ""),
-                                "ai": event.get("answer", ""),
+                                "turn": fields.get("turn_number"),
+                                "patient": fields.get("question", ""),
+                                "ai": fields.get("answer", ""),
                             }
                         ]
 
@@ -205,16 +208,20 @@ class ExtractionAgentRunner:
 
                         # TODO: upsert_answer_options（单选/多选题）
 
+                        # 查询真实 scale_version_id
+                        scale_version_id = await self._get_scale_version_id(
+                            assessment_instance_id
+                        )
                         await writer.calculate_scores(
                             submission_id=submission_id,
-                            scale_version_id=1,  # 占位
+                            scale_version_id=scale_version_id,
                         )
 
                         total_extracted = submission.answered_question_count
 
                         # 6. 更新摘要缓存（追加当前轮）
                         # 简化处理：每 5 轮重新生成摘要
-                        if event.get("turn_number", 0) % 5 == 0:
+                        if fields.get("turn_number", 0) % 5 == 0:
                             self.redis_client.delete(summary_cache_key)
 
                         # 7. 发布 ExtractionResultEvent
@@ -258,3 +265,129 @@ class ExtractionAgentRunner:
             "session_id": session_id,
             "total_extracted": total_extracted,
         }
+
+    async def _get_interaction_session_id(self, session_id: str) -> int:
+        """查询 interaction_session 真实 ID
+        Args:
+            - session_id: 会话编号（session_no）
+        Return:
+            - interaction_session.id
+        Raises:
+            - RuntimeError: 会话不存在
+        """
+        from app.models.base import SessionLocal
+        from app.models.interaction import InteractionSession
+        from sqlalchemy import select
+
+        with SessionLocal() as db:
+            session = db.scalar(
+                select(InteractionSession).where(
+                    InteractionSession.session_no == session_id
+                )
+            )
+            if not session:
+                raise RuntimeError(f"InteractionSession 不存在: session_no={session_id}")
+            return session.id
+
+    async def _get_assessment_instance_id(
+        self, session_id: str, scale_codes: list[str]
+    ) -> int:
+        """查询 assessment_instance 真实 ID
+        Args:
+            - session_id: 会话编号
+            - scale_codes: 量表编码列表
+        Return:
+            - assessment_instance.id（取第一个匹配的实例）
+        Raises:
+            - RuntimeError: 实例不存在
+        """
+        from app.models.assessment_execution import AssessmentInstance
+        from app.models.base import SessionLocal
+        from app.models.interaction import InteractionSession
+        from sqlalchemy import select
+
+        with SessionLocal() as db:
+            # 通过 session_no 找 task_id
+            session = db.scalar(
+                select(InteractionSession).where(
+                    InteractionSession.session_no == session_id
+                )
+            )
+            if not session or not session.task_id:
+                raise RuntimeError(
+                    f"无法从会话获取 task_id: session_no={session_id}"
+                )
+
+            # 查 task 关联的 assessment_instance（第一期简化：取第一个）
+            instance = db.scalar(
+                select(AssessmentInstance)
+                .where(AssessmentInstance.task_id == session.task_id)
+                .limit(1)
+            )
+            if not instance:
+                raise RuntimeError(
+                    f"AssessmentInstance 不存在: task_id={session.task_id}"
+                )
+            return instance.id
+
+    async def _get_scale_version_id(self, assessment_instance_id: int) -> int:
+        """查询 assessment_instance 关联的 scale_version_id
+        Args:
+            - assessment_instance_id: 评估实例 ID
+        Return:
+            - scale_version_id
+        Raises:
+            - RuntimeError: 实例或版本不存在
+        """
+        from app.models.assessment_execution import AssessmentInstance
+        from app.models.base import SessionLocal
+        from sqlalchemy import select
+
+        with SessionLocal() as db:
+            instance = db.scalar(
+                select(AssessmentInstance).where(
+                    AssessmentInstance.id == assessment_instance_id
+                )
+            )
+            if not instance or not instance.scale_version_id:
+                raise RuntimeError(
+                    f"无法获取 scale_version_id: assessment_instance_id={assessment_instance_id}"
+                )
+            return instance.scale_version_id
+
+    async def _get_scale_version_dict(self, scale_codes: list[str]) -> dict[str, str]:
+        """查询量表版本字典（供 extraction agent prompt 使用）
+        Args:
+            - scale_codes: 量表编码列表
+        Return:
+            - {scale_name, version_code}（第一期简化：取第一个 scale 的已发布版本）
+        """
+        from app.models.assessment_template import AssessmentScale, AssessmentScaleVersion
+        from app.models.base import SessionLocal
+        from sqlalchemy import select
+
+        with SessionLocal() as db:
+            scale = db.scalar(
+                select(AssessmentScale).where(
+                    AssessmentScale.scale_code.in_(scale_codes)
+                )
+            )
+            if not scale:
+                return {"scale_name": "入院评估量表", "version_code": "v1.0"}
+
+            version = db.scalar(
+                select(AssessmentScaleVersion)
+                .where(
+                    AssessmentScaleVersion.scale_id == scale.id,
+                    AssessmentScaleVersion.publish_status == "已发布",
+                )
+                .order_by(AssessmentScaleVersion.effective_time.desc())
+                .limit(1)
+            )
+            if not version:
+                return {"scale_name": scale.scale_name, "version_code": "v1.0"}
+
+            return {
+                "scale_name": scale.scale_name,
+                "version_code": version.version_code,
+            }

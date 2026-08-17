@@ -39,8 +39,12 @@ class SendMessageRequest(BaseModel):
     作用：承载患者一轮输入，支持文本与 Base64 音频。
     """
 
-    content_text: str | None = Field(default=None, description="患者文本内容")
-    audio_base64: str | None = Field(default=None, description="Base64 编码的音频")
+    session_id: str = Field(..., description="会话编号")
+    task_id: str = Field(..., description="任务编号")
+    content: str = Field(..., description="患者文本内容")
+    client_message_id: str = Field(..., description="客户端消息唯一标识")
+    input_mode: str = Field(default="text", description="输入模式：text | voice")
+    audio_base64: str | None = Field(default=None, description="Base64 编码的音频（语音模式）")
     audio_format: str = Field(default="pcm", description="音频格式：pcm | opus | mp3")
     message_type: str = Field(default="text", description="消息类型：text | audio")
 
@@ -68,8 +72,14 @@ class MessageItem(BaseModel):
 
 
 class DialogHistoryResponse(BaseModel):
-    """对话历史响应"""
+    """对话历史响应（对齐前端 DialogHistoryResponse 契约）"""
 
-    session_no: str = Field(..., description="会话编号")
+    session_id: str = Field(..., description="会话编号")
+    task_id: str = Field(..., description="任务编号")
+    session_status: str | None = Field(default=None, description="会话状态")
+    current_cicare_stage: str | None = Field(default=None, description="当前CICARE阶段")
+    answered_question_count: int | None = Field(default=None, description="已回答题目数")
+    total_question_count: int | None = Field(default=None, description="总题目数")
+    ai_summary: str | None = Field(default=None, description="AI总结")
     total: int = Field(..., description="消息总数")
     messages: list[MessageItem] = Field(default_factory=list, description="消息列表")

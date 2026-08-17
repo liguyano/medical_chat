@@ -24,7 +24,7 @@ from app.schemas.dialog import (
     SendMessageResponse,
     StartDialogRequest,
 )
-from app.schemas.events import ConstraintEvent, DialogTurnEvent
+from app.schemas.events import ConstraintEvent, PatientAnswerEvent
 from app.workers.event_publisher import DialogEventPublisher
 
 logger = logging.getLogger(__name__)
@@ -155,27 +155,26 @@ def _next_turn_no(db: Session, interaction_session_id: int) -> int:
 
 
 async def send_message(
-    db: Session, session_no: str, req: SendMessageRequest
+    db: Session, req: SendMessageRequest
 ) -> SendMessageResponse:
-    """发送患者消息
+    """发送患者消息（统一入口）
     作用：加会话锁防并发 -> 落库患者消息 -> 关键词拦截并发约束事件 -> 发布 DialogTurnEvent。
           不同步调用模型；AI 回复由 Dialog Agent 消费事件后异步产出。
     Args:
         - db: 数据库会话
-        - session_no: 会话编号
-        - req: 发送消息请求
+        - req: 发送消息请求（包含 session_id/task_id/content/client_message_id/input_mode）
     Return:
         - SendMessageResponse: 落库消息编号、轮次与是否命中拦截
     """
     from app.utils.redis_client import get_async_redis
 
-    session = _load_active_session(db, session_no)
+    session = _load_active_session(db, req.session_id)
 
-    if not req.content_text and not req.audio_base64:
-        raise AppError(ErrorCode.ERR_COMMON_001, "content_text 与 audio_base64 不能同时为空")
+    if not req.content:
+        raise AppError(ErrorCode.ERR_COMMON_001, "content 不能为空")
 
     redis = get_async_redis()
-    lock_key = f"dialog_lock:{session_no}"
+    lock_key = f"dialog_lock:{req.session_id}"
     lock_token = uuid.uuid4().hex
 
     # 获取会话锁，防止同一会话并发处理消息
@@ -193,8 +192,8 @@ async def send_message(
             message_no=message_no,
             turn_no=turn_no,
             role_type="患者",
-            message_type=req.message_type,
-            content_text=req.content_text,
+            message_type="text" if req.input_mode == "text" else "audio",
+            content_text=req.content,
             audio_url=None,
             occurred_at=datetime.now(UTC),
             creator="patient",
@@ -203,32 +202,33 @@ async def send_message(
         db.commit()
 
         # 关键词拦截（步骤7）
-        matches = get_keyword_matcher().match(req.content_text)
+        matches = get_keyword_matcher().match(req.content)
         intercepted = bool(matches)
 
-        publisher = DialogEventPublisher(session_id=session_no)
+        publisher = DialogEventPublisher(session_id=req.session_id)
 
-        # 发布对话轮次事件，交由 Dialog Agent 异步生成回复
+        # 发布患者答案事件（供 Dialog/Schedule/Extraction 三 Agent 消费）
         publisher.publish(
-            DialogTurnEvent(
-                session_id=session_no,
+            PatientAnswerEvent(
+                session_id=req.session_id,
                 turn_number=turn_no,
-                question=req.content_text or "",
-                answer="",
-                metadata={"message_no": message_no, "intercepted": intercepted},
+                role="user",
+                content=req.content,
+                client_message_id=req.client_message_id,
+                input_mode=req.input_mode,
             )
         )
 
         # 命中关键词则追加约束事件，供 Agent 注入下一轮约束提示
         if intercepted:
-            _publish_constraint(publisher, session_no, matches)
+            _publish_constraint(publisher, req.session_id, matches)
 
         logger.info(
-            f"患者消息处理完成: session_no={session_no} turn={turn_no} "
+            f"患者消息处理完成: session_id={req.session_id} turn={turn_no} "
             f"intercepted={intercepted} matched={[m.rule_code for m in matches]}"
         )
         return SendMessageResponse(
-            session_no=session_no,
+            session_no=req.session_id,
             message_no=message_no,
             turn_no=turn_no,
             intercepted=intercepted,
@@ -263,11 +263,15 @@ def _publish_constraint(
     logger.info(f"关键词约束事件已发布: session_no={session_no} 命中 {len(matches)} 条规则")
 
 
-async def get_history(db: Session, session_no: str) -> DialogHistoryResponse:
+async def get_history(
+    db: Session, session_no: str, limit: int = 100, offset: int = 0
+) -> DialogHistoryResponse:
     """获取对话历史
     Args:
         - db: 数据库会话
         - session_no: 会话编号
+        - limit: 返回消息数量上限（默认100）
+        - offset: 偏移量（默认0）
     Return:
         - DialogHistoryResponse: 会话历史消息列表
     """
@@ -280,6 +284,7 @@ async def get_history(db: Session, session_no: str) -> DialogHistoryResponse:
     if session is None:
         raise AppError(ErrorCode.ERR_DIALOG_001)
 
+    # 查询消息（带分页）
     rows = list(
         db.scalars(
             select(InteractionMessage)
@@ -292,6 +297,8 @@ async def get_history(db: Session, session_no: str) -> DialogHistoryResponse:
                 InteractionMessage.occurred_at.asc(),
                 InteractionMessage.id.asc(),
             )
+            .limit(limit)
+            .offset(offset)
         ).all()
     )
 
@@ -307,5 +314,13 @@ async def get_history(db: Session, session_no: str) -> DialogHistoryResponse:
         for row in rows
     ]
     return DialogHistoryResponse(
-        session_no=session_no, total=len(messages), messages=messages
+        session_id=session_no,
+        task_id=str(session.task_id),
+        session_status=session.session_status,
+        current_cicare_stage=None,  # 第一期不实现 CICARE 阶段跟踪
+        answered_question_count=None,
+        total_question_count=None,
+        ai_summary=session.ai_summary,
+        total=len(messages),
+        messages=messages,
     )
