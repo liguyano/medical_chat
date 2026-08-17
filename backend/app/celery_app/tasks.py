@@ -18,19 +18,163 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
     Args:
         - session_id: 会话ID
         - task_config: 任务配置（包含量表ID列表等）
+            必需字段：
+            - scale_codes: List[str] - 量表编码列表
+            可选字段：
+            - check_interval: int - 检查间隔（默认5轮）
     """
+    import asyncio
+    from app.managers.assessment_loader import AssessmentQuestionLoader
+    from medagent.agents.service_agent.schedule_agent import ScheduleAgent
+    from app.utils.redis_client import get_redis
+    from app.managers.dialog_history_manager import DialogHistoryManager
+    from app.workers.event_publisher import DialogEventPublisher
+    from app.schemas.events import ConstraintEvent, SessionEndEvent, EventType
+    from openai import AsyncOpenAI
+    from app.configs.app_config import get_app_config
+
+    async def _run_schedule_agent():
+        """异步执行Schedule Agent逻辑"""
+        try:
+            logger.info(f"[Schedule Agent] 启动任务: session_id={session_id}")
+
+            # 1. 加载量表问题列表
+            scale_codes = task_config.get("scale_codes", [])
+            if not scale_codes:
+                logger.error(f"[Schedule Agent] 缺少量表编码列表: {task_config}")
+                return {"status": "failed", "reason": "missing_scale_codes"}
+
+            loader = AssessmentQuestionLoader()
+            questions = await loader.load_questions_by_scale_codes(scale_codes)
+
+            if not questions:
+                logger.warning(f"[Schedule Agent] 未加载到问题: scale_codes={scale_codes}")
+                return {"status": "failed", "reason": "no_questions_loaded"}
+
+            logger.info(f"[Schedule Agent] 加载问题: {len(questions)}题")
+
+            # 2. 初始化 LLM 客户端（OpenAI 兼容接口）
+            cfg = get_app_config()
+            llm_config = cfg.get_llm_config("schedule_agent")  # 从config.yaml读取
+            if not llm_config:
+                logger.error("[Schedule Agent] 未配置 schedule_agent LLM")
+                return {"status": "failed", "reason": "llm_not_configured"}
+
+            llm_client = AsyncOpenAI(
+                api_key=llm_config.get("api_key"),
+                base_url=llm_config.get("api_base"),
+                timeout=llm_config.get("timeout", 30.0),
+                max_retries=llm_config.get("max_retries", 2),
+            )
+            llm_client.model = llm_config.get("model")
+
+            # 3. 实例化 Schedule Agent
+            check_interval = task_config.get("check_interval", 5)
+            agent = ScheduleAgent(
+                session_id=session_id,
+                task_list=questions,
+                llm_client=llm_client,
+                check_interval=check_interval,
+            )
+
+            # 4. 订阅 dialog_stream
+            redis_client = get_redis()
+            stream_key = f"dialog_stream:{session_id}"
+            last_id = "0"
+
+            # 从Redis读取轮次计数器（支持任务重启恢复）
+            counter_key = f"schedule_agent:turn_counter:{session_id}"
+            saved_counter = redis_client.get(counter_key)
+            if saved_counter:
+                agent.turn_counter = int(saved_counter)
+                logger.info(f"[Schedule Agent] 恢复轮次计数器: {agent.turn_counter}")
+
+            logger.info(f"[Schedule Agent] 开始订阅: {stream_key}")
+
+            # 5. 进入消息循环
+            timeout_count = 0
+            max_timeout = 12  # 最多12次超时（即60秒无消息）后退出
+
+            while True:
+                # 读取新消息（阻塞5秒）
+                messages = redis_client.xread({stream_key: last_id}, count=1, block=5000)
+
+                if not messages:
+                    timeout_count += 1
+                    if timeout_count >= max_timeout:
+                        logger.info(
+                            f"[Schedule Agent] 长时间无消息，任务退出: session={session_id}"
+                        )
+                        break
+                    continue
+
+                timeout_count = 0  # 重置超时计数
+
+                for stream, msg_list in messages:
+                    for message_id, data in msg_list:
+                        last_id = message_id
+
+                        # 只处理 dialog_turn 事件
+                        event_type = data.get("event_type")
+                        if event_type != EventType.DIALOG_TURN.value:
+                            continue
+
+                        logger.info(f"[Schedule Agent] 收到对话轮次事件: turn={data.get('turn_number')}")
+
+                        # 6. 获取对话历史
+                        history_manager = DialogHistoryManager()
+                        history = await history_manager.get_dialog_history(
+                            session_id, limit=30
+                        )
+                        lc_history = history_manager.format_for_langchain(history)
+
+                        # 7. 执行检查
+                        result = await agent.evaluate(lc_history)
+
+                        # 保存轮次计数器到Redis
+                        redis_client.setex(counter_key, 3600, agent.turn_counter)
+
+                        # 8. 如果偏离或遗漏工具，发布约束事件
+                        if result.is_deviation:
+                            publisher = DialogEventPublisher(session_id)
+                            constraint_event = ConstraintEvent(
+                                session_id=session_id,
+                                constraint_type="deviation",
+                                constraint_prompt=result.constraint_prompt,
+                                remaining_tasks=result.remaining_questions,
+                            )
+                            publisher.publish(constraint_event)
+                            logger.warning(
+                                f"[Schedule Agent] 发布约束事件: {result.constraint_prompt}"
+                            )
+
+                        # 9. 检查是否所有问题完成
+                        if not result.remaining_questions:
+                            logger.info(
+                                f"[Schedule Agent] 所有问题已完成: {session_id}"
+                            )
+                            # 发布会话结束事件
+                            publisher = DialogEventPublisher(session_id)
+                            end_event = SessionEndEvent(
+                                session_id=session_id,
+                                end_reason="completed",
+                                total_turns=agent.turn_counter,
+                                duration_seconds=0,  # TODO: 计算实际时长
+                            )
+                            publisher.publish(end_event)
+                            break
+
+            logger.info(f"[Schedule Agent] 任务完成: session_id={session_id}")
+            return {"status": "completed", "session_id": session_id}
+
+        except Exception as e:
+            logger.exception(f"[Schedule Agent] 任务执行异常: {e}")
+            raise
+
     try:
-        logger.info(f"[Schedule Agent] 启动任务: session_id={session_id}")
-
-        # TODO: 实现Schedule Agent逻辑
-        # 1. 生成任务列表（量表问题列表）
-        # 2. 订阅dialog_stream事件
-        # 3. 检测对话偏离
-        # 4. 检查工具调用完整性
-        # 5. 发布约束提示到Redis Stream
-
-        logger.info(f"[Schedule Agent] 任务完成: session_id={session_id}")
-        return {"status": "completed", "session_id": session_id}
+        # 运行异步任务
+        result = asyncio.run(_run_schedule_agent())
+        return result
 
     except Exception as e:
         logger.error(f"[Schedule Agent] 任务失败: {e}")

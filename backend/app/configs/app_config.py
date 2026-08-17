@@ -104,6 +104,18 @@ class LoggingConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class LLMConfig(BaseModel):
+    """LLM 模型配置（OpenAI 兼容接口）"""
+    name: str
+    model: str
+    api_base: str
+    api_key: str
+    timeout: float = 30.0
+    max_retries: int = 2
+    temperature: float = 0.7
+    max_tokens: Optional[int] = None
+
+
 # ==================== YAML 配置来源 ====================
 
 def _find_config_file() -> Optional[Path]:
@@ -160,6 +172,7 @@ class AppConfig(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    llm_models: list[LLMConfig] = Field(default_factory=list)
 
     @classmethod
     def settings_customise_sources(
@@ -186,6 +199,18 @@ class AppConfig(BaseSettings):
     def resolved_celery_backend_url(self) -> str:
         """解析 Celery backend URL（未显式配置时用 redis.backend_db 拼装）"""
         return self.celery.backend_url or self.redis.url(self.redis.backend_db)
+
+    def get_llm_config(self, name: str) -> Optional[dict[str, Any]]:
+        """获取指定名称的 LLM 配置
+        Args:
+            - name: LLM 配置名称（例如 "schedule_agent", "dialog_agent"）
+        Return:
+            - LLM 配置字典，不存在返回 None
+        """
+        for llm in self.llm_models:
+            if llm.name == name:
+                return llm.model_dump()
+        return None
 
 
 @lru_cache(maxsize=1)
