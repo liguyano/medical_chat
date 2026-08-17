@@ -8,7 +8,11 @@ describe('HTTP client', () => {
 
   it('携带Cookie并解析JSON响应', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
+      new Response(JSON.stringify({
+        code: 'OK',
+        message: '成功',
+        data: { ok: true },
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })
@@ -27,7 +31,11 @@ describe('HTTP client', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ detail: '任务不存在', code: 'NOT_FOUND' }), {
+        new Response(JSON.stringify({
+          code: 'ERR_TASK_003',
+          message: '任务不存在',
+          data: null,
+        }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -36,7 +44,7 @@ describe('HTTP client', () => {
     await expect(apiRequest('/api/missing')).rejects.toMatchObject({
       name: 'ApiError',
       status: 404,
-      code: 'NOT_FOUND',
+      code: 'ERR_TASK_003',
       message: '任务不存在',
     } satisfies Partial<ApiError>);
   });

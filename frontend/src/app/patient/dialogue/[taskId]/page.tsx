@@ -315,8 +315,17 @@ export default function PatientDialoguePage() {
     () => session?.messages.filter((message) => message.role === 'patient').length ?? 0,
     [session?.messages]
   );
-  const isStreaming = streamingTaskId === taskId || isSending;
   const completed = session?.sessionStatus === 'completed';
+  const awaitingReply =
+    !completed &&
+    session?.messages.at(-1)?.role === 'patient' &&
+    runtimeConfig.dataMode === 'api';
+  const isStreaming =
+    streamingTaskId === taskId || isSending || awaitingReply;
+  const displayedTotalQuestions =
+    runtimeConfig.dataMode === 'api'
+      ? session?.totalQuestionCount ?? task?.progress?.total ?? totalQuestions
+      : totalQuestions;
 
   const streamAssistantMessage = async (result: ScriptResult) => {
     if (!session) return;
@@ -562,30 +571,40 @@ export default function PatientDialoguePage() {
             <div className="flex-1">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <SparklesIcon className="w-5 h-5 text-primary" />
-                {isPaused ? '评估已暂停' : isStreaming ? 'AI正在生成回复' : '评估进行中'}
+                {completed
+                  ? '评估已完成'
+                  : isPaused
+                    ? '评估已暂停'
+                    : isStreaming
+                      ? 'AI正在生成回复'
+                      : '评估进行中'}
               </div>
               <Progress
                 value={session?.answeredQuestionCount ?? 0}
-                max={totalQuestions}
+                max={displayedTotalQuestions}
                 size="sm"
                 className="mt-2"
               />
             </div>
             <IntegrationStatus
               streamStatus={streamStatus}
-              voiceState={voiceState}
+              voiceState={
+                runtimeConfig.dataMode === 'mock' ? voiceState : undefined
+              }
             />
             <Badge variant={isStreaming ? 'info' : 'primary'} size="sm">
-              {session?.answeredQuestionCount ?? 0}/{totalQuestions}
+              {session?.answeredQuestionCount ?? 0}/{displayedTotalQuestions}
             </Badge>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void togglePause()}
-            >
-              {isPaused ? <PlayIcon className="w-4 h-4 mr-1" /> : <PauseIcon className="w-4 h-4 mr-1" />}
-              {isPaused ? '继续' : '暂停'}
-            </Button>
+            {runtimeConfig.dataMode === 'mock' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void togglePause()}
+              >
+                {isPaused ? <PlayIcon className="w-4 h-4 mr-1" /> : <PauseIcon className="w-4 h-4 mr-1" />}
+                {isPaused ? '继续' : '暂停'}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -629,7 +648,10 @@ export default function PatientDialoguePage() {
                           <div>
                             <p className="text-xs text-foreground-muted">{answer.questionText}</p>
                             <p className="text-sm font-medium mt-1">
-                              {answer.answerText ?? answer.answerNumber ?? '已记录'}
+                              {answer.answerText ??
+                                answer.answerNumber ??
+                                answer.selectedOptions?.join('、') ??
+                                '已记录'}
                             </p>
                           </div>
                           <button
@@ -678,7 +700,10 @@ export default function PatientDialoguePage() {
                         <div>
                           <p className="text-xs text-foreground-muted">{answer.questionText}</p>
                           <p className="text-sm font-medium mt-1">
-                            {answer.answerText ?? answer.answerNumber ?? '已记录'}
+                            {answer.answerText ??
+                              answer.answerNumber ??
+                              answer.selectedOptions?.join('、') ??
+                              '已记录'}
                           </p>
                           <p className="text-xs text-foreground-muted mt-1">
                             可信度 {Math.round(answer.extractionConfidence * 100)}%
@@ -729,7 +754,11 @@ export default function PatientDialoguePage() {
                 <CheckCircleIcon className="w-6 h-6 text-success" />
                 <div className="flex-1">
                   <p className="font-medium">AI评估已完成并提交护士复核</p>
-                  <p className="text-xs text-foreground-muted">下一步完成知情同意确认</p>
+                  <p className="text-xs text-foreground-muted">
+                    {runtimeConfig.dataMode === 'api'
+                      ? '您已完成本次评估，请等待护士复核'
+                      : '下一步完成知情同意确认'}
+                  </p>
                 </div>
                 <Button
                   onClick={() =>
@@ -743,17 +772,31 @@ export default function PatientDialoguePage() {
               <>
                 <div className="px-4 pt-3 flex items-center justify-between">
                   <p className="text-xs text-foreground-muted">
-                    {isRecording ? '正在聆听，请说出您的回答' : '支持文字与语音模拟输入'}
+                    {isRecording
+                      ? '正在聆听，请说出您的回答'
+                      : runtimeConfig.dataMode === 'api'
+                        ? '请输入文字回答'
+                        : '支持文字与语音模拟输入'}
                   </p>
-                  <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
-                    <UserPlusIcon className="w-4 h-4" />
-                    找护士
-                  </button>
+                  {runtimeConfig.dataMode === 'mock' && (
+                    <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
+                      <UserPlusIcon className="w-4 h-4" />
+                      找护士
+                    </button>
+                  )}
                 </div>
                 <ChatInput
                   onSend={handleSendMessage}
-                  onVoiceStart={() => void startVoice()}
-                  onVoiceStop={() => void stopVoice()}
+                  onVoiceStart={
+                    runtimeConfig.dataMode === 'mock'
+                      ? () => void startVoice()
+                      : undefined
+                  }
+                  onVoiceStop={
+                    runtimeConfig.dataMode === 'mock'
+                      ? () => void stopVoice()
+                      : undefined
+                  }
                   placeholder={isPaused ? '评估已暂停' : '输入您的回答...'}
                   disabled={isPaused || isStreaming}
                   isRecording={isRecording}

@@ -76,16 +76,23 @@ function appendDelta(event: SseEnvelope, role: InteractionMessage['role']) {
   const store = useChatStore.getState();
   const session = ensureSession(event);
   if (!currentSession(event.task_id)) store.setSession(event.task_id, session);
-  const message = buildMessage(event, role, true);
+  const isFinal = Boolean(event.payload.is_final);
+  const message = buildMessage(event, role, !isFinal);
   const existing = currentSession(event.task_id)?.messages.find(
     (item) => item.id === message.id
   );
+  const fullContent = value(event.payload, 'content_text', '');
   const delta = value(event.payload, 'delta', value(event.payload, 'text', ''));
   store.upsertMessage(event.task_id, {
     ...message,
-    contentText: `${existing?.contentText ?? ''}${delta}`,
+    contentText:
+      isFinal && fullContent
+        ? fullContent
+        : existing?.contentText === delta
+          ? existing.contentText
+          : `${existing?.contentText ?? ''}${delta}`,
   });
-  if (role === 'ai') store.setStreaming(event.task_id);
+  if (role === 'ai') store.setStreaming(isFinal ? null : event.task_id);
 }
 
 export function applyRealtimeEvent(event: SseEnvelope): void {
@@ -139,6 +146,27 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
     case 'user_transcript_completed': {
       const message = buildMessage(event, 'patient', false);
       chatStore.upsertMessage(event.task_id, message);
+      const updatedSession = currentSession(event.task_id);
+      if (updatedSession) {
+        const answeredQuestionCount = updatedSession.messages.filter(
+          (item) => item.role === 'patient'
+        ).length;
+        const totalQuestionCount =
+          updatedSession.totalQuestionCount ??
+          taskStore.tasks.find((item) => item.id === event.task_id)?.progress
+            ?.total ??
+          answeredQuestionCount;
+        chatStore.setSession(event.task_id, {
+          ...updatedSession,
+          answeredQuestionCount,
+          totalQuestionCount,
+        });
+        taskStore.updateTaskProgress(
+          event.task_id,
+          answeredQuestionCount,
+          totalQuestionCount
+        );
+      }
       break;
     }
     case 'assistant_message_started': {
@@ -169,36 +197,46 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       break;
     }
     case 'extraction_updated': {
-      const raw =
-        (event.payload.field as Record<string, unknown> | undefined) ??
-        event.payload;
-      const answer: StructuredAnswer = {
-        questionId: String(raw.question_id ?? raw.field_id ?? ''),
-        questionCode: String(raw.question_code ?? ''),
-        questionText: String(raw.question_text ?? raw.field_name ?? '评估字段'),
-        answerText:
-          raw.answer_text === undefined ? undefined : String(raw.answer_text),
-        answerNumber:
-          typeof raw.answer_number === 'number'
-            ? raw.answer_number
+      const fields = Array.isArray(event.payload.fields)
+        ? event.payload.fields
+        : [event.payload.field ?? event.payload];
+      for (const item of fields) {
+        const raw =
+          item && typeof item === 'object'
+            ? (item as Record<string, unknown>)
+            : {};
+        const answer: StructuredAnswer = {
+          questionId: String(raw.question_id ?? raw.field_id ?? ''),
+          questionCode: String(raw.question_code ?? ''),
+          questionText: String(raw.question_text ?? raw.field_name ?? '评估字段'),
+          answerText:
+            raw.answer_text === undefined || raw.answer_text === null
+              ? undefined
+              : String(raw.answer_text),
+          answerNumber:
+            typeof raw.answer_number === 'number'
+              ? raw.answer_number
+              : undefined,
+          answerBoolean:
+            typeof raw.answer_boolean === 'boolean'
+              ? raw.answer_boolean
+              : undefined,
+          selectedOptions: Array.isArray(raw.selected_options)
+            ? raw.selected_options.map(String)
             : undefined,
-        answerBoolean:
-          typeof raw.answer_boolean === 'boolean'
-            ? raw.answer_boolean
-            : undefined,
-        selectedOptions: Array.isArray(raw.selected_options)
-          ? raw.selected_options.map(String)
-          : undefined,
-        sourceMessageIds: Array.isArray(raw.source_message_ids)
-          ? raw.source_message_ids.map(String)
-          : event.message_id
-            ? [event.message_id]
-            : [],
-        extractionConfidence:
-          typeof raw.confidence === 'number' ? raw.confidence : 0,
-        corrected: Boolean(raw.corrected),
-      };
-      if (answer.questionId) chatStore.upsertStructuredAnswer(event.task_id, answer);
+          sourceMessageIds: Array.isArray(raw.source_message_ids)
+            ? raw.source_message_ids.map(String)
+            : event.message_id
+              ? [event.message_id]
+              : [],
+          extractionConfidence:
+            typeof raw.confidence === 'number' ? raw.confidence : 0,
+          corrected: Boolean(raw.corrected),
+        };
+        if (answer.questionId) {
+          chatStore.upsertStructuredAnswer(event.task_id, answer);
+        }
+      }
       break;
     }
     case 'progress_updated': {
@@ -256,16 +294,28 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
     case 'handoff_resolved':
       taskStore.resolveHandoff(event.task_id);
       break;
-    case 'task_status_updated':
+    case 'task_status_updated': {
+      const taskStatus = value(
+        event.payload,
+        'task_status',
+        'in_progress'
+      ) as CareTaskStatus;
+      const aiSummary = value(event.payload, 'ai_summary', undefined);
       taskStore.updateTask(event.task_id, {
-        taskStatus: value(
-          event.payload,
-          'task_status',
-          'in_progress'
-        ) as CareTaskStatus,
-        aiSummary: value(event.payload, 'ai_summary', undefined),
+        taskStatus,
+        aiSummary,
       });
+      if (taskStatus === 'pending_review' || taskStatus === 'completed') {
+        chatStore.setSession(event.task_id, {
+          ...session,
+          sessionStatus: 'completed',
+          completedAt: event.occurred_at,
+          aiSummary: aiSummary ?? session.aiSummary,
+        });
+        chatStore.setStreaming(null);
+      }
       break;
+    }
     case 'error':
     case 'heartbeat':
     case 'assistant_audio_delta':

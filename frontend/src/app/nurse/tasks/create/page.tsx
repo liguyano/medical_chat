@@ -37,6 +37,7 @@ export default function CreateTaskPage() {
 }
 
 function CreateTaskContent() {
+  const apiMode = runtimeConfig.dataMode === 'api';
   const router = useRouter();
   const searchParams = useSearchParams();
   const addTask = useTaskStore((state) => state.addTask);
@@ -44,24 +45,34 @@ function CreateTaskContent() {
   const user = useUserStore((state) => state.user);
   const [step, setStep] = useState(1);
   const [selectedPatientId, setSelectedPatientId] = useState(
-    () => searchParams.get('patientId') ?? mockPatients.at(-1)?.id ?? mockPatients[0].id
+    () =>
+      searchParams.get('patientId') ??
+      (apiMode ? '' : mockPatients.at(-1)?.id ?? mockPatients[0].id)
   );
   const [participantType, setParticipantType] = useState<ParticipantType>('patient');
   const [relationship, setRelationship] = useState('女儿');
   const [scene, setScene] = useState<AssessmentScene>('admission');
-  const [selectedScaleIds, setSelectedScaleIds] = useState<string[]>(['1', '2', '3', '4', '5']);
+  const [selectedScaleIds, setSelectedScaleIds] = useState<string[]>(
+    apiMode ? [] : ['1', '2', '3', '4', '5']
+  );
   const [collectionMode, setCollectionMode] = useState<CollectionMode>('ai_dialogue');
-  const [consentRequired, setConsentRequired] = useState(true);
-  const [educationTopics, setEducationTopics] = useState<string[]>(['药物过敏安全宣教', '防跌倒宣教']);
+  const [consentRequired, setConsentRequired] = useState(!apiMode);
+  const [educationTopics, setEducationTopics] = useState<string[]>(
+    apiMode ? [] : ['药物过敏安全宣教', '防跌倒宣教']
+  );
   const [plannedStartTime, setPlannedStartTime] = useState('2026-08-16T14:00');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
   const [dataNotice, setDataNotice] = useState('');
   const [loading, setLoading] = useState(false);
-  const [patients, setPatients] = useState<Patient[]>(mockPatients);
+  const [patients, setPatients] = useState<Patient[]>(
+    apiMode ? [] : mockPatients
+  );
   const [encounters, setEncounters] =
-    useState<PatientEncounter[]>(mockEncounters);
-  const [scales, setScales] = useState<AssessmentScale[]>(mockScales);
+    useState<PatientEncounter[]>(apiMode ? [] : mockEncounters);
+  const [scales, setScales] = useState<AssessmentScale[]>(
+    apiMode ? [] : mockScales
+  );
 
   useEffect(() => {
     if (runtimeConfig.dataMode !== 'api') return;
@@ -80,6 +91,13 @@ function CreateTaskContent() {
         setPatients(patientRecords.map((item) => item.patient));
         setEncounters(patientRecords.map((item) => item.encounter));
         setScales(scaleRecords);
+        setSelectedScaleIds((current) => {
+          const available = new Set(scaleRecords.map((scale) => scale.id));
+          const retained = current.filter((id) => available.has(id));
+          return retained.length
+            ? retained
+            : scaleRecords.map((scale) => scale.id);
+        });
         const firstPatient = patientRecords[0]?.patient;
         setSelectedPatientId((current) =>
           patientRecords.some((item) => item.patient.id === current)
@@ -90,8 +108,11 @@ function CreateTaskContent() {
       })
       .catch((loadError) => {
         if (controller.signal.aborted) return;
+        setPatients([]);
+        setEncounters([]);
+        setScales([]);
         setDataNotice(
-          `后端基础数据暂不可用，当前保留本地演示数据：${
+          `后端基础数据加载失败，API 模式不会混用本地演示数据：${
             loadError instanceof Error ? loadError.message : '未知错误'
           }`
         );
@@ -156,8 +177,8 @@ function CreateTaskContent() {
         relationshipToPatient:
           participantType === 'patient' ? undefined : relationship,
         assessmentScene: scene,
-        consentRequired,
-        educationTopics,
+        consentRequired: apiMode ? false : consentRequired,
+        educationTopics: apiMode ? [] : educationTopics,
         plannedStartTime,
         notes,
       });
@@ -303,9 +324,17 @@ function CreateTaskContent() {
               <h2 className="text-xl mb-4">执行方式</h2>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { value: 'ai_dialogue', label: 'AI对话采集', detail: '文字/语音模拟、实时抽取与宣教' },
+                  {
+                    value: 'ai_dialogue',
+                    label: 'AI对话采集',
+                    detail: apiMode
+                      ? '文字问诊、实时抽取与护理监控'
+                      : '文字/语音模拟、实时抽取与宣教',
+                  },
                   { value: 'traditional_form', label: '传统问卷', detail: '分组填写、自动保存与断点续答' },
-                ].map((item) => (
+                ]
+                  .filter((item) => !apiMode || item.value === 'ai_dialogue')
+                  .map((item) => (
                   <button
                     key={item.value}
                     type="button"
@@ -344,6 +373,8 @@ function CreateTaskContent() {
                 />
               </div>
 
+              {!apiMode && (
+                <>
               <label className="mt-5 flex items-center gap-3 rounded-xl bg-surface-secondary p-4">
                 <input
                   type="checkbox"
@@ -381,6 +412,14 @@ function CreateTaskContent() {
                   })}
                 </div>
               </div>
+                </>
+              )}
+
+              {apiMode && (
+                <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                  当前真实接口为第一期文本问诊闭环；知情同意、宣教、语音和传统问卷将在后续接口开放后启用。
+                </div>
+              )}
 
               <div className="mt-5">
                 <label className="block text-sm font-medium mb-2">护士备注</label>

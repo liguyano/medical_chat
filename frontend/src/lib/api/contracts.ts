@@ -8,6 +8,50 @@ import type {
 
 export type ApiId = string | number;
 
+export interface ApiResponse<T> {
+  code: string;
+  message: string;
+  data: T;
+}
+
+export interface PatientDto {
+  id: ApiId;
+  patient_no: string;
+  patient_name: string;
+  sex?: string;
+  birthday?: string;
+  phone?: string;
+}
+
+export interface PatientEncounterDto {
+  id: ApiId;
+  encounter_no: string;
+  inpatient_no?: string;
+  patient_id: ApiId;
+  department_code?: string;
+  department_name?: string;
+  ward_name?: string;
+  bed_no?: string;
+  admission_time: string;
+  encounter_status: string;
+  diagnosis_snapshot?: Record<string, unknown>;
+}
+
+export interface InHospitalPatientDto {
+  patient: PatientDto;
+  encounter: PatientEncounterDto;
+}
+
+export interface AssessmentScaleDto {
+  id: ApiId;
+  scale_code: string;
+  scale_name: string;
+  scale_type: string;
+  question_count: number;
+  version_code: string;
+  description?: string;
+}
+
 export interface BackendTaskDto {
   id?: ApiId;
   task_id?: ApiId;
@@ -21,7 +65,7 @@ export interface BackendTaskDto {
   department?: string;
   ward_name?: string;
   task_type?: string;
-  collection_mode: 'questionnaire' | 'ai_dialog' | CollectionMode;
+  collection_mode: CollectionMode;
   task_status: TaskStatus;
   nurse_id?: ApiId;
   assigned_nurse_id?: ApiId;
@@ -49,19 +93,17 @@ export interface BackendTaskDto {
 }
 
 export interface CreateTaskRequest {
-  patient_id: string;
-  encounter_id: string;
-  nurse_id: string;
-  scale_ids: string[];
-  collection_mode: 'questionnaire' | 'ai_dialog';
+  patient_id: number;
+  encounter_id: number;
+  assigned_nurse_id?: number;
+  scale_ids: number[];
+  collection_mode: CollectionMode;
   participant_type: ParticipantType;
-  participant_name?: string;
-  relationship_to_patient?: string;
   assessment_scene: AssessmentScene;
-  consent_required: boolean;
-  education_topics: string[];
   planned_start_time?: string;
-  notes?: string;
+  task_type?: string;
+  task_name?: string;
+  task_source?: string;
 }
 
 export interface CreateTaskResponse {
@@ -81,21 +123,26 @@ export interface SendDialogMessageRequest {
 }
 
 export interface DialogMessageDto {
-  message_id: string;
-  session_id: ApiId;
+  message_id?: string;
+  message_no?: string;
+  session_id?: ApiId;
   turn_no: number;
-  role: 'assistant' | 'ai' | 'patient' | 'user' | 'system';
+  role?: 'assistant' | 'ai' | 'patient' | 'user' | 'system';
+  role_type?: string;
+  message_type?: string;
   cicare_stage?: string;
   intent_type?: string;
-  content_text: string;
+  content_text?: string;
   audio_url?: string;
-  occurred_at: string;
+  occurred_at?: string;
   related_question_ids?: ApiId[];
 }
 
 export interface DialogHistoryResponse {
-  session_id: ApiId;
-  task_id: ApiId;
+  session_id?: ApiId;
+  session_no?: ApiId;
+  task_id?: ApiId;
+  task_no?: string;
   session_status?: string;
   current_cicare_stage?: string;
   answered_question_count?: number;

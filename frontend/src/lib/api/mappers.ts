@@ -1,15 +1,21 @@
 import type {
+  ApiId,
   BackendTaskDto,
+  AssessmentScaleDto,
   CreateTaskRequest,
   DialogHistoryResponse,
   DialogMessageDto,
   ExtractedFieldDto,
+  InHospitalPatientDto,
 } from '@/lib/api/contracts';
 import type {
+  AssessmentScale,
   CareTask,
   CollectionMode,
   InteractionMessage,
   InteractionSession,
+  Patient,
+  PatientEncounter,
   StructuredAnswer,
 } from '@/lib/types';
 
@@ -17,27 +23,58 @@ function id(value: string | number | undefined, fallback = ''): string {
   return value === undefined ? fallback : String(value);
 }
 
+function numericId(value: string | number, fieldName: string): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${fieldName} 必须是有效的数字 ID`);
+  }
+  return parsed;
+}
+
+function optionalNumericId(value: string | number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function toBackendCollectionMode(
   mode: CollectionMode
-): 'questionnaire' | 'ai_dialog' {
-  return mode === 'traditional_form' ? 'questionnaire' : 'ai_dialog';
+): CollectionMode {
+  return mode;
 }
 
 export function toCollectionMode(
   mode: BackendTaskDto['collection_mode']
 ): CollectionMode {
-  return mode === 'questionnaire' || mode === 'traditional_form'
+  return mode === 'traditional_form'
     ? 'traditional_form'
     : 'ai_dialogue';
 }
 
 export function mapCreateTaskRequest(
-  input: Omit<CreateTaskRequest, 'collection_mode'> & {
+  input: Omit<
+    CreateTaskRequest,
+    | 'patient_id'
+    | 'encounter_id'
+    | 'assigned_nurse_id'
+    | 'scale_ids'
+    | 'collection_mode'
+  > & {
+    patient_id: ApiId;
+    encounter_id: ApiId;
+    assigned_nurse_id?: ApiId;
+    scale_ids: ApiId[];
     collection_mode: CollectionMode;
   }
 ): CreateTaskRequest {
   return {
     ...input,
+    patient_id: numericId(input.patient_id, 'patient_id'),
+    encounter_id: numericId(input.encounter_id, 'encounter_id'),
+    assigned_nurse_id: optionalNumericId(input.assigned_nurse_id),
+    scale_ids: input.scale_ids.map((scaleId) =>
+      numericId(scaleId, 'scale_ids')
+    ),
     collection_mode: toBackendCollectionMode(input.collection_mode),
   };
 }
@@ -89,23 +126,27 @@ export function mapTaskDto(dto: BackendTaskDto): CareTask {
 }
 
 export function mapDialogMessage(dto: DialogMessageDto): InteractionMessage {
+  const backendRole = dto.role ?? dto.role_type ?? 'system';
   const role =
-    dto.role === 'assistant' || dto.role === 'ai'
+    backendRole === 'assistant' || backendRole === 'ai' || backendRole === 'AI'
       ? 'ai'
-      : dto.role === 'user'
+      : backendRole === 'user' || backendRole === '患者'
         ? 'patient'
-        : dto.role;
+        : backendRole === '家属'
+          ? 'patient'
+          : 'system';
+  const messageId = dto.message_id ?? dto.message_no ?? '';
   return {
-    id: dto.message_id,
-    messageNo: dto.message_id,
+    id: messageId,
+    messageNo: messageId,
     sessionId: id(dto.session_id),
     turnNo: dto.turn_no,
     role,
     cicareStage: dto.cicare_stage as InteractionMessage['cicareStage'],
     intentType: dto.intent_type as InteractionMessage['intentType'],
-    contentText: dto.content_text,
+    contentText: dto.content_text ?? '',
     audioUrl: dto.audio_url,
-    occurredAt: dto.occurred_at,
+    occurredAt: dto.occurred_at ?? new Date().toISOString(),
     relatedQuestionIds: dto.related_question_ids?.map(String),
   };
 }
@@ -115,9 +156,9 @@ export function mapDialogHistory(
   task: CareTask
 ): InteractionSession {
   return {
-    id: id(response.session_id),
-    sessionNo: id(response.session_id),
-    taskId: id(response.task_id),
+    id: id(response.session_id ?? response.session_no, task.sessionId),
+    sessionNo: id(response.session_id ?? response.session_no, task.sessionId),
+    taskId: id(response.task_id, task.id),
     patientId: task.patientId,
     encounterId: task.encounterId,
     interactionType: 'assessment',
@@ -131,7 +172,80 @@ export function mapDialogHistory(
     answeredQuestionCount: response.answered_question_count,
     totalQuestionCount: response.total_question_count,
     aiSummary: response.ai_summary,
-    messages: response.messages.map(mapDialogMessage),
+    messages: response.messages.map((message) =>
+      mapDialogMessage({
+        ...message,
+        session_id: response.session_id ?? response.session_no,
+      })
+    ),
+  };
+}
+
+function calculateAge(birthday?: string): number {
+  if (!birthday) return 0;
+  const birth = new Date(birthday);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  if (
+    now.getMonth() < birth.getMonth() ||
+    (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())
+  ) {
+    age -= 1;
+  }
+  return Math.max(age, 0);
+}
+
+export function mapInHospitalPatient(dto: InHospitalPatientDto): {
+  patient: Patient;
+  encounter: PatientEncounter;
+} {
+  const patientId = id(dto.patient.id);
+  const diagnosis = dto.encounter.diagnosis_snapshot;
+  const diagnosisText =
+    typeof diagnosis?.primary_diagnosis === 'string'
+      ? diagnosis.primary_diagnosis
+      : typeof diagnosis?.diagnosis === 'string'
+        ? diagnosis.diagnosis
+        : '';
+  return {
+    patient: {
+      id: patientId,
+      patientNo: dto.patient.patient_no,
+      name: dto.patient.patient_name,
+      gender:
+        dto.patient.sex === '女'
+          ? 'female'
+          : dto.patient.sex === '男'
+            ? 'male'
+            : 'other',
+      age: calculateAge(dto.patient.birthday),
+      phone: dto.patient.phone,
+    },
+    encounter: {
+      id: id(dto.encounter.id),
+      patientId,
+      encounterNo: dto.encounter.encounter_no,
+      inpatientNo: dto.encounter.inpatient_no ?? dto.encounter.encounter_no,
+      department: dto.encounter.department_name ?? '',
+      ward: dto.encounter.ward_name ?? '',
+      bedNo: dto.encounter.bed_no ?? '',
+      admissionDate: dto.encounter.admission_time,
+      diagnosis: diagnosisText,
+      encounterStatus:
+        dto.encounter.encounter_status === '在院'
+          ? 'in_hospital'
+          : 'discharged',
+    },
+  };
+}
+
+export function mapAssessmentScale(dto: AssessmentScaleDto): AssessmentScale {
+  return {
+    id: id(dto.id),
+    scaleCode: dto.scale_code,
+    scaleName: dto.scale_name,
+    scaleType: dto.scale_type,
+    description: dto.description ?? `${dto.question_count} 道评估问题`,
   };
 }
 

@@ -153,9 +153,11 @@ export class SseClient {
       'dialog_message',
       'monitor_message',
     ]) {
-      source.addEventListener(eventType, (event) =>
-        handle(event as MessageEvent, eventType)
-      );
+      source.addEventListener(eventType, (event) => {
+        if (event instanceof MessageEvent) {
+          handle(event, eventType);
+        }
+      });
     }
 
     source.onerror = () => {
@@ -194,6 +196,6 @@ export function createDialogueSsePath(sessionId: string): string {
   return `/api/sse/dialog/${encodeURIComponent(sessionId)}`;
 }
 
-export function createMonitorSsePath(nurseId: string): string {
-  return `/api/sse/monitor?nurse_id=${encodeURIComponent(nurseId)}`;
+export function createMonitorSsePath(sessionId: string): string {
+  return `/api/sse/monitor/${encodeURIComponent(sessionId)}`;
 }

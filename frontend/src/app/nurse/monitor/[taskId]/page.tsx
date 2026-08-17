@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
@@ -12,9 +12,9 @@ import { Progress } from '@/components/shared/Progress';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
 import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
-import { useUserStore } from '@/lib/stores/useUserStore';
 import { createMonitorSsePath } from '@/lib/transports/sseClient';
 import type { MessageFeedback } from '@/lib/types';
 import {
@@ -27,8 +27,8 @@ import {
 export default function NurseMonitorDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
+  const addTask = useTaskStore((state) => state.addTask);
   const resolveHandoff = useTaskStore((state) => state.resolveHandoff);
-  const user = useUserStore((state) => state.user);
   const session = useChatStore((state) => state.sessions[taskId]);
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
   const interactionEvents = useChatStore((state) => state.events);
@@ -40,16 +40,53 @@ export default function NurseMonitorDetailPage() {
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [actionError, setActionError] = useState('');
+
+  useEffect(() => {
+    if (runtimeConfig.dataMode !== 'api') return;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const currentTask =
+          task ?? (await careRepository.getTask(taskId, controller.signal));
+        if (!task) addTask(currentTask);
+        if (!useChatStore.getState().sessions[taskId]) {
+          const snapshot = await careRepository.getDialogueSnapshot(
+            currentTask,
+            controller.signal
+          );
+          useChatStore.getState().setSession(taskId, snapshot.session);
+          useChatStore
+            .getState()
+            .setStructuredAnswers(taskId, snapshot.answers);
+        }
+        setActionError('');
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
+          setActionError(
+            loadError instanceof Error
+              ? `监控数据加载失败：${loadError.message}`
+              : '监控数据加载失败'
+          );
+        }
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [addTask, task, taskId]);
   const { status: streamStatus, error: streamError } = useRealtimeStream({
-    path: createMonitorSsePath(
-      user?.id ?? task?.assignedNurseId ?? 'current'
-    ),
-    enabled: Boolean(task),
+    path: task?.sessionId ? createMonitorSsePath(task.sessionId) : undefined,
+    enabled: Boolean(task?.sessionId),
   });
 
   if (!task) {
     return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
   }
+  const progressStatus =
+    task.taskStatus === 'pending_review'
+      ? '待复核'
+      : task.taskStatus === 'completed'
+        ? '已完成'
+        : '采集中';
 
   const submitFeedback = async (type: MessageFeedback['feedbackType']) => {
     if (!feedbackMessageId) return;
@@ -124,7 +161,7 @@ export default function NurseMonitorDetailPage() {
         </div>
         <div className="flex gap-2">
           <IntegrationStatus streamStatus={streamStatus} compact />
-          {task.handoffRequired && (
+          {runtimeConfig.dataMode === 'mock' && task.handoffRequired && (
             <Button
               variant="danger"
               onClick={() => void handleResolveHandoff()}
@@ -146,7 +183,7 @@ export default function NurseMonitorDetailPage() {
           <h2 className="font-semibold mb-3">任务进度</h2>
           <Progress value={task.progress?.current ?? 0} max={task.progress?.total ?? 12} size="sm" />
           <p className="text-xs text-foreground-muted mt-2">
-            {task.progress?.current ?? 0}/{task.progress?.total ?? 12} · {task.currentStage ?? '采集中'}
+            {task.progress?.current ?? 0}/{task.progress?.total ?? 12} · {progressStatus}
           </p>
           <div className="mt-5 space-y-2">
             {task.scaleNames?.map((name) => (
@@ -169,7 +206,7 @@ export default function NurseMonitorDetailPage() {
             session.messages.map((message) => (
               <div key={message.id} className="group">
                 <ChatBubble message={message} showTime animate={false} />
-                {message.role === 'ai' && (
+                {runtimeConfig.dataMode === 'mock' && message.role === 'ai' && (
                   <div className="flex justify-start gap-2 -mt-3 mb-4 ml-14">
                     <button
                       type="button"
@@ -208,7 +245,12 @@ export default function NurseMonitorDetailPage() {
                       {Math.round(answer.extractionConfidence * 100)}%
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-1">{answer.answerText ?? answer.answerNumber}</p>
+                  <p className="text-sm font-medium mt-1">
+                    {answer.answerText ??
+                      answer.answerNumber ??
+                      answer.selectedOptions?.join('、') ??
+                      '已记录'}
+                  </p>
                   <p className="text-xs text-primary mt-1">证据消息 {answer.sourceMessageIds.join(', ')}</p>
                 </div>
               ))}
