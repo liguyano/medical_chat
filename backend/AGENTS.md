@@ -9,6 +9,29 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 2. 代码大幅重构时不保留旧类名、旧函数、旧配置字段或旧导入路径兼容层, 旧入口直接直接删除, 全部采用新方案.
 
 
+## 数据库设计事实来源（强制遵守）
+
+**数据库/ORM/迁移的唯一事实来源是以下两份文档，任何表结构、字段命名、关系设计都必须以它们为准：**
+
+- `docs/sql/数据库表业务设计.md` — 核心领域模型
+- `docs/sql/出入院宣教与知情同意数据库设计补充.md` — 宣教/知情同意/签名/随访补充域
+
+核心主链路：`patient` → `patient_encounter` → `care_task` → `interaction_session` →
+`interaction_message`；评估侧 `care_task` → `assessment_instance` → 多个
+`assessment_submission`（AI / 护士 / 最终确认）→ `assessment_answer`
+（唯一约束 `(submission_id, question_id)`）。
+
+**已废弃、禁止再使用的旧"8 张核心表"模型**（曾出现在 `docs/后端详细设计方案.md` 早期版本，
+及 `backend/app/models/*` 早期 ORM）：`assessment_tasks`、`dialog_sessions`、
+`dialog_messages`、`dialog_turns`、`extracted_fields`、`agent_states`、`nurse_ratings`、
+`education_records`、`consent_forms`。该单提交模型无法承载人机对比，已作废。
+
+规则：
+- 新增/修改 ORM 模型、Alembic 迁移、涉及数据库的代码前，先对照上述两份事实来源文档。
+- `docs/后端详细设计方案.md` 的表结构章节仅保留指针，不再作为数据库依据。
+- 智能体运行态存 Redis（TTL），不映射为独立 `agent_states` 表。
+
+
 ## 项目架构
 ```text
 medical-evaluate/
