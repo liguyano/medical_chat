@@ -3,13 +3,13 @@
 """
 
 import asyncio
-import json
 import logging
 
-from openai import AsyncOpenAI
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from .prompt import build_system_prompt, build_user_prompt
-from .validator import ExtractionResult, validate_extraction_result
+from .validator import ExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -23,20 +23,17 @@ class FieldExtractionAgent:
         self,
         session_id: str,
         scale_codes: list[str],
-        llm_client: AsyncOpenAI,
-        model_config: dict,
+        model: BaseChatModel,
     ):
         """初始化 Field Extraction Agent
         Args:
             - session_id: 会话ID
             - scale_codes: 量表编码列表
-            - llm_client: AsyncOpenAI 客户端
-            - model_config: 模型配置 {"model": "qwen-plus", "temperature": 0.1, ...}
+            - model: LangChain BaseChatModel（temperature/timeout 等在模型构造时注入）
         """
         self.session_id = session_id
         self.scale_codes = scale_codes
-        self.llm_client = llm_client
-        self.model_config = model_config
+        self.model = model
 
     async def extract_from_dialog(
         self,
@@ -68,31 +65,20 @@ class FieldExtractionAgent:
 
         logger.info(
             f"[Extraction Agent] 调用 LLM: session={self.session_id}, "
-            f"model={self.model_config['model']}, "
             f"previous_fields={len(previous_extraction)}, "
             f"new_dialog_turns={len(new_dialog)}"
         )
 
-        response = await self.llm_client.chat.completions.create(
-            model=self.model_config["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=self.model_config.get("temperature", 0.1),
-            response_format={"type": "json_object"},
-            timeout=self.model_config.get("timeout", 30.0),
-        )
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
 
-        raw_content = response.choices[0].message.content
-        if not raw_content:
-            raise ValueError("LLM 返回内容为空")
-
-        raw_json = json.loads(raw_content)
-        logger.debug(f"[Extraction Agent] LLM 返回: {raw_json}")
-
-        # Pydantic 校验
-        result = validate_extraction_result(raw_json)
+        structured = self.model.with_structured_output(ExtractionResult)
+        result = await structured.ainvoke(messages)
+        if not isinstance(result, ExtractionResult):
+            # 少数供应商可能返回 dict，做一次兜底校验
+            result = ExtractionResult.model_validate(result)
 
         # 计算派生字段
         result = self._calculate_derived_fields(result)

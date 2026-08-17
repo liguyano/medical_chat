@@ -243,14 +243,14 @@ class DialogHistoryManager:
     async def summarize_history(
         self,
         session_no: str,
-        llm_client,
+        model,
         max_turns: int = 20,
     ) -> str:
         """生成对话摘要（2-3句话）
         作用：调用 LLM 将历史对话压缩，保留关键医疗信息
         Args:
             - session_no: 会话编号
-            - llm_client: AsyncOpenAI 客户端
+            - model: LangChain BaseChatModel（由应用层用 create_chat_model 构造后注入）
             - max_turns: 最多摘要多少轮对话
         Return:
             - 摘要文本（2-3句话）
@@ -287,14 +287,8 @@ class DialogHistoryManager:
         prompt = get_summarization_prompt(messages_for_summary)
 
         try:
-            response = await llm_client.chat.completions.create(
-                model="qwen-plus",  # 使用快速模型
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                timeout=15.0,
-            )
-
-            summary = response.choices[0].message.content
+            response = await model.ainvoke(prompt)
+            summary = getattr(response, "content", "") or ""
             if not summary:
                 return ""
 

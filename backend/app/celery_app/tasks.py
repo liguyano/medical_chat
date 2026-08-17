@@ -19,7 +19,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
     """
     import asyncio
 
-    from openai import AsyncOpenAI
+    from medagent.providers import create_chat_model
 
     from app.celery_app.runtime import ensure_worker_runtime
     from app.configs.app_config import get_app_config
@@ -36,19 +36,13 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
             return {"status": "failed", "reason": "llm_not_configured"}
 
         ensure_worker_runtime()
-        client = AsyncOpenAI(
-            api_key=model_config.resolved_api_key(),
-            base_url=model_config.api_base,
-            timeout=model_config.timeout,
-            max_retries=model_config.max_retries,
-        )
+        model = create_chat_model(model_config)
         runner = ScheduleAgentRunner(
             loader=AssessmentQuestionLoader(),
             history_manager=DialogHistoryManager(),
             redis_client=get_redis(),
             publisher_factory=DialogEventPublisher,
-            llm_client=client,
-            model_config=model_config,
+            model=model,
         )
         return asyncio.run(
             runner.run(
@@ -160,35 +154,6 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
 # ==================== Field Extraction Agent任务 ====================
 
 @celery_app.task(name="app.celery_app.tasks.extraction_agent_worker", bind=True)
-def extraction_agent_worker(self, session_id: str, form_ids: list):
-    """Field Extraction Agent后台任务
-    作用：从对话历史中抽取结构化字段
-    Args:
-        - session_id: 会话ID
-        - form_ids: 量表ID列表
-    """
-    try:
-        logger.info(f"[Extraction Agent] 启动任务: session_id={session_id}")
-
-        # TODO: 实现Field Extraction Agent逻辑
-        # 1. 订阅dialog_stream事件
-        # 2. 批量读取对话历史
-        # 3. 调用大模型抽取字段
-        # 4. 计算置信度
-        # 5. 保存为 assessment_submission + assessment_answer
-        # 6. 发布进度更新事件
-
-        logger.info(f"[Extraction Agent] 任务完成: session_id={session_id}")
-        return {"status": "completed", "session_id": session_id}
-
-    except Exception as e:
-        logger.error(f"[Extraction Agent] 任务失败: {e}")
-        raise self.retry(exc=e, countdown=10, max_retries=3)
-
-
-# ==================== Field Extraction Agent任务 ====================
-
-@celery_app.task(name="app.celery_app.tasks.extraction_agent_worker", bind=True)
 def extraction_agent_worker(self, session_id: str, task_config: dict):
     """Field Extraction Agent 后台任务
     作用：订阅对话流，调用抽取 Agent，写入数据库，发布结果
@@ -202,7 +167,7 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
     """
     import asyncio
 
-    from openai import AsyncOpenAI
+    from medagent.providers import create_chat_model
 
     from app.celery_app.runtime import ensure_worker_runtime
     from app.configs.app_config import get_app_config
@@ -220,12 +185,7 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
             return {"status": "failed", "reason": "llm_not_configured"}
 
         ensure_worker_runtime()
-        client = AsyncOpenAI(
-            api_key=model_config.resolved_api_key(),
-            base_url=model_config.api_base,
-            timeout=model_config.timeout,
-            max_retries=model_config.max_retries,
-        )
+        model = create_chat_model(model_config)
 
         runner = ExtractionAgentRunner(
             loader=AssessmentQuestionLoader(),
@@ -233,8 +193,7 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
             writer_factory=ExtractionResultWriter,
             redis_client=get_redis(),
             publisher_factory=DialogEventPublisher,
-            llm_client=client,
-            model_config=model_config.model_dump(),
+            model=model,
         )
 
         return asyncio.run(

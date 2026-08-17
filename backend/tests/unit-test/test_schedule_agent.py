@@ -1,8 +1,7 @@
 """Schedule Agent 核心逻辑单元测试。"""
 
-import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from medagent.agents.service_agent.schedule_agent import (
@@ -34,22 +33,25 @@ def make_question(code: str, text: str, sort_no: int = 1) -> QuestionTask:
 
 
 def make_llm(payload: dict | str | None = None, *, error: Exception | None = None):
-    """创建 OpenAI 兼容客户端替身。"""
-    create = AsyncMock()
+    """创建 BaseChatModel 替身。
+    说明：模拟 model.with_structured_output(Schema).ainvoke(messages) 链路。
+      - payload 为 dict：ainvoke 返回该 dict（Agent 内部会 model_validate 兜底）；
+      - payload 为字符串：返回该字符串，触发 model_validate 失败（模拟解析失败放行）；
+      - error 非空：ainvoke 抛出异常（模拟 LLM 调用失败）。
+    ainvoke AsyncMock 暴露在返回对象的 .ainvoke 上，供断言调用次数。
+    """
+    ainvoke = AsyncMock()
     if error is not None:
-        create.side_effect = error
+        ainvoke.side_effect = error
     else:
-        content = (
-            json.dumps(payload, ensure_ascii=False)
-            if isinstance(payload, dict)
-            else payload
-        )
-        create.return_value = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-        )
-    return SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        ainvoke.return_value = payload
+
+    structured = SimpleNamespace(ainvoke=ainvoke)
+    model = SimpleNamespace(
+        with_structured_output=Mock(return_value=structured),
+        ainvoke=ainvoke,
     )
+    return model
 
 
 def make_agent(
@@ -80,9 +82,7 @@ def make_agent(
             ]
         ),
         llm,
-        model="qwen-plus",
         check_interval=check_interval,
-        max_tokens=512,
     )
     return agent, llm
 
@@ -94,7 +94,6 @@ def test_check_interval_must_be_positive():
             "session",
             [],
             make_llm({}),
-            model="qwen-plus",
             check_interval=0,
         )
 
@@ -108,7 +107,7 @@ async def test_only_fifth_turn_calls_llm():
         assert result.checked is False
     result = await agent.evaluate([])
     assert result.checked is True
-    llm.chat.completions.create.assert_awaited_once()
+    llm.ainvoke.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -140,9 +139,10 @@ async def test_completed_progress_accumulates_across_checks():
         }
     )
     await agent.evaluate([], force=True)
-    llm.chat.completions.create.return_value.choices[0].message.content = json.dumps(
-        {"completed_questions": ["drinking"], "is_deviation": False}
-    )
+    llm.ainvoke.return_value = {
+        "completed_questions": ["drinking"],
+        "is_deviation": False,
+    }
     result = await agent.evaluate([], force=True)
     assert result.completed_questions == ["smoking", "drinking"]
     assert result.remaining_questions == []
@@ -176,7 +176,6 @@ async def test_llm_exception_fails_open(caplog):
         "session",
         [make_question("smoking", "您是否吸烟？")],
         llm,
-        model="qwen-plus",
         check_interval=1,
     )
     result = await agent.evaluate([])
@@ -309,12 +308,14 @@ def test_state_dump_and_restore():
 
 
 @pytest.mark.asyncio
-async def test_model_request_contains_configured_limits():
-    """模型请求应使用配置的模型、低温度和输出上限。"""
+async def test_model_uses_structured_output():
+    """检查轮应经 with_structured_output 走结构化解析链路。
+    说明：模型/温度/max_tokens 现由 BaseChatModel 构造时注入，不再在请求内透传，
+      故此处只验证结构化输出链路被正确调用。
+    """
+    from medagent.agents.service_agent.schedule_agent.models import ScheduleAnalysis
+
     agent, llm = make_agent()
     await agent.evaluate([], force=True)
-    request = llm.chat.completions.create.await_args.kwargs
-    assert request["model"] == "qwen-plus"
-    assert request["temperature"] == 0.1
-    assert request["max_tokens"] == 512
-    assert request["response_format"] == {"type": "json_object"}
+    llm.with_structured_output.assert_called_once_with(ScheduleAnalysis)
+    llm.ainvoke.assert_awaited_once()

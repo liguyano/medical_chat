@@ -5,16 +5,15 @@
 import asyncio
 import json
 import logging
-from typing import Any
 
-from openai import AsyncOpenAI
+from langchain_core.language_models import BaseChatModel
 from redis import Redis
 
 from app.managers.assessment_loader import AssessmentQuestionLoader
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.managers.extraction_result_writer import ExtractionResultWriter
 from app.workers.event_publisher import DialogEventPublisher
-from medagent.agents.service_agent.extraction_agent import FieldExtractionAgent
+from medagent.agents.factory import create_extraction_agent
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +30,7 @@ class ExtractionAgentRunner:
         writer_factory: type[ExtractionResultWriter],
         redis_client: Redis,
         publisher_factory: type[DialogEventPublisher],
-        llm_client: AsyncOpenAI,
-        model_config: dict[str, Any],
+        model: BaseChatModel,
     ):
         """初始化 Runner
         Args:
@@ -41,16 +39,15 @@ class ExtractionAgentRunner:
             - writer_factory: 字段写入器工厂
             - redis_client: Redis 客户端
             - publisher_factory: 事件发布器工厂
-            - llm_client: AsyncOpenAI 客户端
-            - model_config: 模型配置
+            - model: LangChain BaseChatModel（由应用层用 create_chat_model 构造后注入，
+              同时供抽取 Agent 与对话摘要复用）
         """
         self.loader = loader
         self.history_manager = history_manager
         self.writer_factory = writer_factory
         self.redis_client = redis_client
         self.publisher_factory = publisher_factory
-        self.llm_client = llm_client
-        self.model_config = model_config
+        self.model = model
 
     async def run(
         self,
@@ -94,11 +91,10 @@ class ExtractionAgentRunner:
         }
 
         # 创建 Agent
-        agent = FieldExtractionAgent(
+        agent = create_extraction_agent(
             session_id=session_id,
             scale_codes=scale_codes,
-            llm_client=self.llm_client,
-            model_config=self.model_config,
+            model=self.model,
         )
 
         writer = self.writer_factory()
@@ -160,7 +156,7 @@ class ExtractionAgentRunner:
                             history_summary = history_summary.decode("utf-8")
                         else:
                             history_summary = await self.history_manager.summarize_history(
-                                session_id, self.llm_client, max_turns=20
+                                session_id, self.model, max_turns=20
                             )
                             # 缓存 1 小时
                             self.redis_client.setex(

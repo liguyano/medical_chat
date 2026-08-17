@@ -72,6 +72,23 @@ models:
     supports_vision: false
     supports_reasoning_effort: false
 
+  # 语言模型（确定性变体，用于 schedule 偏离判断，低温度保证判断稳定）
+  - name: qwen-plus-precise
+    type: language
+    display_name: 通义千问 Plus（确定性）
+    model: qwen-plus
+    api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: $DASHSCOPE_API_KEY
+    timeout: 600.0
+    max_retries: 2
+    temperature: 0.1
+    max_tokens: 2000
+    enable_prompt_caching: true
+    prompt_cache_ttl: "5m"
+    supports_thinking: false
+    supports_vision: false
+    supports_reasoning_effort: false
+
   # 语音模型（豆包实时语音 WebSocket 全双工协议）
   - name: dialog_agent_voice
     type: voice
@@ -89,7 +106,7 @@ models:
 # 详写：agent: {language: xxx, voice: yyy}（dialog_agent 需双协议绑定）
 agent_models:
   schedule_agent:
-    language: qwen-plus
+    language: qwen-plus-precise  # 低温度确定性变体，保证偏离判断稳定
 
   dialog_agent:
     language: qwen-plus       # 文本降级引擎

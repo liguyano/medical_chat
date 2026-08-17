@@ -1,13 +1,18 @@
 """Agent 工厂：组装完整 Agent 实例
 作用：提供统一的 agent 实例化入口，遵循纯参数设计，封装引擎创建与依赖注入。
 说明：
-  - create_dialog_agent() 组装 Dialog Agent，支持文本/语音双引擎；
-  - 依赖注入模式：middlewares / state_store / history_store / tool_executor 由应用层传入；
-  - 不直接读取全局配置，遵循 deerflow factory 纯参数模式。
+  - create_dialog_agent()：config 驱动，需按 engine_type 在文本/语音双引擎间选择，
+    因此内部解析 agent_models 绑定并装配引擎；
+  - create_schedule_agent() / create_extraction_agent()：纯依赖注入，单一
+    BaseChatModel 由应用层显式传入（最易测试），不在工厂内读取全局配置；
+  - 两类签名的有意不对称源于 Dialog 的双引擎特性，非疏漏；
+  - 依赖注入模式：middlewares / state_store / history_store / tool_executor 由应用层传入。
 """
 from __future__ import annotations
 
 from typing import Any
+
+from langchain_core.language_models import BaseChatModel
 
 from medagent.agents.middlewares.base import DialogMiddleware
 from medagent.agents.service_agent.dialog_agent.agent import DialogAgent
@@ -21,12 +26,18 @@ from medagent.agents.service_agent.dialog_agent.models import (
     DialogToolExecutor,
 )
 from medagent.agents.service_agent.dialog_agent.tools import execute_tool
+from medagent.agents.service_agent.extraction_agent import FieldExtractionAgent
+from medagent.agents.service_agent.schedule_agent import ScheduleAgent
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
 from medagent.configs import get_agent_config
 from medagent.configs.model_config import ModelType
 from medagent.providers import create_chat_model, create_voice_engine
 
-__all__ = ["create_dialog_agent"]
+__all__ = [
+    "create_dialog_agent",
+    "create_extraction_agent",
+    "create_schedule_agent",
+]
 
 
 def create_dialog_agent(
@@ -108,4 +119,51 @@ def create_dialog_agent(
         state_store=state_store,
         history_store=history_store,
         tool_executor=tool_executor,
+    )
+
+
+def create_schedule_agent(
+    *,
+    session_id: str,
+    task_list: list[QuestionTask],
+    model: BaseChatModel,
+    check_interval: int = 5,
+) -> ScheduleAgent:
+    """创建 Schedule Agent（SDK 工厂入口）
+    作用：以纯依赖注入方式组装调度智能体，模型由应用层显式传入。
+    Args:
+        - session_id: 会话 ID
+        - task_list: 量表问题任务列表（QuestionTask 对象）
+        - model: LangChain BaseChatModel（应用层用 create_chat_model 构造后注入）
+        - check_interval: 每隔多少轮执行一次检查
+    Return:
+        - ScheduleAgent 实例
+    """
+    return ScheduleAgent(
+        session_id=session_id,
+        task_list=task_list,
+        model=model,
+        check_interval=check_interval,
+    )
+
+
+def create_extraction_agent(
+    *,
+    session_id: str,
+    scale_codes: list[str],
+    model: BaseChatModel,
+) -> FieldExtractionAgent:
+    """创建 Field Extraction Agent（SDK 工厂入口）
+    作用：以纯依赖注入方式组装字段抽取智能体，模型由应用层显式传入。
+    Args:
+        - session_id: 会话 ID
+        - scale_codes: 量表编码列表
+        - model: LangChain BaseChatModel（应用层用 create_chat_model 构造后注入）
+    Return:
+        - FieldExtractionAgent 实例
+    """
+    return FieldExtractionAgent(
+        session_id=session_id,
+        scale_codes=scale_codes,
+        model=model,
     )

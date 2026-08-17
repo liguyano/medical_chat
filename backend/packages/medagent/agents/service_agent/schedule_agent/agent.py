@@ -2,10 +2,11 @@
 作用：监控量表对话进度、检测语义偏离并检查关键工具调用。
 """
 
-import json
 import logging
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from .models import (
@@ -26,33 +27,24 @@ class ScheduleAgent:
         self,
         session_id: str,
         task_list: list[QuestionTask],
-        llm_client: Any,
+        model: BaseChatModel,
         *,
-        model: str,
         check_interval: int = 5,
-        temperature: float = 0.1,
-        max_tokens: int | None = None,
     ) -> None:
         """初始化调度智能体
         Args:
             - session_id: 交互会话编号
             - task_list: 量表问题任务列表
-            - llm_client: OpenAI 兼容异步客户端
-            - model: 模型配置名称
+            - model: LangChain BaseChatModel（temperature/max_tokens 等在模型构造时注入）
             - check_interval: 每隔多少轮执行一次检查
-            - temperature: 调度判断温度
-            - max_tokens: 单次判断最大输出 token
         """
         if check_interval <= 0:
             raise ValueError("check_interval 必须大于 0")
 
         self.session_id = session_id
         self.task_list = task_list
-        self.llm_client = llm_client
         self.model = model
         self.check_interval = check_interval
-        self.temperature = temperature
-        self.max_tokens = max_tokens
         self.turn_counter = 0
         self.completed_question_codes: set[str] = {
             task.question_code for task in task_list if task.completed
@@ -131,25 +123,19 @@ class ScheduleAgent:
             dialog_history=dialog_history[-20:],
             turn_number=self.turn_counter,
         )
-        request: dict[str, Any] = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": DEVIATION_CHECK_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": self.temperature,
-            "response_format": {"type": "json_object"},
-        }
-        if self.max_tokens is not None:
-            request["max_tokens"] = self.max_tokens
+        messages = [
+            SystemMessage(content=DEVIATION_CHECK_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
 
         try:
-            response = await self.llm_client.chat.completions.create(**request)
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("LLM 返回内容为空")
-            return ScheduleAnalysis.model_validate_json(content)
-        except (AttributeError, IndexError, TypeError, ValueError, json.JSONDecodeError, ValidationError):
+            structured = self.model.with_structured_output(ScheduleAnalysis)
+            result = await structured.ainvoke(messages)
+            if isinstance(result, ScheduleAnalysis):
+                return result
+            # 少数供应商可能返回 dict，做一次兜底校验
+            return ScheduleAnalysis.model_validate(result)
+        except (AttributeError, TypeError, ValueError, ValidationError):
             logger.exception("[Schedule Agent] LLM 结构化响应解析失败")
         except Exception:
             logger.exception("[Schedule Agent] LLM 调用失败")
