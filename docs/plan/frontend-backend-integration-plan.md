@@ -2,13 +2,13 @@
 
 > 创建日期：2026-08-16
 >
-> 开发 worktree：`D:\A-AICodeWork\medical-evaluate-frontend-integration`
+> 开发工作区：`D:\A-AICodeWork\medical-evaluate`
 >
-> 开发分支：`feat/frontend-backend-integration`
+> 开发分支：`feat/frontend-api-integration`
 >
-> 基线提交：`a9d3960`
+> 基线提交：`35d8aab`
 >
-> 当前状态：前端 Mock/API 双适配已完成并通过 Mock 回归，等待后端接口真实联调
+> 当前状态：进入真实 API 联调与后端缺陷同步修复阶段
 
 ## 1. 目标与实施原则
 
@@ -215,3 +215,45 @@ heartbeat
 - [ ] 10.5 更新开发进度、测试指南和审查记录。
 - [ ] 10.6 测试通过后将 `feat/frontend-backend-integration` 合并回本地 `main`。
 - [ ] 10.7 工作区干净且本地 `main` 状态正确后，再推送远程 `main`。
+
+## 11. 2026-08-17 真实 API 闭环实施
+
+本轮以 `backend/docs/API.md` 为前端对接入口，同时以实际 FastAPI 路由、数据库设计和
+第一期文本闭环约束校正文档漂移。范围仅包含患者、量表、AI 对话任务、文本问诊、
+字段抽取和护士单会话实时监控；语音、传统问卷、知情同意、宣教、人工介入、评分和
+护士复核不在第一期真实 API 范围内。
+
+### 11.1 契约统一
+
+- [X] 11.1.1 REST 成功响应统一使用 `{code,message,data}`，HTTP Client 负责校验
+  `code` 并返回 `data`。
+- [X] 11.1.2 对齐患者、量表、任务、会话、历史和抽取 DTO，数字 ID 在映射边界转字符串。
+- [X] 11.1.3 对齐 `ai_dialogue`、任务编号、会话编号和消息发送路径。
+- [X] 11.1.4 SSE 使用患者端 `/api/sse/dialog/{session_no}` 与护士端
+  `/api/sse/monitor/{session_no}`，支持 `Last-Event-ID`。
+
+### 11.2 前端完整对接
+
+- [X] 11.2.1 任务创建页只使用后端患者和已发布量表，不在 API 失败时静默回退 Mock。
+- [X] 11.2.2 发布 AI 对话任务后保存后端 `task_no/session_no`，患者端可直接进入问诊。
+- [X] 11.2.3 患者对话页加载历史与抽取快照、订阅 SSE、发送患者答案并展示 AI 下一问。
+- [X] 11.2.4 护士监控页按会话订阅 SSE，实时展示问答、字段、约束和完成状态。
+- [X] 11.2.5 API 模式隐藏或禁用第一期未实现的操作，避免调用不存在的后端端点。
+- [X] 11.2.6 页面保留 Mock 模式，但 API 模式不得混入 Mock 数据。
+
+### 11.3 后端联调修复
+
+- [X] 11.3.1 修复任务创建 ORM 字段、采集模式枚举和统一响应包装。
+- [X] 11.3.2 创建任务时原子生成 `care_task`、`interaction_session` 和每量表
+  `assessment_instance`，提交后派发四个 Worker。
+- [X] 11.3.3 修复 AI 先问、患者同轮回答、DB 历史恢复和 Redis 状态恢复。
+- [X] 11.3.4 修复多量表 Extraction 写库、抽取事件和会话完成状态。
+- [X] 11.3.5 修正 SSE 信封、事件名、首问重放和护士监听路径。
+- [X] 11.3.6 更新 `backend/docs/API.md`，确保文档与实际代码一致。
+
+### 11.4 验证与交付
+
+- [X] 11.4.1 运行后端静态检查与现有测试。
+- [X] 11.4.2 运行前端单元测试、lint、typecheck 和 build。
+- [X] 11.4.3 使用真实浏览器验证桌面端和 390px 手机端关键流程及控制台。
+- [X] 11.4.4 完成代码审查、修复发现的问题并提交。
