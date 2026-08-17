@@ -1,13 +1,12 @@
 """智能体状态管理器
-作用：管理智能体状态的序列化、Redis存储、降级到数据库
+作用：管理智能体运行态的 Redis 存储与 TTL。
+说明：数据库事实来源已废弃 agent_states 表；可审计业务数据由 interaction/assessment 域持久化。
 """
-import pickle
 import logging
 from typing import Any, Dict, Optional
 from datetime import datetime
 
 from app.utils.redis_client import get_redis, get_async_redis
-from app.configs.app_config import get_app_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,6 @@ class AgentStateManager:
     def __init__(self):
         """初始化状态管理器"""
         self.redis = get_redis()
-        config = get_app_config()
         self.state_ttl = 3600  # 状态存活时间：1小时
 
     def _get_state_key(self, session_id: str) -> str:
@@ -65,13 +63,10 @@ class AgentStateManager:
                 logger.info(f"智能体状态保存成功: {session_id}")
             else:
                 logger.error(f"智能体状态保存失败: {session_id}")
-                # 降级：保存到数据库（TODO）
-                self._fallback_to_db(session_id, agent_state)
 
             return success
         except Exception as e:
             logger.error(f"保存智能体状态异常: {session_id} -> {e}")
-            self._fallback_to_db(session_id, agent_state)
             return False
 
     def load_agent_state(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -87,15 +82,13 @@ class AgentStateManager:
 
             if agent_state is None:
                 logger.warning(f"Redis中未找到智能体状态: {session_id}")
-                # 尝试从数据库恢复（TODO）
-                agent_state = self._load_from_db(session_id)
             else:
                 logger.info(f"智能体状态加载成功: {session_id}")
 
             return agent_state
         except Exception as e:
             logger.error(f"加载智能体状态异常: {session_id} -> {e}")
-            return self._load_from_db(session_id)
+            return None
 
     def delete_agent_state(self, session_id: str) -> bool:
         """删除智能体状态
@@ -161,41 +154,6 @@ class AgentStateManager:
         except Exception as e:
             logger.error(f"获取智能体状态TTL异常: {session_id} -> {e}")
             return -2
-
-    def _fallback_to_db(self, session_id: str, agent_state: Dict[str, Any]):
-        """降级到数据库保存
-        作用：Redis失败时将状态保存到数据库
-        Args:
-            - session_id: 会话ID
-            - agent_state: 智能体状态字典
-        """
-        try:
-            # TODO: 实现数据库降级逻辑
-            # 1. 序列化agent_state为JSON或pickle
-            # 2. 插入agent_states表
-            # 3. 记录降级日志
-            logger.warning(f"智能体状态降级保存（未实现）: {session_id}")
-        except Exception as e:
-            logger.error(f"降级保存失败: {session_id} -> {e}")
-
-    def _load_from_db(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """从数据库恢复智能体状态
-        Args:
-            - session_id: 会话ID
-        Return:
-            - agent_state: 智能体状态字典，不存在返回None
-        """
-        try:
-            # TODO: 实现数据库恢复逻辑
-            # 1. 查询agent_states表
-            # 2. 反序列化状态
-            # 3. 恢复到Redis
-            logger.warning(f"从数据库恢复智能体状态（未实现）: {session_id}")
-            return None
-        except Exception as e:
-            logger.error(f"数据库恢复失败: {session_id} -> {e}")
-            return None
-
 
 class AsyncAgentStateManager:
     """异步智能体状态管理器

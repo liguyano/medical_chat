@@ -10,18 +10,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.models.base import Base
-# 导入所有模型确保被注册到Base.metadata
-from app.models import (
-    AssessmentTask,
-    DialogSession,
-    DialogMessage,
-    ExtractedField,
-    AgentState,
-    NurseRating,
-    EducationRecord,
-    ConsentForm,
-)
+# 导入统一模型包，确保批次 A 的全部模型注册到 Base.metadata。
+from app.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

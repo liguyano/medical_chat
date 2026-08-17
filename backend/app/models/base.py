@@ -1,41 +1,94 @@
-"""数据库基础配置
-作用：定义SQLAlchemy Base类和数据库会话
+"""数据库模型基础设施
+作用：定义 SQLAlchemy 2.0 声明基类、统一业务字段和数据库会话。
 """
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from datetime import datetime
+from typing import Generator, Optional
 
-# SQLAlchemy Base类
-Base = declarative_base()
+from sqlalchemy import BigInteger, DateTime, Integer, String, create_engine, func, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
-# 数据库引擎（将在配置加载后初始化）
+
+class Base(DeclarativeBase):
+    """所有 ORM 模型的声明基类。"""
+
+
+class BusinessBaseMixin:
+    """业务表统一字段
+    作用：落实《数据库表业务设计.md》§4 的统一字段规范。
+    """
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    creator: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="创建人账号或系统标识")
+    updator: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="最后更新人账号或系统标识")
+    create_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.now,
+        server_default=func.now(),
+        comment="创建时间",
+    )
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.now,
+        onupdate=datetime.now,
+        server_default=func.now(),
+        comment="更新时间",
+    )
+    deleted: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="逻辑删除：0未删除，1已删除",
+    )
+
+
 engine = None
-SessionLocal = None
+SessionLocal: Optional[sessionmaker[Session]] = None
 
 
-def init_db(database_url: str):
-    """初始化数据库引擎和会话
-    作用：根据配置创建数据库引擎和会话工厂
+def init_db(
+    database_url: str,
+    *,
+    pool_size: int = 10,
+    max_overflow: int = 20,
+    pool_pre_ping: bool = True,
+    echo: bool = False,
+) -> None:
+    """初始化数据库引擎和会话工厂
     Args:
-        - database_url: 数据库连接字符串
+        - database_url: PostgreSQL 连接字符串
+        - pool_size: 连接池常驻连接数
+        - max_overflow: 连接池额外连接数
+        - pool_pre_ping: 借出连接前是否检查可用性
+        - echo: 是否输出 SQL 日志
     """
     global engine, SessionLocal
     engine = create_engine(
         database_url,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-        echo=False,
+        pool_pre_ping=pool_pre_ping,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        echo=echo,
     )
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
 
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     """获取数据库会话
-    作用：FastAPI依赖注入使用的数据库会话生成器
+    作用：提供 FastAPI 依赖注入使用的数据库会话生成器。
     Return:
-        - db: 数据库会话对象
+        - db: SQLAlchemy Session
     """
+    if SessionLocal is None:
+        raise RuntimeError("数据库未初始化，请先调用 init_db()")
+
     db = SessionLocal()
     try:
         yield db

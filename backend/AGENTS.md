@@ -31,6 +31,13 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `docs/后端详细设计方案.md` 的表结构章节仅保留指针，不再作为数据库依据。
 - 智能体运行态存 Redis（TTL），不映射为独立 `agent_states` 表。
 
+当前需求1批次 A ORM 已落地 22 张表，按领域分组：
+- `app/models/patient_task.py` — `patient` / `patient_encounter` / `care_task`
+- `app/models/assessment_template.py` — 量表配置 7 表
+- `app/models/interaction.py` — AI 对话 6 表
+- `app/models/assessment_execution.py` — 评估执行 6 表
+- Alembic 初始迁移：`26533d4669bd_initial_domain_model_batch_a.py`
+
 
 ## 项目架构
 ```text

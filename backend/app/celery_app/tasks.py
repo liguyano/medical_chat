@@ -83,7 +83,7 @@ def extraction_agent_worker(self, session_id: str, form_ids: list):
         # 2. 批量读取对话历史
         # 3. 调用大模型抽取字段
         # 4. 计算置信度
-        # 5. 保存到extracted_fields表
+        # 5. 保存为 assessment_submission + assessment_answer
         # 6. 发布进度更新事件
 
         logger.info(f"[Extraction Agent] 任务完成: session_id={session_id}")

@@ -235,7 +235,7 @@ class ExtractionAgentSubscriber(EventSubscriber):
         # TODO: 实现字段抽取逻辑
         # 1. 读取对话历史
         # 2. 调用大模型抽取字段
-        # 3. 保存到extracted_fields表
+        # 3. 保存为 assessment_submission + assessment_answer
         # 4. 发布抽取结果事件
 
 
