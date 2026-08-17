@@ -121,3 +121,21 @@ from medagent.configs.agent_config import get_agent_config
 # from app.configs.app_config import ...  # ← will fail CI
 ```
 
+## Schedule Agent 边界
+
+- SDK 核心位于
+  `packages/medagent/agents/service_agent/schedule_agent/`，包含问题任务模型、
+  提示词、LLM 语义检查、进度状态和工具完整性检查；该目录禁止导入 `app.*`。
+- 应用编排位于 `app/workers/schedule_agent_runner.py`，负责读取 PostgreSQL
+  对话历史、消费 Redis Stream、保存 Redis 检查点以及发布约束/结束事件。
+- 独立 Celery worker 通过 `app/celery_app/runtime.py` 按进程初始化数据库与
+  Redis；`worker_process_init` 负责 prefork 初始化，Schedule Agent 任务入口
+  额外执行幂等兜底，以兼容 Windows solo worker。
+- `app/managers/assessment_loader.py` 只加载“当前生效且已发布”的量表版本，
+  并将 ORM 数据转换为 `medagent` 的 `QuestionTask`。
+- `app/managers/assessment_catalog_importer.py` 幂等导入
+  `docs/structured/assessment-scales`。源文件为 `pending_review` 时必须保持“审核中”，
+  临床审核前禁止直接发布。
+- 文本模型统一使用 `config.yaml` 的 `models` 列表和 `agent_models` 绑定，通过
+  OpenAI 兼容接口调用；豆包实时语音等非 OpenAI 协议模型放在 `voice_models`。
+

@@ -1,11 +1,11 @@
 """Schedule Agent 提示词模板
-作用：定义偏离检测的System Prompt和User Prompt模板
+作用：定义偏离检测的 System Prompt 和 User Prompt 模板。
 """
+
 import json
-from typing import List, Dict
+from typing import Any
 
-from app.managers.assessment_loader import QuestionTask
-
+from .models import QuestionTask
 
 DEVIATION_CHECK_SYSTEM_PROMPT = """你是一个医疗评估调度助手，负责监控 AI 与患者的对话是否按照量表问题进行。
 
@@ -13,6 +13,7 @@ DEVIATION_CHECK_SYSTEM_PROMPT = """你是一个医疗评估调度助手，负责
 1. 判断最近的对话是否偏离了量表问题列表
 2. 识别对话中是否涉及了量表问题的回答
 3. 给出明确的偏离判断（是/否）和原因
+4. 根据对话证据识别已经得到患者有效回答的量表问题编码
 
 ## 偏离判断标准
 
@@ -41,6 +42,7 @@ DEVIATION_CHECK_SYSTEM_PROMPT = """你是一个医疗评估调度助手，负责
 {
   "is_deviation": bool,
   "reason": str,
+  "completed_questions": [str],
   "current_focus": str,
   "suggested_action": str
 }
@@ -48,14 +50,15 @@ DEVIATION_CHECK_SYSTEM_PROMPT = """你是一个医疗评估调度助手，负责
 字段说明：
 - is_deviation: true表示偏离，false表示正常
 - reason: 判断理由（简短说明）
+- completed_questions: 仅填写有明确患者回答证据的问题编码，不允许猜测
 - current_focus: 当前对话焦点是什么
 - suggested_action: 如果偏离，建议采取的行动
 """
 
 
 def build_deviation_check_prompt(
-    remaining_tasks: List[QuestionTask],
-    dialog_history: List[Dict[str, str]],
+    remaining_tasks: list[QuestionTask],
+    dialog_history: list[dict[str, str]],
     turn_number: int,
 ) -> str:
     """构建偏离检测的User Prompt
@@ -90,15 +93,18 @@ def build_deviation_check_prompt(
 
 1. 分析最近的对话内容
 2. 判断 AI 是否偏离了量表问题列表
-3. 严格按照JSON格式输出判断结果
+3. 识别已经获得明确回答的问题编码
+4. 严格按照JSON格式输出判断结果
 
 记住：追问、共情、宣教、开场都不算偏离。只有持续谈论量表之外的话题才算偏离。
+
+{get_few_shot_examples_text()}
 """
 
     return prompt
 
 
-def _format_remaining_tasks(tasks: List[QuestionTask]) -> str:
+def _format_remaining_tasks(tasks: list[QuestionTask]) -> str:
     """格式化待完成任务列表
     Args:
         - tasks: 任务列表
@@ -111,8 +117,11 @@ def _format_remaining_tasks(tasks: List[QuestionTask]) -> str:
     lines = []
     for idx, task in enumerate(tasks[:5], 1):  # 只显示前5个待完成问题
         required_mark = "【必答】" if task.required else "【可选】"
+        options = "、".join(option.option_label for option in task.options)
+        option_text = f"；可选项：{options}" if options else ""
         lines.append(
-            f"{idx}. {required_mark} {task.patient_text} (编码: {task.question_code})"
+            f"{idx}. {required_mark} {task.patient_text} "
+            f"(编码: {task.question_code}{option_text})"
         )
 
     if len(tasks) > 5:
@@ -121,7 +130,7 @@ def _format_remaining_tasks(tasks: List[QuestionTask]) -> str:
     return "\n".join(lines)
 
 
-def _format_dialog_history(history: List[Dict[str, str]]) -> str:
+def _format_dialog_history(history: list[dict[str, str]]) -> str:
     """格式化对话历史
     Args:
         - history: 对话历史列表
@@ -147,7 +156,7 @@ def _format_dialog_history(history: List[Dict[str, str]]) -> str:
 
 
 # Few-shot 示例（用于提高准确率）
-FEW_SHOT_EXAMPLES = [
+FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
     {
         "scenario": "正常追问场景",
         "dialog": [
@@ -159,6 +168,7 @@ FEW_SHOT_EXAMPLES = [
         "expected_output": {
             "is_deviation": False,
             "reason": "AI对患者回答进行合理追问，这是正常的评估流程",
+            "completed_questions": ["smoking_status"],
             "current_focus": "吸烟情况详细评估",
             "suggested_action": "无需干预，继续当前评估",
         },
@@ -175,6 +185,7 @@ FEW_SHOT_EXAMPLES = [
         "expected_output": {
             "is_deviation": True,
             "reason": "AI回答了与量表无关的生活服务问题，且持续多轮未回到评估",
+            "completed_questions": [],
             "current_focus": "生活服务咨询",
             "suggested_action": "提醒AI回到量表问题：您是否吸烟？",
         },
@@ -192,6 +203,7 @@ FEW_SHOT_EXAMPLES = [
         "expected_output": {
             "is_deviation": False,
             "reason": "AI进行了共情回应后，及时引导回到量表问题（疼痛评分）",
+            "completed_questions": [],
             "current_focus": "疼痛评估",
             "suggested_action": "无需干预，AI表现良好",
         },
@@ -209,6 +221,7 @@ FEW_SHOT_EXAMPLES = [
         "expected_output": {
             "is_deviation": False,
             "reason": "AI根据患者吸烟情况进行健康宣教，这是系统要求的功能",
+            "completed_questions": ["smoking_status"],
             "current_focus": "吸烟健康宣教",
             "suggested_action": "无需干预，宣教完成后会继续评估",
         },
@@ -227,7 +240,8 @@ def get_few_shot_examples_text() -> str:
     for idx, example in enumerate(FEW_SHOT_EXAMPLES, 1):
         lines.append(f"### 示例{idx}：{example['scenario']}\n")
         lines.append("对话：")
-        for msg in example["dialog"]:
+        dialog: list[dict[str, str]] = example["dialog"]
+        for msg in dialog:
             role = "AI" if msg["role"] == "assistant" else "患者"
             lines.append(f"{role}: {msg['content']}")
         lines.append("\n判断结果：")

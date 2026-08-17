@@ -1,365 +1,286 @@
 """Schedule Agent 核心逻辑
-作用：调度智能体，监控Dialog Agent对话进度，检测偏离，发布约束提示。
+作用：监控量表对话进度、检测语义偏离并检查关键工具调用。
 """
+
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import ValidationError
 
-from app.managers.assessment_loader import QuestionTask
+from .models import (
+    QuestionTask,
+    ScheduleAgentOutput,
+    ScheduleAnalysis,
+    ToolCallRecord,
+)
+from .prompts import DEVIATION_CHECK_SYSTEM_PROMPT, build_deviation_check_prompt
 
 logger = logging.getLogger(__name__)
 
 
-class ScheduleAgentOutput(BaseModel):
-    """Schedule Agent 输出 Schema
-    作用：结构化输出调度结果
-    """
-
-    is_deviation: bool = Field(description="是否偏离量表问题")
-    constraint_prompt: str = Field(default="", description="约束提示词（偏离时非空）")
-    completed_questions: List[str] = Field(
-        default_factory=list, description="已完成的问题编码列表"
-    )
-    remaining_questions: List[str] = Field(
-        default_factory=list, description="待完成的问题编码列表"
-    )
-    missing_tool_calls: List[str] = Field(
-        default_factory=list, description="遗漏的工具调用列表"
-    )
-    next_suggested_question: str = Field(default="", description="建议下一个提问")
-    progress_percentage: float = Field(default=0.0, description="完成进度百分比")
-
-
 class ScheduleAgent:
-    """调度智能体
-    作用：
-    1. 监控Dialog Agent对话进度
-    2. 基于LLM检测对话是否偏离量表问题
-    3. 检查工具调用完整性
-    4. 发布约束提示到Redis Stream
-    """
+    """量表评估调度智能体。"""
 
     def __init__(
         self,
         session_id: str,
-        task_list: List[QuestionTask],
+        task_list: list[QuestionTask],
         llm_client: Any,
+        *,
+        model: str,
         check_interval: int = 5,
-    ):
-        """初始化Schedule Agent
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+    ) -> None:
+        """初始化调度智能体
         Args:
-            - session_id: 会话ID
+            - session_id: 交互会话编号
             - task_list: 量表问题任务列表
-            - llm_client: LLM客户端（OpenAI兼容接口）
-            - check_interval: 检查间隔（每N轮对话检查一次）
+            - llm_client: OpenAI 兼容异步客户端
+            - model: 模型配置名称
+            - check_interval: 每隔多少轮执行一次检查
+            - temperature: 调度判断温度
+            - max_tokens: 单次判断最大输出 token
         """
+        if check_interval <= 0:
+            raise ValueError("check_interval 必须大于 0")
+
         self.session_id = session_id
         self.task_list = task_list
         self.llm_client = llm_client
+        self.model = model
         self.check_interval = check_interval
-        self.turn_counter = 0  # 对话轮次计数器
-
-        # 构建问题编码映射
-        self.question_map = {q.question_code: q for q in task_list}
-
-        logger.info(
-            f"[Schedule Agent] 初始化: session={session_id}, 问题数={len(task_list)}, 检查间隔={check_interval}轮"
-        )
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.turn_counter = 0
+        self.completed_question_codes: set[str] = {
+            task.question_code for task in task_list if task.completed
+        }
+        self.question_map = {task.question_code: task for task in task_list}
 
     async def evaluate(
-        self, dialog_history: List[Dict[str, str]]
+        self,
+        dialog_history: list[dict[str, str]],
+        *,
+        tool_calls: list[ToolCallRecord | dict[str, Any]] | None = None,
+        force: bool = False,
     ) -> ScheduleAgentOutput:
-        """评估对话进度并检测偏离
-        作用：每5轮对话检查一次，判断是否偏离，检查工具调用
-        Args:
-            - dialog_history: 对话历史（LangChain格式）
-                格式: [{"role": "assistant", "content": "..."}, {"role": "user", "content": "..."}]
-        Return:
-            - output: ScheduleAgentOutput结构化输出
+        """评估一次对话轮次
+        作用：按检查间隔调用 LLM，并合并进度与工具完整性结果。
         """
         self.turn_counter += 1
+        if not force and self.turn_counter % self.check_interval != 0:
+            return self._build_output(checked=False)
 
-        # 1. 检查轮次，每N轮才执行检查
-        if self.turn_counter % self.check_interval != 0:
-            return self._skip_check()
+        remaining_before_check = self._remaining_codes()
+        analysis = await self._analyze_dialog(dialog_history, remaining_before_check)
+        self._merge_completed_questions(analysis.completed_questions)
 
-        logger.info(f"[Schedule Agent] 第{self.turn_counter}轮检查: session={self.session_id}")
-
-        # 2. 统计已完成和待完成的问题
-        completed = await self._get_completed_questions(dialog_history)
-        remaining = self._get_remaining_questions(completed)
-
-        # 3. 检测对话偏离（调用 LLM）
-        is_deviation = await self._check_deviation(dialog_history, remaining)
-
-        # 4. 检查工具调用完整性
-        missing_tools = await self._check_tool_calls(dialog_history)
-
-        # 5. 生成约束提示
+        normalized_calls: list[ToolCallRecord] = []
+        for call in tool_calls or []:
+            try:
+                normalized_calls.append(
+                    call
+                    if isinstance(call, ToolCallRecord)
+                    else ToolCallRecord.model_validate(call)
+                )
+            except ValidationError:
+                logger.warning("[Schedule Agent] 忽略无效工具调用记录: %r", call)
+        missing_tools = self._check_tool_calls(dialog_history, normalized_calls)
+        remaining = self._remaining_codes()
         constraint_prompt = self._build_constraint_prompt(
-            is_deviation, missing_tools, remaining
-        )
-
-        # 6. 计算进度
-        total = len(self.task_list)
-        completed_count = len(completed)
-        progress = (completed_count / total * 100) if total > 0 else 0.0
-
-        output = ScheduleAgentOutput(
-            is_deviation=is_deviation or bool(missing_tools),
-            constraint_prompt=constraint_prompt,
-            completed_questions=completed,
+            analysis=analysis,
+            missing_tools=missing_tools,
             remaining_questions=remaining,
-            missing_tool_calls=missing_tools,
-            next_suggested_question=remaining[0] if remaining else "",
-            progress_percentage=round(progress, 2),
+        )
+        return self._build_output(
+            checked=True,
+            is_deviation=analysis.is_deviation or bool(missing_tools),
+            constraint_prompt=constraint_prompt,
+            missing_tools=missing_tools,
         )
 
-        logger.info(
-            f"[Schedule Agent] 检查结果: 偏离={output.is_deviation}, "
-            f"进度={completed_count}/{total} ({output.progress_percentage}%)"
-        )
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """恢复 Redis 中的轻量运行状态。"""
+        self.turn_counter = max(int(state.get("turn_counter", 0)), 0)
+        completed = state.get("completed_questions", [])
+        if isinstance(completed, list):
+            self._merge_completed_questions(completed)
 
-        return output
-
-    def _skip_check(self) -> ScheduleAgentOutput:
-        """跳过本次检查，返回空结果
-        作用：非检查轮次时，返回默认输出
-        """
-        return ScheduleAgentOutput(
-            is_deviation=False,
-            constraint_prompt="",
-            completed_questions=[],
-            remaining_questions=[q.question_code for q in self.task_list],
-            missing_tool_calls=[],
-        )
-
-    async def _check_deviation(
-        self, dialog_history: List[Dict[str, str]], remaining_questions: List[str]
-    ) -> bool:
-        """基于 LLM 判断对话是否偏离
-        作用：调用LLM分析对话历史，判断是否偏离量表问题
-        Args:
-            - dialog_history: 对话历史
-            - remaining_questions: 待完成的问题列表
-        Return:
-            - is_deviation: True表示偏离，False表示正常
-        """
-        try:
-            # 构建提示词
-            from .schedule_agent_prompts import (
-                build_deviation_check_prompt,
-                DEVIATION_CHECK_SYSTEM_PROMPT,
-            )
-
-            # 获取最近10轮对话
-            recent_history = dialog_history[-20:] if len(dialog_history) > 20 else dialog_history
-
-            # 获取待完成问题的详细信息
-            remaining_tasks = [
-                self.question_map[qc] for qc in remaining_questions if qc in self.question_map
-            ]
-
-            user_prompt = build_deviation_check_prompt(
-                remaining_tasks=remaining_tasks,
-                dialog_history=recent_history,
-                turn_number=self.turn_counter,
-            )
-
-            # 调用 LLM
-            response = await self.llm_client.chat.completions.create(
-                model=self.llm_client.model,
-                messages=[
-                    {"role": "system", "content": DEVIATION_CHECK_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.1,  # 低温度，提高判断稳定性
-                response_format={"type": "json_object"},  # 强制JSON输出
-            )
-
-            # 解析结果
-            result_text = response.choices[0].message.content
-            result = json.loads(result_text)
-
-            is_deviation = result.get("is_deviation", False)
-            reason = result.get("reason", "")
-
-            if is_deviation:
-                logger.warning(f"[Schedule Agent] 检测到偏离: {reason}")
-
-            return is_deviation
-
-        except Exception as e:
-            logger.error(f"[Schedule Agent] 偏离检测失败: {e}")
-            # 失败时默认返回False，避免误判
-            return False
-
-    async def _check_tool_calls(
-        self, dialog_history: List[Dict[str, str]]
-    ) -> List[str]:
-        """检查是否遗漏工具调用
-        作用：基于关键词规则检查对话中是否提到特征词但未调用相应工具
-        Args:
-            - dialog_history: 对话历史
-        Return:
-            - missing_tools: 遗漏的工具列表（例如 ["get_education_material(tobacco)"]）
-        """
-        missing_tools: List[str] = []
-
-        # 关键词 -> 工具映射规则
-        keyword_tool_map = {
-            "抽烟": "get_education_material(category='tobacco')",
-            "吸烟": "get_education_material(category='tobacco')",
-            "喝酒": "get_education_material(category='alcohol')",
-            "饮酒": "get_education_material(category='alcohol')",
-            "手术": "trigger_consent_form(form_type='surgery')",
-            "青霉素过敏": "remind_doctor_allergy",
-            "药物过敏": "remind_doctor_allergy",
+    def dump_state(self) -> dict[str, Any]:
+        """导出可持久化的轻量运行状态。"""
+        return {
+            "turn_counter": self.turn_counter,
+            "completed_questions": self._completed_codes(),
         }
 
-        try:
-            # 1. 收集对话中出现的关键词
-            mentioned_keywords = set()
-            for msg in dialog_history:
-                if msg["role"] == "user":
-                    content = msg["content"].lower()
-                    for keyword in keyword_tool_map.keys():
-                        if keyword in content:
-                            mentioned_keywords.add(keyword)
-
-            # 2. 检查是否调用了对应工具
-            # 注意：这里简化处理，实际应该检查 tool_call 事件
-            # TODO: 从 dialog_history 或 Redis Stream 读取 tool_call 事件
-            called_tools = self._extract_tool_calls_from_history(dialog_history)
-
-            # 3. 找出遗漏的工具
-            for keyword in mentioned_keywords:
-                tool_name = keyword_tool_map[keyword]
-                # 简化判断：只检查工具名称前缀
-                tool_prefix = tool_name.split("(")[0]
-                if not any(tool_prefix in called for called in called_tools):
-                    missing_tools.append(tool_name)
-
-            if missing_tools:
-                logger.warning(f"[Schedule Agent] 检测到遗漏工具: {missing_tools}")
-
-        except Exception as e:
-            logger.error(f"[Schedule Agent] 工具调用检查失败: {e}")
-
-        return missing_tools
-
-    def _extract_tool_calls_from_history(
-        self, dialog_history: List[Dict[str, str]]
-    ) -> List[str]:
-        """从对话历史中提取已调用的工具
-        作用：解析对话中的工具调用记录
-        Args:
-            - dialog_history: 对话历史
-        Return:
-            - called_tools: 已调用的工具名称列表
-        """
-        # TODO: 实际应该从 Redis Stream 的 tool_call 事件中读取
-        # 这里简化处理，从对话内容中查找工具调用标记
-        called_tools = []
-        for msg in dialog_history:
-            if msg["role"] == "assistant":
-                content = msg["content"]
-                # 假设工具调用会在消息中体现（实际应该是独立事件）
-                if "宣教" in content or "教育材料" in content:
-                    called_tools.append("get_education_material")
-                if "知情同意" in content:
-                    called_tools.append("trigger_consent_form")
-        return called_tools
-
-    async def _get_completed_questions(
-        self, dialog_history: List[Dict[str, str]]
-    ) -> List[str]:
-        """从对话历史中识别已完成的问题
-        作用：分析对话，判断哪些问题已经得到回答
-        Args:
-            - dialog_history: 对话历史
-        Return:
-            - completed: 已完成的问题编码列表
-        """
-        # TODO: 这里应该调用 LLM 或使用 Field Extraction Agent 的结果
-        # 暂时简化：假设每个问题被提及且患者回答了，就算完成
-        completed = []
-
-        try:
-            # 简化实现：检查问题文本是否出现在对话中
-            for task in self.task_list:
-                question_text = task.patient_text
-                for msg in dialog_history:
-                    if msg["role"] == "assistant" and question_text in msg["content"]:
-                        # AI提问了
-                        # 检查下一条是否有患者回答
-                        idx = dialog_history.index(msg)
-                        if idx + 1 < len(dialog_history):
-                            next_msg = dialog_history[idx + 1]
-                            if next_msg["role"] == "user" and len(next_msg["content"]) > 3:
-                                completed.append(task.question_code)
-                                task.completed = True
-                                break
-
-        except Exception as e:
-            logger.error(f"[Schedule Agent] 统计已完成问题失败: {e}")
-
-        return completed
-
-    def _get_remaining_questions(self, completed: List[str]) -> List[str]:
-        """获取待完成的问题列表
-        Args:
-            - completed: 已完成的问题编码列表
-        Return:
-            - remaining: 待完成的问题编码列表
-        """
-        return [
-            q.question_code
-            for q in self.task_list
-            if q.question_code not in completed
+    async def _analyze_dialog(
+        self,
+        dialog_history: list[dict[str, str]],
+        remaining_questions: list[str],
+    ) -> ScheduleAnalysis:
+        """调用 OpenAI 兼容接口执行语义判断。"""
+        remaining_tasks = [
+            self.question_map[code]
+            for code in remaining_questions
+            if code in self.question_map
         ]
+        prompt = build_deviation_check_prompt(
+            remaining_tasks=remaining_tasks,
+            dialog_history=dialog_history[-20:],
+            turn_number=self.turn_counter,
+        )
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": DEVIATION_CHECK_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": self.temperature,
+            "response_format": {"type": "json_object"},
+        }
+        if self.max_tokens is not None:
+            request["max_tokens"] = self.max_tokens
+
+        try:
+            response = await self.llm_client.chat.completions.create(**request)
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("LLM 返回内容为空")
+            return ScheduleAnalysis.model_validate_json(content)
+        except (AttributeError, IndexError, TypeError, ValueError, json.JSONDecodeError, ValidationError):
+            logger.exception("[Schedule Agent] LLM 结构化响应解析失败")
+        except Exception:
+            logger.exception("[Schedule Agent] LLM 调用失败")
+        return ScheduleAnalysis()
+
+    def _merge_completed_questions(self, question_codes: list[str]) -> None:
+        """只接纳当前量表中存在的问题编码。"""
+        valid_codes = set(question_codes) & self.question_map.keys()
+        self.completed_question_codes.update(valid_codes)
+        for code in valid_codes:
+            self.question_map[code].completed = True
+
+    def _check_tool_calls(
+        self,
+        dialog_history: list[dict[str, str]],
+        tool_calls: list[ToolCallRecord],
+    ) -> list[str]:
+        """检查最近对话命中的宣教/同意工具是否已正确调用。"""
+        recent_user_text = "\n".join(
+            message.get("content", "")
+            for message in dialog_history[-10:]
+            if message.get("role") == "user"
+        )
+        requirements = [
+            (
+                ("抽烟", "吸烟"),
+                ("不抽烟", "不吸烟", "已经戒烟", "戒烟了"),
+                "get_education_material",
+                {"category": "tobacco"},
+                "get_education_material(category='tobacco')",
+            ),
+            (
+                ("喝酒", "饮酒"),
+                ("不喝酒", "不饮酒", "已经戒酒", "戒酒了"),
+                "get_education_material",
+                {"category": "alcohol"},
+                "get_education_material(category='alcohol')",
+            ),
+            (
+                ("手术",),
+                ("不做手术", "无需手术"),
+                "trigger_consent_form",
+                {"form_type": "surgery"},
+                "trigger_consent_form(form_type='surgery')",
+            ),
+        ]
+
+        missing: list[str] = []
+        for keywords, negative_phrases, tool_name, expected_arguments, label in requirements:
+            has_positive_feature = any(
+                keyword in recent_user_text for keyword in keywords
+            ) and not any(
+                negative in recent_user_text for negative in negative_phrases
+            )
+            if not has_positive_feature:
+                continue
+            matched = any(
+                call.name == tool_name
+                and all(call.arguments.get(key) == value for key, value in expected_arguments.items())
+                for call in tool_calls
+            )
+            if not matched:
+                missing.append(label)
+        return missing
 
     def _build_constraint_prompt(
         self,
-        is_deviation: bool,
-        missing_tools: List[str],
-        remaining_questions: List[str],
+        *,
+        analysis: ScheduleAnalysis,
+        missing_tools: list[str],
+        remaining_questions: list[str],
     ) -> str:
-        """生成约束提示词
-        作用：当偏离或遗漏工具时，生成具体的约束提示
-        Args:
-            - is_deviation: 是否偏离
-            - missing_tools: 遗漏的工具列表
-            - remaining_questions: 待完成问题列表
-        Return:
-            - constraint_prompt: 约束提示词
-        """
-        if not is_deviation and not missing_tools:
-            return ""
-
-        prompts = []
-
-        if is_deviation and remaining_questions:
-            next_question_code = remaining_questions[0]
-            if next_question_code in self.question_map:
-                next_task = self.question_map[next_question_code]
+        """组合偏离引导和工具补偿约束。"""
+        prompts: list[str] = []
+        if analysis.is_deviation:
+            if analysis.suggested_action:
+                prompts.append(analysis.suggested_action)
+            elif remaining_questions:
                 prompts.append(
-                    f"你偏离了量表问题列表，请回到问题：{next_task.patient_text}"
+                    f"请结束无关话题，并自然引导患者回答："
+                    f"{self.question_map[remaining_questions[0]].patient_text}"
                 )
 
-        if missing_tools:
-            tool_prompts = []
-            for tool in missing_tools:
-                if "tobacco" in tool:
-                    tool_prompts.append("你必须对患者进行抽烟相关的健康宣教")
-                elif "alcohol" in tool:
-                    tool_prompts.append("你必须对患者进行饮酒相关的健康宣教")
-                elif "surgery" in tool:
-                    tool_prompts.append("你必须让患者阅读手术知情同意书")
-                elif "allergy" in tool:
-                    tool_prompts.append("你必须提醒患者下次就医时告知医生药物过敏史")
-            prompts.extend(tool_prompts)
+        for tool in missing_tools:
+            if "tobacco" in tool:
+                prompts.append("必须调用戒烟宣教工具，并完成吸烟频率与吸烟量追问。")
+            elif "alcohol" in tool:
+                prompts.append("必须调用饮酒宣教工具，并完成饮酒频率与饮酒量追问。")
+            elif "surgery" in tool:
+                prompts.append("必须调用手术知情同意书工具，引导患者阅读并确认。")
+        return "\n".join(dict.fromkeys(prompts))
 
-        return "\n".join(prompts)
+    def _build_output(
+        self,
+        *,
+        checked: bool,
+        is_deviation: bool = False,
+        constraint_prompt: str = "",
+        missing_tools: list[str] | None = None,
+    ) -> ScheduleAgentOutput:
+        """根据当前累积状态构建输出。"""
+        completed = self._completed_codes()
+        remaining = self._remaining_codes()
+        total = len(self.task_list)
+        progress = round(len(completed) / total * 100, 2) if total else 100.0
+        next_question = (
+            self.question_map[remaining[0]].patient_text if remaining else ""
+        )
+        return ScheduleAgentOutput(
+            checked=checked,
+            is_deviation=is_deviation,
+            constraint_prompt=constraint_prompt,
+            completed_questions=completed,
+            remaining_questions=remaining,
+            missing_tool_calls=missing_tools or [],
+            next_suggested_question=next_question,
+            progress_percentage=progress,
+        )
+
+    def _completed_codes(self) -> list[str]:
+        """按量表原始顺序返回已完成问题。"""
+        return [
+            task.question_code
+            for task in self.task_list
+            if task.question_code in self.completed_question_codes
+        ]
+
+    def _remaining_codes(self) -> list[str]:
+        """按量表原始顺序返回待完成问题。"""
+        return [
+            task.question_code
+            for task in self.task_list
+            if task.question_code not in self.completed_question_codes
+        ]

@@ -6,9 +6,18 @@
 import logging
 
 from celery import Celery
-from kombu import Queue, Exchange
+from celery.signals import worker_process_init
+from kombu import Exchange, Queue
 
 logger = logging.getLogger(__name__)
+
+
+@worker_process_init.connect
+def _initialize_worker_process_runtime(**_kwargs) -> None:
+    """在每个 Celery 执行进程中初始化数据库与 Redis。"""
+    from app.celery_app.runtime import ensure_worker_runtime
+
+    ensure_worker_runtime()
 
 
 def _build_celery_app() -> Celery:

@@ -11,16 +11,15 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
-
 
 # ==================== 子配置模型 ====================
 
@@ -68,7 +67,7 @@ class RedisConfig(BaseModel):
     cache_db: int = 0
     broker_db: int = 1
     backend_db: int = 2
-    password: Optional[str] = None
+    password: str | None = None
     stream_maxlen: int = 10000
 
     def url(self, db: int) -> str:
@@ -88,8 +87,8 @@ class RedisConfig(BaseModel):
 
 class CeleryConfig(BaseModel):
     """Celery 配置"""
-    broker_url: Optional[str] = None
-    backend_url: Optional[str] = None
+    broker_url: str | None = None
+    backend_url: str | None = None
     task_time_limit: int = 1800
     task_soft_time_limit: int = 1500
 
@@ -99,26 +98,71 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
     # 使用别名 json 对应 YAML 键，避免与 BaseModel.json 属性冲突
     json_format: bool = Field(default=False, alias="json")
-    file: Optional[str] = None
+    file: str | None = None
 
     model_config = {"populate_by_name": True}
 
 
-class LLMConfig(BaseModel):
-    """LLM 模型配置（OpenAI 兼容接口）"""
+class ModelConfig(BaseModel):
+    """OpenAI 兼容文本模型配置。"""
+
+    model_config = ConfigDict(extra="allow")
+
     name: str
+    display_name: str
+    use: str = "openai:AsyncOpenAI"
     model: str
     api_base: str
     api_key: str
-    timeout: float = 30.0
+    timeout: float = 600.0
     max_retries: int = 2
-    temperature: float = 0.7
-    max_tokens: Optional[int] = None
+    enable_prompt_caching: bool = False
+    prompt_cache_ttl: str | None = None
+    supports_thinking: bool = False
+    supports_vision: bool = False
+    supports_reasoning_effort: bool = False
+    when_thinking_enabled: dict[str, Any] | None = None
+    when_thinking_disabled: dict[str, Any] | None = None
+
+    def resolved_api_key(self) -> str:
+        """解析 `$ENV` 或 `${ENV}` 形式的密钥引用。"""
+        if not self.api_key.startswith("$"):
+            return self.api_key
+        variable = self.api_key[1:]
+        if variable.startswith("{") and variable.endswith("}"):
+            variable = variable[1:-1]
+        value = os.getenv(variable)
+        if not value:
+            raise RuntimeError(f"模型 {self.name} 缺少环境变量: {variable}")
+        return value
+
+
+class VoiceModelConfig(BaseModel):
+    """非 OpenAI 协议的实时语音模型配置。"""
+
+    name: str
+    model: str
+    websocket_url: str
+    api_key: str
+    timeout: float = 60.0
+    max_retries: int = 2
+
+    def resolved_api_key(self) -> str:
+        """解析实时语音模型的环境变量密钥引用。"""
+        if not self.api_key.startswith("$"):
+            return self.api_key
+        variable = self.api_key[1:]
+        if variable.startswith("{") and variable.endswith("}"):
+            variable = variable[1:-1]
+        value = os.getenv(variable)
+        if not value:
+            raise RuntimeError(f"语音模型 {self.name} 缺少环境变量: {variable}")
+        return value
 
 
 # ==================== YAML 配置来源 ====================
 
-def _find_config_file() -> Optional[Path]:
+def _find_config_file() -> Path | None:
     """定位根目录 config.yaml
     作用：从当前文件向上回溯寻找 config.yaml；
           支持 MEDICAL_CONFIG 环境变量显式指定路径。
@@ -143,7 +187,7 @@ class _YamlSettingsSource(PydanticBaseSettingsSource):
           其优先级低于环境变量，从而实现环境变量覆盖 YAML。
     """
 
-    def get_field_value(self, field, field_name):  # noqa: D102 (由基类约定)
+    def get_field_value(self, field, field_name):
         return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
@@ -172,7 +216,9 @@ class AppConfig(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    llm_models: list[LLMConfig] = Field(default_factory=list)
+    models: list[ModelConfig] = Field(default_factory=list)
+    agent_models: dict[str, str] = Field(default_factory=dict)
+    voice_models: list[VoiceModelConfig] = Field(default_factory=list)
 
     @classmethod
     def settings_customise_sources(
@@ -200,17 +246,23 @@ class AppConfig(BaseSettings):
         """解析 Celery backend URL（未显式配置时用 redis.backend_db 拼装）"""
         return self.celery.backend_url or self.redis.url(self.redis.backend_db)
 
-    def get_llm_config(self, name: str) -> Optional[dict[str, Any]]:
-        """获取指定名称的 LLM 配置
+    def get_model_config(self, name: str) -> ModelConfig | None:
+        """按模型名称获取 OpenAI 兼容模型配置。"""
+        return next((model for model in self.models if model.name == name), None)
+
+    def get_agent_model_config(self, agent_name: str) -> ModelConfig | None:
+        """获取指定智能体绑定的模型配置
         Args:
-            - name: LLM 配置名称（例如 "schedule_agent", "dialog_agent"）
+            - agent_name: 智能体名称，例如 schedule_agent
         Return:
-            - LLM 配置字典，不存在返回 None
+            - 模型配置；未绑定或模型不存在时返回 None
         """
-        for llm in self.llm_models:
-            if llm.name == name:
-                return llm.model_dump()
-        return None
+        model_name = self.agent_models.get(agent_name)
+        return self.get_model_config(model_name) if model_name else None
+
+    def get_voice_model_config(self, name: str) -> VoiceModelConfig | None:
+        """按名称获取非 OpenAI 协议的实时语音模型配置。"""
+        return next((model for model in self.voice_models if model.name == name), None)
 
 
 @lru_cache(maxsize=1)

@@ -1,11 +1,12 @@
 """事件Schema定义
 作用：定义Redis Stream通信层的事件结构
 """
-from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
 import uuid
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
@@ -27,13 +28,8 @@ class BaseEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     event_type: EventType
     session_id: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     version: str = Field(default="1.0")
-
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class DialogTurnEvent(BaseEvent):
@@ -44,8 +40,8 @@ class DialogTurnEvent(BaseEvent):
     turn_number: int
     question: str                         # 患者问题
     answer: str                           # AI回答
-    tool_calls: Optional[List[Dict[str, Any]]] = None  # 工具调用记录
-    metadata: Optional[Dict[str, Any]] = None
+    tool_calls: list[dict[str, Any]] | None = None  # 工具调用记录
+    metadata: dict[str, Any] | None = None
 
 
 class DialogTextEvent(BaseEvent):
@@ -66,7 +62,7 @@ class DialogAudioEvent(BaseEvent):
     turn_number: int
     audio_url: str                        # 音频URL（OSS/本地）
     audio_format: str = "pcm"             # pcm | opus | mp3
-    duration_ms: Optional[int] = None
+    duration_ms: int | None = None
 
 
 class ToolCallEvent(BaseEvent):
@@ -76,8 +72,8 @@ class ToolCallEvent(BaseEvent):
     event_type: EventType = EventType.TOOL_CALL
     turn_number: int
     tool_name: str                        # 工具名称
-    tool_args: Dict[str, Any]             # 工具参数
-    tool_result: Optional[Any] = None     # 工具返回值
+    tool_args: dict[str, Any]             # 工具参数
+    tool_result: Any | None = None     # 工具返回值
 
 
 class ConstraintEvent(BaseEvent):
@@ -87,7 +83,7 @@ class ConstraintEvent(BaseEvent):
     event_type: EventType = EventType.CONSTRAINT
     constraint_type: str                  # deviation | missing_tool | timeout
     constraint_prompt: str                # 约束提示词
-    remaining_tasks: List[str]            # 剩余任务列表
+    remaining_tasks: list[str]            # 剩余任务列表
 
 
 class SessionStartEvent(BaseEvent):
@@ -97,7 +93,7 @@ class SessionStartEvent(BaseEvent):
     event_type: EventType = EventType.SESSION_START
     patient_id: str
     task_id: str
-    form_ids: List[str]                   # 量表ID列表
+    form_ids: list[str]                   # 量表ID列表
 
 
 class SessionEndEvent(BaseEvent):
@@ -116,8 +112,8 @@ class ExtractionResultEvent(BaseEvent):
     """
     event_type: EventType = EventType.EXTRACTION_RESULT
     form_id: str
-    extracted_fields: Dict[str, Any]      # {field_name: value}
-    confidence_scores: Dict[str, float]   # {field_name: confidence}
+    extracted_fields: dict[str, Any]      # {field_name: value}
+    confidence_scores: dict[str, float]   # {field_name: confidence}
 
 
 # 事件类型映射
