@@ -94,10 +94,53 @@ class DialogEventPublisher:
         except Exception as e:
             logger.error(f"降级保存失败: {e}")
 
+    def publish_extraction_result(
+        self,
+        session_id: str,
+        extracted_fields: dict,
+        confidence_scores: dict,
+    ) -> str | None:
+        """发布字段抽取结果事件
+        作用：发布 ExtractionResultEvent 到 dialog_stream（供前端 SSE 消费）
+        Args:
+            - session_id: 会话ID
+            - extracted_fields: 抽取的字段 {question_id: answer_value}
+            - confidence_scores: 置信度 {question_id: confidence}
+        Return:
+            - message_id 或 None
+        """
+        from datetime import datetime
+
+        from app.schemas.events import ExtractionResultEvent
+
+        event = ExtractionResultEvent(
+            event_type="extraction_result",
+            session_id=session_id,
+            extracted_fields=extracted_fields,
+            confidence_scores=confidence_scores,
+            timestamp=datetime.now().isoformat(),
+        )
+
+        try:
+            event_dict = event.model_dump(mode="json")
+            message_id = self.redis.xadd(
+                stream_key=self.stream_key, fields=event_dict, max_len=self.max_len
+            )
+
+            logger.debug(
+                f"[EventPublisher] 发布抽取结果: session={session_id}, "
+                f"fields={len(extracted_fields)}, message_id={message_id}"
+            )
+            return message_id
+
+        except Exception as e:
+            logger.error(f"[EventPublisher] 发布抽取结果失败: {e}")
+            return None
+
 
 class StreamKeyHelper:
     """Stream键名辅助类
-    作用：提供统一的Stream键名生成规则
+    作用:提供统一的Stream键名生成规则
     """
 
     @staticmethod
@@ -130,45 +173,3 @@ class StreamKeyHelper:
         """
         return f"extraction_stream:{session_id}"
 
-    async def publish_extraction_result(
-        self,
-        session_id: str,
-        extracted_fields: dict,
-        confidence_scores: dict,
-    ) -> str | None:
-        """发布字段抽取结果事件
-        作用：发布 ExtractionResultEvent 到 extraction_result_stream
-        Args:
-            - session_id: 会话ID
-            - extracted_fields: 抽取的字段 {question_id: answer_value}
-            - confidence_scores: 置信度 {question_id: confidence}
-        Return:
-            - message_id 或 None
-        """
-        from app.schemas.events import ExtractionResultEvent
-
-        event = ExtractionResultEvent(
-            event_type="extraction_result",
-            session_id=session_id,
-            extracted_fields=extracted_fields,
-            confidence_scores=confidence_scores,
-            timestamp=datetime.now().isoformat(),
-        )
-
-        stream_key = f"extraction_result_stream:{session_id}"
-
-        try:
-            event_dict = event.model_dump(mode="json")
-            message_id = self.redis.xadd(
-                stream_key=stream_key, fields=event_dict, max_len=self.max_len
-            )
-
-            logger.debug(
-                f"[EventPublisher] 发布抽取结果: session={session_id}, "
-                f"fields={len(extracted_fields)}, message_id={message_id}"
-            )
-            return message_id
-
-        except Exception as e:
-            logger.error(f"[EventPublisher] 发布抽取结果失败: {e}")
-            return None

@@ -69,7 +69,7 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
             必需字段：
             - scale_codes: List[str] - 量表编码列表
             可选字段：
-            - engine_type: str - 引擎类型（'doubao' | 'text'，默认 'doubao'）
+            - engine_type: str - 引擎类型（'text' | 'doubao'，默认 'text'）
     """
     import asyncio
 
@@ -100,7 +100,7 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
             logger.info(f"[Dialog Agent] 加载量表问题: {len(questions)} 项")
 
             # 2. 确定引擎类型（模型绑定由 SDK 工厂从 agent_models 解析）
-            engine_type = task_config.get("engine_type", "doubao")
+            engine_type = task_config.get("engine_type", "text")
             if engine_type not in ("text", "doubao"):
                 logger.error(f"[Dialog Agent] 未知引擎类型: {engine_type}")
                 return {"status": "failed", "reason": "unknown_engine_type"}
