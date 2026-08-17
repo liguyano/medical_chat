@@ -1,8 +1,8 @@
 """测试事件订阅器
 作用：验证EventSubscriber的订阅和处理功能
 """
-import sys
 import os
+import sys
 
 # UTF-8编码（Windows兼容）
 if sys.platform == 'win32':
@@ -10,14 +10,15 @@ if sys.platform == 'win32':
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-import pytest
-import time
 import threading
-from datetime import datetime
+import time
+
+import pytest
+
 from app.schemas.events import DialogTurnEvent, EventType
+from app.utils.redis_client import get_redis, init_redis
 from app.workers.event_publisher import DialogEventPublisher
 from app.workers.event_subscriber import EventSubscriber
-from app.utils.redis_client import init_redis, get_redis
 
 
 # 测试用订阅器
@@ -25,6 +26,8 @@ class TestSubscriber(EventSubscriber):
     """测试订阅器
     作用：记录接收到的事件
     """
+
+    __test__ = False
 
     def __init__(self, session_id: str):
         super().__init__(
@@ -89,7 +92,7 @@ def test_subscriber_receive_single_event(redis_setup):
     assert received_event.turn_number == 1
     assert received_event.question == "测试问题"
 
-    print(f"✅ 订阅器接收单个事件成功")
+    print("✅ 订阅器接收单个事件成功")
 
 
 def test_subscriber_receive_batch_events(redis_setup):
