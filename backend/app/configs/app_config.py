@@ -69,6 +69,7 @@ class RedisConfig(BaseModel):
     broker_db: int = 1
     backend_db: int = 2
     password: Optional[str] = None
+    stream_maxlen: int = 10000
 
     def url(self, db: int) -> str:
         """按库号拼装 Redis 连接串
