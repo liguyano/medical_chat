@@ -1,0 +1,53 @@
+# ============================================================
+# medical-evaluate 主配置模板
+# 用法：拷贝为根目录 config.yaml（已 gitignore），按环境修改。
+#   cp config.example.yaml config.yaml
+# 环境变量可覆盖任意字段：前缀 APP_ + 双下划线分隔层级，
+#   例如 APP_DATABASE__PASSWORD=xxx 覆盖 database.password。
+# ============================================================
+
+# 运行环境：development | testing | production
+env: development
+
+# 应用基础配置
+app:
+  name: medical-evaluate
+  host: 0.0.0.0
+  port: 8000
+  debug: true
+
+# PostgreSQL 数据库（对应 docker-compose.yml 中的 postgres 服务）
+database:
+  host: localhost
+  port: 15432
+  user: medical
+  password: medical_dev_password
+  db: medical_evaluate
+  pool_size: 10
+  max_overflow: 20
+  pool_pre_ping: true
+  echo: false
+
+# Redis（缓存 / Stream / Celery broker & backend）
+redis:
+  host: localhost
+  port: 6379
+  # 库分配：0=缓存与Stream，1=Celery broker，2=Celery backend
+  cache_db: 0
+  broker_db: 1
+  backend_db: 2
+  password: null
+
+# Celery 任务队列
+celery:
+  # 留空则由 redis 配置自动拼装 redis://{host}:{port}/{broker_db|backend_db}
+  broker_url: null
+  backend_url: null
+  task_time_limit: 1800
+  task_soft_time_limit: 1500
+
+# 日志系统
+logging:
+  level: INFO          # DEBUG | INFO | WARNING | ERROR
+  json: false          # true 时输出结构化 JSON 日志
+  file: null           # 指定路径则同时写文件，如 logs/app.log
