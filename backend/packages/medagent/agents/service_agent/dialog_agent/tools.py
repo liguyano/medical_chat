@@ -1,100 +1,36 @@
 """Dialog Agent 工具定义
-作用：定义宣教材料获取、知情同意书触发等工具 schema 和执行器（桩实现）。
+作用：用 LangChain @tool 装饰器定义宣教/知情同意等工具，函数签名即 schema 单一来源；
+      对引擎侧导出 OpenAI function dict（DIALOG_TOOLS），对编排层导出执行入口（execute_tool）。
+说明（对齐 deerflow tools/builtins 的 LangChain 工具形态）：
+  - @tool 定义：函数签名 + docstring 自动生成参数 schema，消除 schema 与实现漂移；
+  - 引擎（DoubaoVoiceEngine / TextChatEngine）需 OpenAI function dict，故经
+    convert_to_openai_tool 从 @tool 生成，不再手写 dict；
+  - execute_tool 改为注册表查表 + ainvoke，删除手写 if/elif 路由。
 """
 import logging
 from typing import Any, Literal
 from uuid import uuid4
 
+from langchain_core.tools import BaseTool, tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from pydantic import ValidationError
+
 logger = logging.getLogger(__name__)
 
 
-# ==================== 工具 Schema 定义 ====================
-
-TOOL_GET_EDUCATION_MATERIAL = {
-    "type": "function",
-    "function": {
-        "name": "get_education_material",
-        "description": "获取健康宣教材料（抽烟、饮酒、糖尿病、药物过敏等）",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "enum": ["tobacco", "alcohol", "diabetes", "allergy"],
-                    "description": "宣教类别：tobacco=抽烟, alcohol=饮酒, diabetes=糖尿病, allergy=药物过敏",
-                },
-                "level": {
-                    "type": "integer",
-                    "enum": [1, 2, 3],
-                    "description": "宣教级别：1=简短提醒, 2=标准宣教, 3=深度宣教",
-                },
-            },
-            "required": ["category"],
-        },
-    },
-}
-
-TOOL_TRIGGER_CONSENT_FORM = {
-    "type": "function",
-    "function": {
-        "name": "trigger_consent_form",
-        "description": "触发知情同意书签署流程（手术、麻醉、输血等）",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "form_type": {
-                    "type": "string",
-                    "enum": ["surgery", "anesthesia", "blood_transfusion", "tobacco"],
-                    "description": "知情同意书类型：surgery=手术, anesthesia=麻醉, blood_transfusion=输血, tobacco=戒烟",
-                },
-            },
-            "required": ["form_type"],
-        },
-    },
-}
-
-TOOL_PLAY_AUDIO = {
-    "type": "function",
-    "function": {
-        "name": "play_audio",
-        "description": "播放音频（预留工具，当前未实现）",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "audio_url": {
-                    "type": "string",
-                    "description": "音频文件 URL",
-                },
-            },
-            "required": ["audio_url"],
-        },
-    },
-}
+# ==================== 工具定义（@tool，签名即 schema） ====================
 
 
-# ==================== 工具注册表 ====================
-
-DIALOG_TOOLS = [
-    TOOL_GET_EDUCATION_MATERIAL,
-    TOOL_TRIGGER_CONSENT_FORM,
-    TOOL_PLAY_AUDIO,
-]
-
-
-# ==================== 工具执行器（桩实现） ====================
-
-
-async def execute_get_education_material(
+@tool
+async def get_education_material(
     category: Literal["tobacco", "alcohol", "diabetes", "allergy"],
     level: int = 2,
 ) -> dict[str, Any]:
-    """获取健康宣教材料（桩实现）
-    作用：优先从 interaction_rule 表读规则；批次B education 表未落地则返回占位。
+    """获取健康宣教材料（抽烟、饮酒、糖尿病、药物过敏等）。
+
     Args:
-        - category: 宣教类别
-        - level: 宣教级别（1-3）
-    Return:
-        - 宣教材料结构化数据
+        category: 宣教类别（tobacco=抽烟, alcohol=饮酒, diabetes=糖尿病, allergy=药物过敏）。
+        level: 宣教级别（1=简短提醒, 2=标准宣教, 3=深度宣教）。
     """
     if category not in {"tobacco", "alcohol", "diabetes", "allergy"}:
         return {"success": False, "message": f"不支持的宣教类别: {category}"}
@@ -112,7 +48,6 @@ async def execute_get_education_material(
         "diabetes": "糖尿病",
         "allergy": "药物过敏",
     }
-
     return {
         "success": True,
         "placeholder": True,
@@ -126,15 +61,15 @@ async def execute_get_education_material(
     }
 
 
-async def execute_trigger_consent_form(
+@tool
+async def trigger_consent_form(
     form_type: Literal["surgery", "anesthesia", "blood_transfusion", "tobacco"],
 ) -> dict[str, Any]:
-    """触发知情同意书签署流程（桩实现）
-    作用：发布 consent_form 事件到 Redis Stream，返回占位 form_id。
+    """触发知情同意书签署流程（手术、麻醉、输血等）。
+
     Args:
-        - form_type: 知情同意书类型
-    Return:
-        - 触发结果（含占位 form_id）
+        form_type: 知情同意书类型（surgery=手术, anesthesia=麻醉,
+            blood_transfusion=输血, tobacco=戒烟）。
     """
     if form_type not in {"surgery", "anesthesia", "blood_transfusion", "tobacco"}:
         return {"success": False, "message": f"不支持的知情同意书类型: {form_type}"}
@@ -150,7 +85,6 @@ async def execute_trigger_consent_form(
         "blood_transfusion": "输血",
         "tobacco": "戒烟",
     }
-
     return {
         "success": True,
         "placeholder": True,
@@ -162,12 +96,12 @@ async def execute_trigger_consent_form(
     }
 
 
-async def execute_play_audio(audio_url: str) -> dict[str, Any]:
-    """播放音频（预留工具）
+@tool
+async def play_audio(audio_url: str) -> dict[str, Any]:
+    """播放音频（预留工具，当前未实现）。
+
     Args:
-        - audio_url: 音频 URL
-    Return:
-        - 播放结果
+        audio_url: 音频文件 URL。
     """
     logger.info("[Tool] play_audio: audio_url=%s", audio_url)
     return {
@@ -176,27 +110,48 @@ async def execute_play_audio(audio_url: str) -> dict[str, Any]:
     }
 
 
-# ==================== 工具路由器 ====================
+# ==================== 工具注册表 ====================
+
+# LangChain BaseTool 注册表（名称 → 工具对象），供执行路由与 schema 生成复用
+_TOOL_OBJECTS: list[BaseTool] = [
+    get_education_material,
+    trigger_consent_form,
+    play_audio,
+]
+_TOOL_REGISTRY: dict[str, BaseTool] = {t.name: t for t in _TOOL_OBJECTS}
+
+
+def build_openai_tool_schemas() -> list[dict[str, Any]]:
+    """构建 OpenAI function 调用 schema 列表
+    作用：从 @tool 对象生成引擎侧所需的 OpenAI function dict，保证 schema 与实现单一来源。
+    Return:
+        - OpenAI function dict 列表
+    """
+    return [convert_to_openai_tool(t) for t in _TOOL_OBJECTS]
+
+
+# 引擎侧使用的 OpenAI function dict 列表（对外名保持 DIALOG_TOOLS 不变）
+DIALOG_TOOLS: list[dict[str, Any]] = build_openai_tool_schemas()
+
+
+# ==================== 工具执行路由器 ====================
 
 
 async def execute_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     """工具执行路由器
-    作用：根据 tool_name 分发到具体执行器。
+    作用：按名称从注册表查表并 ainvoke，替代手写 if/elif 路由。
     Args:
         - tool_name: 工具名称
         - arguments: 工具参数
     Return:
-        - 工具执行结果
+        - 工具执行结果（工具函数返回值）
     """
+    target = _TOOL_REGISTRY.get(tool_name)
+    if target is None:
+        logger.warning("[Tool] 未知工具: %s", tool_name)
+        return {"success": False, "message": f"未知工具: {tool_name}"}
     try:
-        if tool_name == "get_education_material":
-            return await execute_get_education_material(**arguments)
-        if tool_name == "trigger_consent_form":
-            return await execute_trigger_consent_form(**arguments)
-        if tool_name == "play_audio":
-            return await execute_play_audio(**arguments)
-    except TypeError:
+        return await target.ainvoke(arguments)
+    except (TypeError, ValueError, ValidationError):
         logger.exception("[Tool] 参数错误: %s", tool_name)
         return {"success": False, "message": f"工具参数错误: {tool_name}"}
-    logger.warning("[Tool] 未知工具: %s", tool_name)
-    return {"success": False, "message": f"未知工具: {tool_name}"}

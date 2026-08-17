@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from medagent.agents.middleware.base import DialogMiddleware
+from medagent.agents.middlewares.base import DialogMiddleware
 from medagent.agents.service_agent.dialog_agent.agent import DialogAgent
 from medagent.agents.service_agent.dialog_agent.engine import (
     DialogEngine,

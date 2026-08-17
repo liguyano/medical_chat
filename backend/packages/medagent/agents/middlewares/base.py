@@ -1,5 +1,13 @@
 """Middleware 基础抽象与链式执行器
 作用：定义 DialogMiddleware 抽象基类和 MiddlewareChain 执行器。
+说明（与 LangChain AgentMiddleware 的关系）：
+  - 本项目 Dialog Agent 使用自定义 DialogEngine（豆包语音全双工 WebSocket / 文本双引擎），
+    **不经过 LangGraph create_agent 的模型节点**，因此拿不到 LangChain 中间件的
+    (state, runtime) 上下文；
+  - 故这里采用**对话轮次级**钩子 before_agent(context) / after_agent(context, output)，
+    以 context 字典承载 session_id / patient_input / constraints / tool_calls；
+  - 有意区别于 LangChain AgentMiddleware 的 before_model / after_model / wrap_model_call
+    （后者操作 LangGraph state，语音全双工场景不适用），命名不套用以免语义误导。
 """
 import logging
 from abc import ABC, abstractmethod

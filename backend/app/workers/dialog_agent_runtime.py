@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from medagent.agents.middleware import (
+from medagent.agents.middlewares import (
     EventPublishMiddleware,
     KeywordInterceptMiddleware,
     ScheduleConstraintMiddleware,

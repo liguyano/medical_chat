@@ -7,9 +7,7 @@ from medagent.agents.service_agent.dialog_agent.prompt import (
 )
 from medagent.agents.service_agent.dialog_agent.tools import (
     DIALOG_TOOLS,
-    execute_get_education_material,
     execute_tool,
-    execute_trigger_consent_form,
 )
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 
@@ -84,9 +82,13 @@ def test_dialog_tool_schemas_follow_openai_function_contract():
 @pytest.mark.asyncio
 async def test_education_placeholder_is_explicit_and_validated():
     """宣教桩必须明确标识占位，且拒绝非法枚举。"""
-    result = await execute_get_education_material("tobacco", 2)
-    invalid_category = await execute_get_education_material("unknown", 2)
-    invalid_level = await execute_get_education_material("tobacco", 9)
+    result = await execute_tool("get_education_material", {"category": "tobacco", "level": 2})
+    invalid_category = await execute_tool(
+        "get_education_material", {"category": "unknown", "level": 2}
+    )
+    invalid_level = await execute_tool(
+        "get_education_material", {"category": "tobacco", "level": 9}
+    )
 
     assert result["success"] is True
     assert result["placeholder"] is True
@@ -97,8 +99,8 @@ async def test_education_placeholder_is_explicit_and_validated():
 @pytest.mark.asyncio
 async def test_consent_placeholder_uses_unique_id_and_is_not_signed():
     """知情同意桩不得伪造签署完成，form_id 必须避免固定碰撞。"""
-    first = await execute_trigger_consent_form("surgery")
-    second = await execute_trigger_consent_form("surgery")
+    first = await execute_tool("trigger_consent_form", {"form_type": "surgery"})
+    second = await execute_tool("trigger_consent_form", {"form_type": "surgery"})
 
     assert first["success"] is True
     assert first["placeholder"] is True

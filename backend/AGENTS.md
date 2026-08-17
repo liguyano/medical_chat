@@ -145,8 +145,17 @@ from medagent.configs.agent_config import get_agent_config
 
 - SDK 核心位于
   `packages/medagent/agents/service_agent/dialog_agent/`，中间件位于
-  `packages/medagent/agents/middleware/`；两者只依赖 `medagent.*` 协议与类型，
+  `packages/medagent/agents/middlewares/`；两者只依赖 `medagent.*` 协议与类型，
   禁止导入 `app.*`。
+- 中间件目录命名对齐 deerflow（`middlewares/`），但因 Dialog Agent 使用自定义
+  `DialogEngine`（语音全双工 WebSocket / 文本双引擎），**不经过 LangGraph `create_agent`
+  模型节点**，故采用**对话轮次级**钩子 `before_agent(context)` / `after_agent(context, output)`，
+  有意区别于 LangChain `AgentMiddleware` 的 `before_model`/`after_model`（后者操作
+  LangGraph state，语音场景不适用），不套用其命名以免语义误导。
+- Dialog 工具（`dialog_agent/tools.py`）用 LangChain `@tool` 定义，函数签名即 schema
+  单一来源；引擎侧所需 OpenAI function dict 经 `build_openai_tool_schemas()`
+  （`convert_to_openai_tool`）生成，对外仍导出 `DIALOG_TOOLS`（dict 列表）与
+  `execute_tool(name, args)`（注册表查表 + `ainvoke`，无手写 if/elif 路由）。
 - 引擎装配统一走 SDK 工厂 `medagent.agents.factory.create_dialog_agent`：按 `engine_type`
   （`text`/`doubao`）从 `agent_models` 解析绑定，文本路径构造 `TextChatEngine`，语音路径经
   `medagent.providers.create_voice_engine` 构造 `DoubaoVoiceEngine`。工厂遵循纯参数设计，

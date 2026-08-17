@@ -4,7 +4,7 @@ import json
 from uuid import uuid4
 
 import pytest
-from medagent.agents.middleware import EventPublishMiddleware, ScheduleConstraintMiddleware
+from medagent.agents.middlewares import EventPublishMiddleware, ScheduleConstraintMiddleware
 
 from app.managers.session_timeout_manager import SessionTimeoutManager
 from app.schemas.events import ConstraintEvent, DialogTurnEvent, EventType
