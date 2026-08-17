@@ -58,6 +58,53 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
 
 # ==================== Dialog Agent任务 ====================
 
+@celery_app.task(name="app.celery_app.tasks.dialog_agent_worker", bind=True)
+def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: dict):
+    """Dialog Agent 后台任务
+    作用：运行 AI 主导问诊循环，首轮发开场白，后续轮消费患者答案产出下一问
+    Args:
+        - session_id: 会话ID
+        - patient_info: 患者信息
+        - task_config: 任务配置
+            必需字段：
+            - scale_codes: List[str] - 量表编码列表
+            可选字段：
+            - check_interval: int - Redis Stream 阻塞读取间隔（秒，默认 5）
+    """
+    import asyncio
+
+    from medagent.providers import create_chat_model
+
+    from app.celery_app.runtime import ensure_worker_runtime
+    from app.configs.app_config import get_app_config
+    from app.utils.redis_client import get_redis
+    from app.workers.dialog_agent_runner import DialogAgentRunner
+
+    try:
+        config = get_app_config()
+        model_config = config.get_agent_model_config("dialog_agent")
+        if model_config is None:
+            return {"status": "failed", "reason": "llm_not_configured"}
+
+        ensure_worker_runtime()
+        model = create_chat_model(model_config)
+
+        runner = DialogAgentRunner(
+            session_id=session_id,
+            patient_info=patient_info,
+            scale_codes=task_config.get("scale_codes", []),
+            model=model,
+            redis_client=get_redis(),
+        )
+
+        return asyncio.run(
+            runner.run(check_interval=task_config.get("check_interval", 5))
+        )
+    except Exception as exc:
+        logger.exception("[Dialog Agent] Celery任务失败: session=%s", session_id)
+        raise self.retry(exc=exc, countdown=10, max_retries=3)
+
+
 @celery_app.task(name="app.celery_app.tasks.dialog_agent_preheat", bind=True)
 def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config: dict):
     """Dialog Agent预热任务
