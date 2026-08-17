@@ -139,3 +139,22 @@ from medagent.configs.agent_config import get_agent_config
 - 文本模型统一使用 `config.yaml` 的 `models` 列表和 `agent_models` 绑定，通过
   OpenAI 兼容接口调用；豆包实时语音等非 OpenAI 协议模型放在 `voice_models`。
 
+## Dialog Agent 边界
+
+- SDK 核心位于
+  `packages/medagent/agents/service_agent/dialog_agent/`，中间件位于
+  `packages/medagent/agents/middleware/`；两者只依赖 `medagent.*` 协议与类型，
+  禁止导入 `app.*`。
+- 应用适配与依赖组装位于 `app/workers/dialog_agent_runtime.py`，负责注入
+  PostgreSQL 历史、Redis 状态、Schedule 约束源、事件接收器和活动时间更新器。
+- Schedule 与 Dialog 共用 `dialog_stream:{session_id}`。Dialog 通过持久化
+  `dialog_agent:constraint_cursor:{session_id}` 只消费一次 `ConstraintEvent`，
+  并发布扁平的 `DialogTurnEvent` / `ToolCallEvent`。
+- `DialogEngine` 统一语音与文本事件。文本引擎回传工具结果后必须继续调用模型，
+  直到生成患者可见回复或达到最大工具轮次；供应商错误不得直接暴露给患者。
+- 独立 Celery worker 的 `dialog_agent_preheat` 必须先调用
+  `ensure_worker_runtime()`，再加载 PostgreSQL 量表并通过 App 适配层组装智能体。
+- OpenAI 兼容文本降级模型使用 `agent_models.dialog_agent`；实时语音使用
+  `voice_models.dialog_agent`。豆包真实语音上线前必须用真实 App ID、Resource ID、
+  API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。
+

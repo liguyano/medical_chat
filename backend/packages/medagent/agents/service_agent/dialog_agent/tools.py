@@ -2,7 +2,8 @@
 作用：定义宣教材料获取、知情同意书触发等工具 schema 和执行器（桩实现）。
 """
 import logging
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ DIALOG_TOOLS = [
 async def execute_get_education_material(
     category: Literal["tobacco", "alcohol", "diabetes", "allergy"],
     level: int = 2,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """获取健康宣教材料（桩实现）
     作用：优先从 interaction_rule 表读规则；批次B education 表未落地则返回占位。
     Args:
@@ -95,7 +96,11 @@ async def execute_get_education_material(
     Return:
         - 宣教材料结构化数据
     """
-    logger.info(f"[Tool] get_education_material: category={category}, level={level}")
+    if category not in {"tobacco", "alcohol", "diabetes", "allergy"}:
+        return {"success": False, "message": f"不支持的宣教类别: {category}"}
+    if level not in {1, 2, 3}:
+        return {"success": False, "message": "宣教级别必须是 1、2 或 3"}
+    logger.info("[Tool] get_education_material: category=%s, level=%s", category, level)
 
     # TODO: 从 interaction_rule 表查询宣教规则（批次B）
     # TODO: 从 education 表查询宣教内容（批次B）
@@ -110,6 +115,7 @@ async def execute_get_education_material(
 
     return {
         "success": True,
+        "placeholder": True,
         "material_id": f"edu_{category}_{level}",
         "category": category,
         "level": level,
@@ -122,7 +128,7 @@ async def execute_get_education_material(
 
 async def execute_trigger_consent_form(
     form_type: Literal["surgery", "anesthesia", "blood_transfusion", "tobacco"],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """触发知情同意书签署流程（桩实现）
     作用：发布 consent_form 事件到 Redis Stream，返回占位 form_id。
     Args:
@@ -130,7 +136,9 @@ async def execute_trigger_consent_form(
     Return:
         - 触发结果（含占位 form_id）
     """
-    logger.info(f"[Tool] trigger_consent_form: form_type={form_type}")
+    if form_type not in {"surgery", "anesthesia", "blood_transfusion", "tobacco"}:
+        return {"success": False, "message": f"不支持的知情同意书类型: {form_type}"}
+    logger.info("[Tool] trigger_consent_form: form_type=%s", form_type)
 
     # TODO: 发布 consent_form 事件到 Redis Stream（批次B）
     # TODO: 从 consent_form 表查询表单模板（批次B）
@@ -145,7 +153,8 @@ async def execute_trigger_consent_form(
 
     return {
         "success": True,
-        "form_id": f"consent_{form_type}_{12345}",
+        "placeholder": True,
+        "form_id": f"consent_{form_type}_{uuid4().hex}",
         "form_type": form_type,
         "title": f"{form_type_map.get(form_type, form_type)}知情同意书",
         "status": "pending_signature",
@@ -153,14 +162,14 @@ async def execute_trigger_consent_form(
     }
 
 
-async def execute_play_audio(audio_url: str) -> Dict[str, Any]:
+async def execute_play_audio(audio_url: str) -> dict[str, Any]:
     """播放音频（预留工具）
     Args:
         - audio_url: 音频 URL
     Return:
         - 播放结果
     """
-    logger.info(f"[Tool] play_audio: audio_url={audio_url}")
+    logger.info("[Tool] play_audio: audio_url=%s", audio_url)
     return {
         "success": False,
         "message": "play_audio 工具预留，当前未实现",
@@ -170,7 +179,7 @@ async def execute_play_audio(audio_url: str) -> Dict[str, Any]:
 # ==================== 工具路由器 ====================
 
 
-async def execute_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
+async def execute_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     """工具执行路由器
     作用：根据 tool_name 分发到具体执行器。
     Args:
@@ -179,12 +188,15 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
     Return:
         - 工具执行结果
     """
-    if tool_name == "get_education_material":
-        return await execute_get_education_material(**arguments)
-    elif tool_name == "trigger_consent_form":
-        return await execute_trigger_consent_form(**arguments)
-    elif tool_name == "play_audio":
-        return await execute_play_audio(**arguments)
-    else:
-        logger.warning(f"[Tool] 未知工具: {tool_name}")
-        return {"success": False, "message": f"未知工具: {tool_name}"}
+    try:
+        if tool_name == "get_education_material":
+            return await execute_get_education_material(**arguments)
+        if tool_name == "trigger_consent_form":
+            return await execute_trigger_consent_form(**arguments)
+        if tool_name == "play_audio":
+            return await execute_play_audio(**arguments)
+    except TypeError:
+        logger.exception("[Tool] 参数错误: %s", tool_name)
+        return {"success": False, "message": f"工具参数错误: {tool_name}"}
+    logger.warning("[Tool] 未知工具: %s", tool_name)
+    return {"success": False, "message": f"未知工具: {tool_name}"}

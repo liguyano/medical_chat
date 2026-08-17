@@ -80,13 +80,15 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
     import asyncio
 
     from medagent.agents.service_agent.dialog_agent import (
-        DialogAgent,
         DoubaoVoiceEngine,
         TextChatEngine,
     )
 
+    from app.celery_app.runtime import ensure_worker_runtime
     from app.configs.app_config import get_app_config
     from app.managers.assessment_loader import AssessmentQuestionLoader
+    from app.utils.redis_client import get_redis
+    from app.workers.dialog_agent_runtime import build_dialog_agent
 
     async def _run_preheat():
         """异步执行预热逻辑"""
@@ -99,6 +101,7 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
                 logger.error(f"[Dialog Agent] 缺少量表编码列表: {task_config}")
                 return {"status": "failed", "reason": "missing_scale_codes"}
 
+            ensure_worker_runtime()
             loader = AssessmentQuestionLoader()
             questions = await loader.load_questions_by_scale_codes(scale_codes)
             if not questions:
@@ -144,11 +147,12 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
                 return {"status": "failed", "reason": "unknown_engine_type"}
 
             # 4. 创建 DialogAgent 实例
-            agent = DialogAgent(
+            agent = build_dialog_agent(
                 session_id=session_id,
                 patient_info=patient_info,
                 task_list=questions,
                 engine=engine,
+                redis_client=get_redis(),
             )
 
             # 5. 初始化 DialogAgent（创建会话、保存状态到 Redis）

@@ -1,80 +1,64 @@
-"""事件发布中间件
-作用：after_agent 统一发布 DialogTurnEvent / ToolCallEvent 到 Redis Stream。
+"""对话事件发布中间件。
+
+事件接收器由应用层注入，SDK 仅产生稳定的事件字典契约。
 """
+
+import inspect
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from app.managers.event_publisher import DialogEventPublisher
-from app.schemas.events import DialogTurnEvent, ToolCallEvent
-
+from ..service_agent.dialog_agent.models import DialogEventSink
 from .base import DialogMiddleware
 
 logger = logging.getLogger(__name__)
 
 
 class EventPublishMiddleware(DialogMiddleware):
-    """事件发布中间件
-    作用：对话轮次结束后，发布事件到 Redis Stream 供其他智能体消费。
-    """
+    """对话结束后发布轮次和工具调用事件。"""
 
-    def __init__(self, session_id: str):
-        """初始化事件发布中间件
-        Args:
-            - session_id: 会话 ID
-        """
+    def __init__(
+        self,
+        session_id: str,
+        event_sink: DialogEventSink | None = None,
+    ) -> None:
         self.session_id = session_id
-        self.publisher = DialogEventPublisher(session_id)
-        logger.info(f"[EventPublishMiddleware] 初始化: session_id={session_id}")
+        self.event_sink = event_sink
 
-    async def before_agent(self, context: Dict[str, Any]) -> None:
-        """执行前钩子：事件发布在 after 阶段进行
-        Args:
-            - context: 上下文字典
-        """
-        pass
+    async def before_agent(self, context: dict[str, Any]) -> None:
+        """事件发布在 after 阶段进行。"""
 
-    async def after_agent(self, context: Dict[str, Any], output: Any) -> None:
-        """执行后钩子：发布对话轮次事件
-        Args:
-            - context: 上下文字典，包含 turn_number、patient_input、tool_calls 等
-            - output: 智能体输出（AI 回复文本）
-        """
+    async def _publish(self, event: dict[str, Any]) -> None:
+        if self.event_sink is None:
+            return
+        result = self.event_sink(event)
+        if inspect.isawaitable(result):
+            await result
+
+    async def after_agent(self, context: dict[str, Any], output: Any) -> None:
+        """发布 DialogTurnEvent 和逐条 ToolCallEvent。"""
         try:
-            # 1. 发布 DialogTurnEvent
-            turn_number = context.get("turn_number", 0)
-            patient_input = context.get("patient_input", "")
-            tool_calls = context.get("tool_calls", [])
-
-            turn_event = DialogTurnEvent(
-                session_id=self.session_id,
-                turn_number=turn_number,
-                question=patient_input,
-                answer=str(output) if output else "",
-                tool_calls=tool_calls if tool_calls else None,
+            turn_number = int(context.get("turn_number", 0))
+            tool_calls = list(context.get("tool_calls") or [])
+            await self._publish(
+                {
+                    "event_type": "dialog_turn",
+                    "session_id": self.session_id,
+                    "turn_number": turn_number,
+                    "question": str(context.get("patient_input", "")),
+                    "answer": str(output or ""),
+                    "tool_calls": tool_calls or None,
+                }
             )
-            event_id = self.publisher.publish(turn_event)
-            if event_id:
-                logger.info(
-                    f"[EventPublishMiddleware] 发布 DialogTurnEvent: "
-                    f"turn={turn_number}, event_id={event_id}"
+            for tool_call in tool_calls:
+                await self._publish(
+                    {
+                        "event_type": "tool_call",
+                        "session_id": self.session_id,
+                        "turn_number": turn_number,
+                        "tool_name": str(tool_call.get("name", "")),
+                        "tool_args": dict(tool_call.get("arguments") or {}),
+                        "tool_result": tool_call.get("result"),
+                    }
                 )
-
-            # 2. 发布 ToolCallEvent（如有工具调用）
-            if tool_calls:
-                for tool_call in tool_calls:
-                    tool_event = ToolCallEvent(
-                        session_id=self.session_id,
-                        turn_number=turn_number,
-                        tool_name=tool_call.get("name", ""),
-                        tool_args=tool_call.get("arguments", {}),
-                        tool_result=tool_call.get("result"),
-                    )
-                    tool_event_id = self.publisher.publish(tool_event)
-                    if tool_event_id:
-                        logger.info(
-                            f"[EventPublishMiddleware] 发布 ToolCallEvent: "
-                            f"tool={tool_call.get('name')}, event_id={tool_event_id}"
-                        )
-
-        except Exception as e:
-            logger.error(f"[EventPublishMiddleware] 事件发布失败: {e}", exc_info=True)
+        except Exception:
+            logger.exception("[EventPublishMiddleware] 事件发布失败")

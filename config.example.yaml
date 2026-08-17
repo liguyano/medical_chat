@@ -71,6 +71,7 @@ models:
 # 智能体到文本模型的绑定
 agent_models:
   schedule_agent: qwen-plus
+  dialog_agent: qwen-plus
   extraction_agent: qwen-plus
 
 # 非 OpenAI 协议模型单独配置（豆包实时语音 WebSocket）

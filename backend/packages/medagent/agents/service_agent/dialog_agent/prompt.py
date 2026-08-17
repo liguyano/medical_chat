@@ -2,9 +2,9 @@
 作用：构建 system_prompt，内嵌 CICARE 六步 + 沟通风格 + 评估任务 + 工具使用说明。
 """
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from app.managers.assessment_loader import QuestionTask
+from ..schedule_agent import QuestionTask
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ COMMUNICATION_STYLE = """
 
 TOOL_USAGE_GUIDE = """
 【工具使用规则】
-1. **get_education_material**：患者提及抽烟/饮酸/糖尿病/药物过敏时，*必须*调用获取宣教材料
+1. **get_education_material**：患者提及抽烟/饮酒/糖尿病/药物过敏时，*必须*调用获取宣教材料
    - 抽烟/饮酒：level=2（标准宣教）
    - 糖尿病/药物过敏：level=3（深度宣教）
 
@@ -77,9 +77,9 @@ TOOL_USAGE_GUIDE = """
 
 
 def build_system_prompt(
-    patient_info: Dict[str, Any],
-    task_list: List[QuestionTask],
-    constraints: List[str] = None,
+    patient_info: dict[str, Any],
+    task_list: list[QuestionTask],
+    constraints: list[str] | None = None,
 ) -> str:
     """构建 Dialog Agent 的 system_prompt
     作用：内嵌 CICARE 六步 + 沟通风格 + 评估任务 + 工具使用 + 动态约束。
@@ -126,16 +126,13 @@ def build_system_prompt(
 {''.join(chr(10) + line for line in constraint_lines)}
 """
 
-    # 4. 从 dialogue_script 表加载话术（TODO：批次B）
-    # 当前使用内置模板
-    script_section = """
+    # 当前使用内置模板，应用层后续可在构建前注入已审核话术。
+    script_section = f"""
 【话术模板】（示例）
 - 开场："您好{patient_name}，我是AI护理助手小智，很高兴为您服务。接下来我会协助您完成入院评估，了解您的健康状况，大约需要10-15分钟，可以开始吗？"
 - 追问过敏："您提到对药物过敏，能告诉我具体是哪种药物吗？比如青霉素、头孢类等。"
 - 宣教引入："关于抽烟，我这里有一些健康建议想和您分享..."
 - 结束："感谢您的配合，评估已完成。护士稍后会来核实信息，祝您早日康复！"
-
-TODO: 批次B从 dialogue_script 表加载话术
 """
 
     # 5. 组装 system_prompt
@@ -163,7 +160,7 @@ TODO: 批次B从 dialogue_script 表加载话术
     return system_prompt
 
 
-def build_constraint_update_prompt(constraints: List[str]) -> str:
+def build_constraint_update_prompt(constraints: list[str]) -> str:
     """构建约束更新 prompt（用于 session.update）
     作用：将约束列表转为追加指令，动态注入到对话中。
     Args:
