@@ -1,4 +1,10 @@
-"""Dialog Agent 应用层依赖组装与 Redis 适配器。"""
+"""Dialog Agent 应用层依赖组装与 Redis 适配器
+作用：提供 App 层依赖注入函数，组装 middlewares / state_store / history_store，
+      供 SDK 工厂使用；封装 Redis 约束源和事件接收器。
+说明：
+  - get_runtime_dependencies() 返回依赖字典，传递给 create_dialog_agent()；
+  - build_dialog_agent() 保留向后兼容（已弃用，直接使用 create_dialog_agent + get_runtime_dependencies）。
+"""
 
 from __future__ import annotations
 
@@ -81,6 +87,36 @@ class AppDialogEventSink:
         return self.publisher.publish(model)
 
 
+def get_runtime_dependencies(session_id: str) -> dict[str, Any]:
+    """组装 Dialog Agent 运行时依赖（App 层注入）
+    作用：返回 middlewares / state_store / history_store / tool_executor，
+          供 create_dialog_agent() 使用。
+    Args:
+        - session_id: 会话 ID
+    Return:
+        - 包含 middlewares / state_store / history_store / tool_executor 的字典
+    """
+    from app.utils.redis_client import get_redis
+
+    redis_client = get_redis()
+    timeout_manager = SessionTimeoutManager()
+
+    return {
+        "middlewares": [
+            KeywordInterceptMiddleware(),
+            ScheduleConstraintMiddleware(RedisConstraintSource(redis_client)),
+            EventPublishMiddleware(
+                session_id,
+                AppDialogEventSink(session_id),
+            ),
+            TimeoutMiddleware(timeout_manager.update_activity),
+        ],
+        "state_store": AsyncAgentStateManager(),
+        "history_store": DialogHistoryManager(),
+        "tool_executor": None,  # 当前 DialogAgent 内部处理工具，无需外部执行器
+    }
+
+
 def build_dialog_agent(
     *,
     session_id: str,
@@ -89,7 +125,10 @@ def build_dialog_agent(
     engine: DialogEngine,
     redis_client: RedisClient,
 ) -> DialogAgent:
-    """使用应用层 PostgreSQL/Redis 组件组装纯 SDK Dialog Agent。"""
+    """使用应用层 PostgreSQL/Redis 组件组装纯 SDK Dialog Agent
+    作用：向后兼容函数，直接构造 DialogAgent（已弃用）。
+    说明：新代码请使用 create_dialog_agent() + get_runtime_dependencies()。
+    """
     timeout_manager = SessionTimeoutManager()
     return DialogAgent(
         session_id=session_id,
@@ -108,3 +147,4 @@ def build_dialog_agent(
         state_store=AsyncAgentStateManager(),
         history_store=DialogHistoryManager(),
     )
+

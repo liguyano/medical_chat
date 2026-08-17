@@ -9,7 +9,6 @@ from app.configs.app_config import (
     LoggingConfig,
     ModelConfig,
     RedisConfig,
-    VoiceModelConfig,
     get_app_config,
 )
 from app.configs.logging_config import setup_logging
@@ -22,7 +21,6 @@ __all__ = [
     "LoggingConfig",
     "ModelConfig",
     "RedisConfig",
-    "VoiceModelConfig",
     "get_app_config",
     "setup_logging",
 ]
