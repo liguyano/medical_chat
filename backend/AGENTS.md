@@ -136,17 +136,33 @@ from medagent.configs.agent_config import get_agent_config
 - `app/managers/assessment_catalog_importer.py` 幂等导入
   `docs/structured/assessment-scales`。源文件为 `pending_review` 时必须保持“审核中”，
   临床审核前禁止直接发布。
-- 文本模型统一使用 `config.yaml` 的 `models` 列表和 `agent_models` 绑定，通过
-  OpenAI 兼容接口调用；豆包实时语音等非 OpenAI 协议模型放在 `voice_models`。
+- 所有模型（语言 + 语音）统一登记在 `config.yaml` 的 `models` 列表，用 `type: language|voice`
+  区分类别；`agent_models` 绑定支持简写（`agent: model_name` → 语言模型）或详写
+  （`agent: {language: .., voice: ..}`）。Schedule Agent 通过
+  `get_agent_model_config("schedule_agent")` 取语言模型。
 
 ## Dialog Agent 边界
 
 - SDK 核心位于
   `packages/medagent/agents/service_agent/dialog_agent/`，中间件位于
-  `packages/medagent/agents/middleware/`；两者只依赖 `medagent.*` 协议与类型，
+  `packages/medagent/agents/middlewares/`；两者只依赖 `medagent.*` 协议与类型，
   禁止导入 `app.*`。
-- 应用适配与依赖组装位于 `app/workers/dialog_agent_runtime.py`，负责注入
-  PostgreSQL 历史、Redis 状态、Schedule 约束源、事件接收器和活动时间更新器。
+- 中间件目录命名对齐 deerflow（`middlewares/`），但因 Dialog Agent 使用自定义
+  `DialogEngine`（语音全双工 WebSocket / 文本双引擎），**不经过 LangGraph `create_agent`
+  模型节点**，故采用**对话轮次级**钩子 `before_agent(context)` / `after_agent(context, output)`，
+  有意区别于 LangChain `AgentMiddleware` 的 `before_model`/`after_model`（后者操作
+  LangGraph state，语音场景不适用），不套用其命名以免语义误导。
+- Dialog 工具（`dialog_agent/tools.py`）用 LangChain `@tool` 定义，函数签名即 schema
+  单一来源；引擎侧所需 OpenAI function dict 经 `build_openai_tool_schemas()`
+  （`convert_to_openai_tool`）生成，对外仍导出 `DIALOG_TOOLS`（dict 列表）与
+  `execute_tool(name, args)`（注册表查表 + `ainvoke`，无手写 if/elif 路由）。
+- 引擎装配统一走 SDK 工厂 `medagent.agents.factory.create_dialog_agent`：按 `engine_type`
+  （`text`/`doubao`）从 `agent_models` 解析绑定，文本路径构造 `TextChatEngine`，语音路径经
+  `medagent.providers.create_voice_engine` 构造 `DoubaoVoiceEngine`。工厂遵循纯参数设计，
+  引擎实例化不再散落在 app 层。
+- 应用适配与依赖组装位于 `app/workers/dialog_agent_runtime.py`，`get_runtime_dependencies`
+  返回 middlewares / state_store / history_store / tool_executor，注入 PostgreSQL 历史、
+  Redis 状态、Schedule 约束源、事件接收器和活动时间更新器，供工厂消费。
 - Schedule 与 Dialog 共用 `dialog_stream:{session_id}`。Dialog 通过持久化
   `dialog_agent:constraint_cursor:{session_id}` 只消费一次 `ConstraintEvent`，
   并发布扁平的 `DialogTurnEvent` / `ToolCallEvent`。
@@ -154,7 +170,7 @@ from medagent.configs.agent_config import get_agent_config
   直到生成患者可见回复或达到最大工具轮次；供应商错误不得直接暴露给患者。
 - 独立 Celery worker 的 `dialog_agent_preheat` 必须先调用
   `ensure_worker_runtime()`，再加载 PostgreSQL 量表并通过 App 适配层组装智能体。
-- OpenAI 兼容文本降级模型使用 `agent_models.dialog_agent`；实时语音使用
-  `voice_models.dialog_agent`。豆包真实语音上线前必须用真实 App ID、Resource ID、
-  API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。
+- `dialog_agent` 在 `agent_models` 中详写绑定两类模型：`language`（OpenAI 兼容文本降级）
+  与 `voice`（豆包实时语音，`type: voice`）。豆包真实语音上线前必须用真实 App ID、
+  Resource ID、API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。
 

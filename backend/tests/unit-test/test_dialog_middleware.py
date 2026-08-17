@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from medagent.agents.middleware import (
+from medagent.agents.middlewares import (
     DialogMiddleware,
     EventPublishMiddleware,
     KeywordInterceptMiddleware,

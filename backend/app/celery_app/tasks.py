@@ -79,16 +79,11 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
     """
     import asyncio
 
-    from medagent.agents.service_agent.dialog_agent import (
-        DoubaoVoiceEngine,
-        TextChatEngine,
-    )
+    from medagent.agents.factory import create_dialog_agent
 
     from app.celery_app.runtime import ensure_worker_runtime
-    from app.configs.app_config import get_app_config
     from app.managers.assessment_loader import AssessmentQuestionLoader
-    from app.utils.redis_client import get_redis
-    from app.workers.dialog_agent_runtime import build_dialog_agent
+    from app.workers.dialog_agent_runtime import get_runtime_dependencies
 
     async def _run_preheat():
         """异步执行预热逻辑"""
@@ -110,49 +105,27 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
 
             logger.info(f"[Dialog Agent] 加载量表问题: {len(questions)} 项")
 
-            # 2. 按引擎类型获取对应协议的模型配置
-            config = get_app_config()
+            # 2. 确定引擎类型（模型绑定由 SDK 工厂从 agent_models 解析）
             engine_type = task_config.get("engine_type", "doubao")
-
-            if engine_type == "doubao":
-                # 豆包语音全双工引擎
-                voice_config = config.get_voice_model_config("dialog_agent")
-                if voice_config is None:
-                    logger.error("[Dialog Agent] 未找到 dialog_agent 语音模型配置")
-                    return {"status": "failed", "reason": "missing_llm_config"}
-                engine = DoubaoVoiceEngine(
-                    api_key=voice_config.resolved_api_key(),
-                    model=voice_config.model,
-                    ws_url=voice_config.websocket_url,
-                    timeout=voice_config.timeout,
-                )
-                logger.info("[Dialog Agent] 创建 DoubaoVoiceEngine")
-
-            elif engine_type == "text":
-                # 文本降级引擎（用于无豆包 Key 环境验证）
-                text_config = config.get_agent_model_config("dialog_agent")
-                if text_config is None:
-                    logger.error("[Dialog Agent] 未找到 dialog_agent 文本模型配置")
-                    return {"status": "failed", "reason": "missing_llm_config"}
-                engine = TextChatEngine(
-                    api_key=text_config.resolved_api_key(),
-                    model=text_config.model,
-                    api_base=text_config.api_base,
-                    timeout=text_config.timeout,
-                )
-                logger.info("[Dialog Agent] 创建 TextChatEngine（降级模式）")
-
-            else:
+            if engine_type not in ("text", "doubao"):
                 logger.error(f"[Dialog Agent] 未知引擎类型: {engine_type}")
                 return {"status": "failed", "reason": "unknown_engine_type"}
+            logger.info(f"[Dialog Agent] 引擎类型: {engine_type}")
 
-            # 4. 创建 DialogAgent 实例
-            agent = build_dialog_agent(
+            # 3. 组装运行时依赖（middlewares / state_store / history_store）
+            deps = get_runtime_dependencies(session_id)
+
+            # 4. 通过 SDK 工厂创建 DialogAgent 实例
+            agent = create_dialog_agent(
                 session_id=session_id,
                 patient_info=patient_info,
                 task_list=questions,
-                engine=engine,
-                redis_client=get_redis(),
+                engine_type=engine_type,
+                agent_name="dialog_agent",
+                middlewares=deps["middlewares"],
+                state_store=deps["state_store"],
+                history_store=deps["history_store"],
+                tool_executor=deps["tool_executor"],
             )
 
             # 5. 初始化 DialogAgent（创建会话、保存状态到 Redis）

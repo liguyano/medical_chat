@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ...middleware.base import DialogMiddleware, MiddlewareChain
+from ...middlewares.base import DialogMiddleware, MiddlewareChain
 from ..schedule_agent import QuestionTask
 from .engine import DialogEngine
 from .models import (

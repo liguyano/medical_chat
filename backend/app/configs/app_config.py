@@ -14,12 +14,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+# 复用 medagent SDK 的模型 Schema，保证 config.yaml 单一事实来源。
+# app 层可导入 medagent（medagent 禁止反向导入 app.*）。
+from medagent.configs.agent_config import AgentModelBinding
+from medagent.configs.model_config import ModelConfig, ModelType
 
 # ==================== 子配置模型 ====================
 
@@ -103,61 +108,8 @@ class LoggingConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class ModelConfig(BaseModel):
-    """OpenAI 兼容文本模型配置。"""
-
-    model_config = ConfigDict(extra="allow")
-
-    name: str
-    display_name: str
-    use: str = "openai:AsyncOpenAI"
-    model: str
-    api_base: str
-    api_key: str
-    timeout: float = 600.0
-    max_retries: int = 2
-    enable_prompt_caching: bool = False
-    prompt_cache_ttl: str | None = None
-    supports_thinking: bool = False
-    supports_vision: bool = False
-    supports_reasoning_effort: bool = False
-    when_thinking_enabled: dict[str, Any] | None = None
-    when_thinking_disabled: dict[str, Any] | None = None
-
-    def resolved_api_key(self) -> str:
-        """解析 `$ENV` 或 `${ENV}` 形式的密钥引用。"""
-        if not self.api_key.startswith("$"):
-            return self.api_key
-        variable = self.api_key[1:]
-        if variable.startswith("{") and variable.endswith("}"):
-            variable = variable[1:-1]
-        value = os.getenv(variable)
-        if not value:
-            raise RuntimeError(f"模型 {self.name} 缺少环境变量: {variable}")
-        return value
-
-
-class VoiceModelConfig(BaseModel):
-    """非 OpenAI 协议的实时语音模型配置。"""
-
-    name: str
-    model: str
-    websocket_url: str
-    api_key: str
-    timeout: float = 60.0
-    max_retries: int = 2
-
-    def resolved_api_key(self) -> str:
-        """解析实时语音模型的环境变量密钥引用。"""
-        if not self.api_key.startswith("$"):
-            return self.api_key
-        variable = self.api_key[1:]
-        if variable.startswith("{") and variable.endswith("}"):
-            variable = variable[1:-1]
-        value = os.getenv(variable)
-        if not value:
-            raise RuntimeError(f"语音模型 {self.name} 缺少环境变量: {variable}")
-        return value
+# 说明：模型 Schema（ModelConfig / ModelType / AgentModelBinding）统一复用
+# medagent.configs，此处不再重复定义，避免 app 层与 SDK 层配置漂移。
 
 
 # ==================== YAML 配置来源 ====================
@@ -216,9 +168,10 @@ class AppConfig(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    # 模型统一注册表（语言 + 语音，通过 type 区分），复用 medagent Schema
     models: list[ModelConfig] = Field(default_factory=list)
-    agent_models: dict[str, str] = Field(default_factory=dict)
-    voice_models: list[VoiceModelConfig] = Field(default_factory=list)
+    # 智能体模型绑定：支持简写（字符串→语言模型）或详写（{language:.., voice:..}）
+    agent_models: dict[str, str | AgentModelBinding] = Field(default_factory=dict)
 
     @classmethod
     def settings_customise_sources(
@@ -247,22 +200,54 @@ class AppConfig(BaseSettings):
         return self.celery.backend_url or self.redis.url(self.redis.backend_db)
 
     def get_model_config(self, name: str) -> ModelConfig | None:
-        """按模型名称获取 OpenAI 兼容模型配置。"""
+        """按模型名称获取模型配置（语言或语音）。"""
         return next((model for model in self.models if model.name == name), None)
 
-    def get_agent_model_config(self, agent_name: str) -> ModelConfig | None:
+    def _binding(self, agent_name: str) -> AgentModelBinding | None:
+        """规整智能体绑定为 AgentModelBinding（字符串简写视为语言模型）。"""
+        raw = self.agent_models.get(agent_name)
+        if raw is None:
+            return None
+        if isinstance(raw, AgentModelBinding):
+            return raw
+        return AgentModelBinding(language=raw)
+
+    def get_agent_model_config(
+        self, agent_name: str, model_type: ModelType = ModelType.LANGUAGE
+    ) -> ModelConfig | None:
         """获取指定智能体绑定的模型配置
         Args:
             - agent_name: 智能体名称，例如 schedule_agent
+            - model_type: 期望的模型类别（language / voice），默认 language
         Return:
             - 模型配置；未绑定或模型不存在时返回 None
+        Raises:
+            - ValueError: 绑定的模型类别与请求类别不一致
         """
-        model_name = self.agent_models.get(agent_name)
-        return self.get_model_config(model_name) if model_name else None
+        binding = self._binding(agent_name)
+        if binding is None:
+            return None
+        model_name = (
+            binding.voice if model_type == ModelType.VOICE else binding.language
+        )
+        if not model_name:
+            return None
+        model = self.get_model_config(model_name)
+        if model is not None and model.type != model_type:
+            raise ValueError(
+                f"智能体 {agent_name} 绑定的模型 {model_name} 类别为 {model.type.value}，"
+                f"与请求类别 {model_type.value} 不符"
+            )
+        return model
 
-    def get_voice_model_config(self, name: str) -> VoiceModelConfig | None:
-        """按名称获取非 OpenAI 协议的实时语音模型配置。"""
-        return next((model for model in self.voice_models if model.name == name), None)
+    def get_voice_model_config(self, name: str) -> ModelConfig | None:
+        """按名称获取语音模型配置（type=voice）。
+        说明：保留方法名向后兼容；现从统一 models 列表按 type=voice 查询。
+        """
+        model = self.get_model_config(name)
+        if model is not None and model.type != ModelType.VOICE:
+            return None
+        return model
 
 
 @lru_cache(maxsize=1)

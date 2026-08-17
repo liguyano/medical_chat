@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from medagent.agents.middleware import DialogMiddleware
+from medagent.agents.middlewares import DialogMiddleware
 from medagent.agents.service_agent.dialog_agent import DialogAgent, DialogEngine
 from medagent.agents.service_agent.dialog_agent.agent import GENERIC_ERROR_MESSAGE
 from medagent.agents.service_agent.schedule_agent import QuestionTask
