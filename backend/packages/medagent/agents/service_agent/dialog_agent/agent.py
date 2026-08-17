@@ -49,6 +49,7 @@ class DialogAgent:
         self.history_store = history_store
         self.tool_executor = tool_executor
         self.turn_counter = 0
+        self.last_turn_context: dict[str, Any] = {}
 
     async def initialize(self) -> None:
         """创建引擎会话并保存初始状态。"""
@@ -78,6 +79,7 @@ class DialogAgent:
         self,
         audio_or_text: Any,
         session_no: str | None = None,
+        context_metadata: dict[str, Any] | None = None,
     ) -> str:
         """处理一轮患者输入并返回完整 AI 文本。"""
         self.turn_counter += 1
@@ -89,6 +91,8 @@ class DialogAgent:
             "constraints": [],
             "tool_calls": [],
         }
+        if context_metadata:
+            context.update(context_metadata)
         applied_constraints = 0
 
         try:
@@ -136,8 +140,7 @@ class DialogAgent:
                         context.setdefault("audio_chunks", []).append(event.get("data"))
                     elif event_type == "tool_call":
                         followup_required = (
-                            await self._handle_tool_call(event, context)
-                            or followup_required
+                            await self._handle_tool_call(event, context) or followup_required
                         )
                     elif event_type == "response_done":
                         break
@@ -168,6 +171,7 @@ class DialogAgent:
                 )
 
             await self.middleware.execute_after(context, full_response_text)
+            self.last_turn_context = context
             await self._update_state()
             return full_response_text
         except Exception:
@@ -177,6 +181,7 @@ class DialogAgent:
                 self.turn_counter,
             )
             await self.middleware.execute_after(context, GENERIC_ERROR_MESSAGE)
+            self.last_turn_context = context
             return GENERIC_ERROR_MESSAGE
 
     async def _apply_new_constraints(

@@ -1,12 +1,15 @@
 """Redis客户端工具类
 作用：提供Redis连接、Stream操作、缓存操作等功能
 """
+
 import json
+import logging
 import pickle
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
-import logging
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +19,9 @@ class RedisClient:
     作用：提供Redis基础操作和Stream操作
     """
 
-    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0, password: Optional[str] = None):
+    def __init__(
+        self, host: str = "localhost", port: int = 6379, db: int = 0, password: str | None = None
+    ):
         """初始化Redis客户端
         Args:
             - host: Redis主机地址
@@ -24,8 +29,9 @@ class RedisClient:
             - db: 数据库编号
             - password: 密码
         """
+        resolved_host = "127.0.0.1" if host == "localhost" else host
         self.client = Redis(
-            host=host,
+            host=resolved_host,
             port=port,
             db=db,
             password=password,
@@ -34,7 +40,7 @@ class RedisClient:
             socket_keepalive=True,
             health_check_interval=30,
         )
-        logger.info(f"Redis客户端初始化成功: {host}:{port}/{db}")
+        logger.info(f"Redis客户端初始化成功: {resolved_host}:{port}/{db}")
 
     def ping(self) -> bool:
         """检查Redis连接
@@ -43,13 +49,13 @@ class RedisClient:
         """
         try:
             return self.client.ping()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Redis连接失败: {e}")
             return False
 
     # ==================== Stream操作 ====================
 
-    def xadd(self, stream_key: str, fields: Dict[str, Any], max_len: int = 10000) -> str:
+    def xadd(self, stream_key: str, fields: dict[str, Any], max_len: int = 10000) -> str:
         """向Stream添加消息
         作用：发布事件到Redis Stream
         Args:
@@ -71,17 +77,14 @@ class RedisClient:
             stream_key,
             serialized_fields,
             maxlen=max_len,
-            approximate=True  # 近似裁剪，性能更好
+            approximate=True,  # 近似裁剪，性能更好
         )
         logger.debug(f"Stream发布成功: {stream_key} -> {message_id}")
-        return message_id.decode('utf-8')
+        return message_id.decode("utf-8")
 
     def xread(
-        self,
-        streams: Dict[str, str],
-        count: Optional[int] = None,
-        block: Optional[int] = None
-    ) -> List[Tuple[str, List[Tuple[str, Dict[str, bytes]]]]]:
+        self, streams: dict[str, str], count: int | None = None, block: int | None = None
+    ) -> list[tuple[str, list[tuple[str, dict[str, bytes]]]]]:
         """从Stream读取消息
         作用：订阅事件流
         Args:
@@ -91,10 +94,13 @@ class RedisClient:
         Return:
             - messages: [(stream_key, [(message_id, fields)])]
         """
-        result = self.client.xread(streams=streams, count=count, block=block)
-        return result
+        try:
+            return self.client.xread(streams=streams, count=count, block=block)
+        except RedisTimeoutError:
+            logger.warning("Redis XREAD 阻塞读取超时，按无新消息处理")
+            return []
 
-    def xgroup_create(self, stream_key: str, group_name: str, id: str = '0', mkstream: bool = True):
+    def xgroup_create(self, stream_key: str, group_name: str, id: str = "0", mkstream: bool = True):
         """创建消费者组
         Args:
             - stream_key: Stream键名
@@ -115,11 +121,11 @@ class RedisClient:
         self,
         group_name: str,
         consumer_name: str,
-        streams: Dict[str, str],
-        count: Optional[int] = None,
-        block: Optional[int] = None,
-        noack: bool = False
-    ) -> List[Tuple[bytes, List[Tuple[bytes, Dict[bytes, bytes]]]]]:
+        streams: dict[str, str],
+        count: int | None = None,
+        block: int | None = None,
+        noack: bool = False,
+    ) -> list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]:
         """消费者组读取消息
         Args:
             - group_name: 消费者组名称
@@ -131,15 +137,18 @@ class RedisClient:
         Return:
             - messages: [(stream_key, [(message_id, fields)])]
         """
-        result = self.client.xreadgroup(
-            groupname=group_name,
-            consumername=consumer_name,
-            streams=streams,
-            count=count,
-            block=block,
-            noack=noack
-        )
-        return result
+        try:
+            return self.client.xreadgroup(
+                groupname=group_name,
+                consumername=consumer_name,
+                streams=streams,
+                count=count,
+                block=block,
+                noack=noack,
+            )
+        except RedisTimeoutError:
+            logger.warning("Redis XREADGROUP 阻塞读取超时，按无新消息处理")
+            return []
 
     def xack(self, stream_key: str, group_name: str, *message_ids):
         """确认消息已处理
@@ -152,7 +161,7 @@ class RedisClient:
 
     # ==================== 缓存操作 ====================
 
-    def set(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
+    def set(self, key: str, value: Any, ex: int | None = None) -> bool:
         """设置缓存
         Args:
             - key: 键名
@@ -164,11 +173,11 @@ class RedisClient:
         try:
             serialized = pickle.dumps(value)
             return self.client.set(key, serialized, ex=ex)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Redis SET失败: {key} -> {e}")
             return False
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """获取缓存
         Args:
             - key: 键名
@@ -180,7 +189,7 @@ class RedisClient:
             if data is None:
                 return None
             return pickle.loads(data)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Redis GET失败: {key} -> {e}")
             return None
 
@@ -221,6 +230,22 @@ class RedisClient:
         """
         return self.client.ttl(key)
 
+    def acquire_lock(self, key: str, token: str, ttl: int = 30) -> bool:
+        """获取分布式锁
+        作用：使用 SET NX EX 原子获取短时会话锁。
+        """
+        return bool(self.client.set(key, token, nx=True, ex=ttl))
+
+    def release_lock(self, key: str, token: str) -> bool:
+        """释放分布式锁
+        作用：仅释放当前token持有的锁，避免误删其他请求的锁。
+        """
+        lua = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end"
+        )
+        return bool(self.client.eval(lua, 1, key, token))
+
     def close(self):
         """关闭连接"""
         self.client.close()
@@ -231,10 +256,13 @@ class AsyncRedisClient:
     作用：提供异步Redis操作，用于FastAPI异步路由
     """
 
-    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0, password: Optional[str] = None):
+    def __init__(
+        self, host: str = "localhost", port: int = 6379, db: int = 0, password: str | None = None
+    ):
         """初始化异步Redis客户端"""
+        resolved_host = "127.0.0.1" if host == "localhost" else host
         self.client = AsyncRedis(
-            host=host,
+            host=resolved_host,
             port=port,
             db=db,
             password=password,
@@ -243,33 +271,33 @@ class AsyncRedisClient:
             socket_keepalive=True,
             health_check_interval=30,
         )
-        logger.info(f"异步Redis客户端初始化成功: {host}:{port}/{db}")
+        logger.info(f"异步Redis客户端初始化成功: {resolved_host}:{port}/{db}")
 
     async def ping(self) -> bool:
         """检查Redis连接"""
         try:
             return await self.client.ping()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Redis连接失败: {e}")
             return False
 
-    async def set(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
+    async def set(self, key: str, value: Any, ex: int | None = None) -> bool:
         """异步设置缓存"""
         try:
             serialized = pickle.dumps(value)
             return await self.client.set(key, serialized, ex=ex)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Redis SET失败: {key} -> {e}")
             return False
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """异步获取缓存"""
         try:
             data = await self.client.get(key)
             if data is None:
                 return None
             return pickle.loads(data)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Redis GET失败: {key} -> {e}")
             return None
 
@@ -281,10 +309,10 @@ class AsyncRedisClient:
 
     async def xread(
         self,
-        streams: Dict[str, str],
-        count: Optional[int] = None,
-        block: Optional[int] = None,
-    ) -> List[Tuple[bytes, List[Tuple[bytes, Dict[bytes, bytes]]]]]:
+        streams: dict[str, str],
+        count: int | None = None,
+        block: int | None = None,
+    ) -> list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]:
         """异步从 Stream 读取消息
         作用：供 SSE 端点持续消费 dialog_stream，支持阻塞等待新消息。
         Args:
@@ -294,7 +322,15 @@ class AsyncRedisClient:
         Return:
             - messages: [(stream_key, [(message_id, fields)])]，无消息时为空列表
         """
-        return await self.client.xread(streams=streams, count=count, block=block)
+        try:
+            return await self.client.xread(
+                streams=streams,
+                count=count,
+                block=block,
+            )
+        except RedisTimeoutError:
+            logger.warning("异步 Redis XREAD 阻塞读取超时，按无新消息处理")
+            return []
 
     # ==================== 分布式锁（对话并发控制用） ====================
 
@@ -333,11 +369,11 @@ class AsyncRedisClient:
 
 
 # 全局单例
-redis_client: Optional[RedisClient] = None
-async_redis_client: Optional[AsyncRedisClient] = None
+redis_client: RedisClient | None = None
+async_redis_client: AsyncRedisClient | None = None
 
 
-def init_redis(host: str, port: int, db: int = 0, password: Optional[str] = None):
+def init_redis(host: str, port: int, db: int = 0, password: str | None = None):
     """初始化全局Redis客户端
     作用：在应用启动时调用
     """

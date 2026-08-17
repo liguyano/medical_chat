@@ -1,14 +1,13 @@
 """Redis Stream事件发布器
 作用：封装事件发布到Redis Stream的逻辑
 """
-import json
+
 import logging
-from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from app.utils.redis_client import get_redis
-from app.schemas.events import BaseEvent, EventType
 from app.configs.app_config import get_app_config
+from app.schemas.events import BaseEvent
+from app.utils.redis_client import RedisClient, get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,11 @@ class DialogEventPublisher:
     作用：发布对话事件到Redis Stream
     """
 
-    def __init__(self, session_id: str = None, redis_client=None):
+    def __init__(
+        self,
+        session_id: str | None = None,
+        redis_client: RedisClient | None = None,
+    ):
         """初始化事件发布器
         Args:
             - session_id: 会话ID（可选）
@@ -30,7 +33,7 @@ class DialogEventPublisher:
         config = get_app_config()
         self.max_len = config.redis.stream_maxlen
 
-    def publish(self, event: BaseEvent) -> Optional[str]:
+    def publish(self, event: BaseEvent) -> str | None:
         """发布单个事件
         作用：将事件序列化并发布到Redis Stream
         Args:
@@ -40,27 +43,23 @@ class DialogEventPublisher:
         """
         try:
             # 序列化事件为字典
-            event_dict = event.model_dump(mode='json')
+            event_dict = event.model_dump(mode="json")
 
             # 发布到Redis Stream
             message_id = self.redis.xadd(
-                stream_key=self.stream_key,
-                fields=event_dict,
-                max_len=self.max_len
+                stream_key=self.stream_key, fields=event_dict, max_len=self.max_len
             )
 
-            logger.debug(
-                f"事件发布成功: {event.event_type} -> {self.stream_key} (id={message_id})"
-            )
+            logger.debug(f"事件发布成功: {event.event_type} -> {self.stream_key} (id={message_id})")
             return message_id
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"事件发布失败: {event.event_type} -> {e}")
             # 降级：保存到数据库message_queue表（TODO: 实现降级逻辑）
             self._fallback_to_db(event)
             return None
 
-    def publish_batch(self, events: List[BaseEvent]) -> List[Optional[str]]:
+    def publish_batch(self, events: list[BaseEvent]) -> list[str | None]:
         """批量发布事件
         作用：批量发布多个事件
         Args:
@@ -74,9 +73,7 @@ class DialogEventPublisher:
             message_ids.append(message_id)
 
         success_count = sum(1 for mid in message_ids if mid is not None)
-        logger.info(
-            f"批量发布完成: {success_count}/{len(events)} 成功"
-        )
+        logger.info(f"批量发布完成: {success_count}/{len(events)} 成功")
         return message_ids
 
     def _fallback_to_db(self, event: BaseEvent):
@@ -91,12 +88,13 @@ class DialogEventPublisher:
             # 2. 插入message_queue表
             # 3. 后台任务定期重试发布
             logger.warning(f"事件降级保存（未实现）: {event.event_type}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"降级保存失败: {e}")
 
     def publish_extraction_result(
         self,
         session_id: str,
+        task_id: int | str,
         extracted_fields: dict,
         confidence_scores: dict,
     ) -> str | None:
@@ -109,16 +107,17 @@ class DialogEventPublisher:
         Return:
             - message_id 或 None
         """
-        from datetime import datetime
+        from datetime import UTC
 
         from app.schemas.events import ExtractionResultEvent
 
         event = ExtractionResultEvent(
             event_type="extraction_result",
             session_id=session_id,
+            task_id=task_id,
             extracted_fields=extracted_fields,
             confidence_scores=confidence_scores,
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(UTC),
         )
 
         try:
@@ -133,7 +132,7 @@ class DialogEventPublisher:
             )
             return message_id
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"[EventPublisher] 发布抽取结果失败: {e}")
             return None
 
@@ -172,4 +171,3 @@ class StreamKeyHelper:
             - stream_key: extraction_stream:{session_id}
         """
         return f"extraction_stream:{session_id}"
-

@@ -2,6 +2,7 @@
 作用：定义三个智能体的后台任务，以及定时清理、测试任务。
 说明：所有任务均注册到 celery_config 中的全局唯一 celery_app 实例。
 """
+
 import logging
 
 from app.celery_app.celery_config import celery_app
@@ -58,6 +59,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
 
 # ==================== Dialog Agent任务 ====================
 
+
 @celery_app.task(name="app.celery_app.tasks.dialog_agent_worker", bind=True)
 def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: dict):
     """Dialog Agent 后台任务
@@ -97,9 +99,7 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
             redis_client=get_redis(),
         )
 
-        return asyncio.run(
-            runner.run(check_interval=task_config.get("check_interval", 5))
-        )
+        return asyncio.run(runner.run(check_interval=task_config.get("check_interval", 5)))
     except Exception as exc:
         logger.exception("[Dialog Agent] Celery任务失败: session=%s", session_id)
         raise self.retry(exc=exc, countdown=10, max_retries=3)
@@ -108,7 +108,7 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
 @celery_app.task(name="app.celery_app.tasks.dialog_agent_preheat", bind=True)
 def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config: dict):
     """Dialog Agent预热任务
-    作用：创建对话引擎，初始化 DialogAgent，保存状态到 Redis
+    作用：校验文本模型与量表配置，并保存可恢复的预热标记
     Args:
         - session_id: 会话ID
         - patient_info: 患者信息（用于个性化提示词）
@@ -120,11 +120,9 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
     """
     import asyncio
 
-    from medagent.agents.factory import create_dialog_agent
-
     from app.celery_app.runtime import ensure_worker_runtime
     from app.managers.assessment_loader import AssessmentQuestionLoader
-    from app.workers.dialog_agent_runtime import get_runtime_dependencies
+    from app.utils.redis_client import get_redis
 
     async def _run_preheat():
         """异步执行预热逻辑"""
@@ -146,35 +144,24 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
 
             logger.info(f"[Dialog Agent] 加载量表问题: {len(questions)} 项")
 
-            # 2. 确定引擎类型（模型绑定由 SDK 工厂从 agent_models 解析）
+            # 2. 第一期仅允许文本引擎
             engine_type = task_config.get("engine_type", "text")
-            if engine_type not in ("text", "doubao"):
+            if engine_type != "text":
                 logger.error(f"[Dialog Agent] 未知引擎类型: {engine_type}")
                 return {"status": "failed", "reason": "unknown_engine_type"}
-            logger.info(f"[Dialog Agent] 引擎类型: {engine_type}")
-
-            # 3. 组装运行时依赖（middlewares / state_store / history_store）
-            deps = get_runtime_dependencies(session_id)
-
-            # 4. 通过 SDK 工厂创建 DialogAgent 实例
-            agent = create_dialog_agent(
-                session_id=session_id,
-                patient_info=patient_info,
-                task_list=questions,
-                engine_type=engine_type,
-                agent_name="dialog_agent",
-                middlewares=deps["middlewares"],
-                state_store=deps["state_store"],
-                history_store=deps["history_store"],
-                tool_executor=deps["tool_executor"],
+            redis = get_redis()
+            saved = redis.set(
+                f"dialog_agent:preheated:{session_id}",
+                {
+                    "engine_type": engine_type,
+                    "scale_codes": scale_codes,
+                    "question_count": len(questions),
+                    "patient_info": patient_info,
+                },
+                ex=3600,
             )
-
-            # 5. 初始化 DialogAgent（创建会话、保存状态到 Redis）
-            await agent.initialize()
-            logger.info("[Dialog Agent] DialogAgent 初始化完成")
-
-            # 6. 记录 worker/进程标识到 Redis（用于进程绑定）
-            # TODO: 实现进程绑定逻辑（批次B）
+            if not saved:
+                raise RuntimeError("Dialog Agent预热标记保存失败")
 
             return {
                 "status": "preheated",
@@ -193,12 +180,13 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
         logger.info(f"[Dialog Agent] 预热完成: {result}")
         return result
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"[Dialog Agent] 预热任务失败: {e}")
         raise self.retry(exc=e, countdown=5, max_retries=3)
 
 
 # ==================== Field Extraction Agent任务 ====================
+
 
 @celery_app.task(name="app.celery_app.tasks.extraction_agent_worker", bind=True)
 def extraction_agent_worker(self, session_id: str, task_config: dict):
@@ -257,6 +245,7 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
 
 # ==================== 定时任务 ====================
 
+
 @celery_app.task(name="app.celery_app.tasks.cleanup_expired_sessions")
 def cleanup_expired_sessions():
     """清理过期会话
@@ -279,6 +268,7 @@ def cleanup_expired_sessions():
 
 
 # ==================== 测试任务 ====================
+
 
 @celery_app.task(name="app.celery_app.tasks.test_task")
 def test_task(x: int, y: int):

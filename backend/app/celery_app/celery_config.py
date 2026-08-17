@@ -3,6 +3,7 @@
 说明：worker.py / beat.py / tasks.py 全部复用本模块的同一个 celery_app 实例，
       避免出现任务绑定到不同Celery实例导致Worker无法识别任务的问题。
 """
+
 import logging
 
 from celery import Celery
@@ -98,6 +99,10 @@ def _build_celery_app() -> Celery:
             "routing_key": "schedule",
         },
         "app.celery_app.tasks.dialog_agent_preheat": {
+            "queue": "dialog_queue",
+            "routing_key": "dialog",
+        },
+        "app.celery_app.tasks.dialog_agent_worker": {
             "queue": "dialog_queue",
             "routing_key": "dialog",
         },

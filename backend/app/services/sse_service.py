@@ -2,6 +2,7 @@
 作用：将 Redis Stream 中的事件消息转换为 SSE 事件（event / data / id），
       并提供 dialog_stream 的异步消费生成器，供 SSE 端点使用。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +10,8 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
+
+from redis.exceptions import RedisError
 
 from app.schemas.events import EventType
 from app.utils.redis_client import get_async_redis
@@ -28,7 +31,6 @@ _EVENT_NAME_MAP: dict[str, str] = {
     EventType.CONSTRAINT.value: "progress_updated",
     EventType.SESSION_END.value: "task_status_updated",
     # 兼容旧事件（后补）
-    EventType.DIALOG_TURN.value: "assistant_text_delta",
     EventType.DIALOG_TEXT.value: "assistant_text_delta",
     EventType.DIALOG_AUDIO.value: "assistant_audio_delta",
     EventType.SESSION_START.value: "session_status",
@@ -112,6 +114,7 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "content_text": data.get("content", ""),
             "delta": data.get("content", ""),
             "text": data.get("content", ""),
+            "is_final": True,
             "turn_no": data.get("turn_number", 0),
             "question_id": data.get("question_id"),
             "role": "assistant",
@@ -128,8 +131,13 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
         }
     elif event_type == EventType.EXTRACTION_RESULT.value:
         # 字段抽取结果 -> extraction_updated
+        extracted_fields = data.get("extracted_fields", {})
         return {
-            "fields": data.get("extracted_fields", {}),
+            "fields": (
+                list(extracted_fields.values())
+                if isinstance(extracted_fields, dict)
+                else extracted_fields
+            ),
             "confidence_scores": data.get("confidence_scores", {}),
         }
     elif event_type in (EventType.TOOL_CALL.value, EventType.CONSTRAINT.value):
@@ -141,7 +149,7 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
     elif event_type == EventType.SESSION_END.value:
         # 会话结束 -> task_status_updated
         return {
-            "status": "completed",
+            "task_status": "pending_review",
             "end_reason": data.get("end_reason", "completed"),
             "total_turns": data.get("total_turns", 0),
         }
@@ -165,8 +173,8 @@ async def stream_dialog_events(
     """
     redis = get_async_redis()
     stream_key = dialog_stream_key(session_id)
-    # last_id="$" 表示只读连接建立后的新消息；带 Last-Event-ID 时从该 ID 之后续读
-    last_id = last_event_id or "$"
+    # 首次连接从头回放，确保任务创建后立即产生的AI首问不会丢失。
+    last_id = last_event_id or "0-0"
 
     while True:
         try:
@@ -180,7 +188,7 @@ async def stream_dialog_events(
             # 客户端断开，正常退出
             logger.debug(f"SSE 消费取消: session={session_id}")
             raise
-        except Exception as e:
+        except RedisError as e:
             logger.error(f"SSE 读取 Stream 失败: session={session_id} -> {e}")
             yield {"event": "error", "data": json.dumps({"message": "事件流读取失败"})}
             return
@@ -192,8 +200,9 @@ async def stream_dialog_events(
 
         for _stream_key, entries in messages:
             for raw_id, fields in entries:
-                message_id = (
-                    raw_id.decode("utf-8") if isinstance(raw_id, bytes) else str(raw_id)
-                )
+                message_id = raw_id.decode("utf-8") if isinstance(raw_id, bytes) else str(raw_id)
                 last_id = message_id
+                decoded = _decode_fields(fields)
+                if decoded.get("event_type") == EventType.DIALOG_TURN.value:
+                    continue
                 yield format_sse_event(message_id, fields)

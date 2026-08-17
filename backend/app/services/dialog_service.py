@@ -1,7 +1,7 @@
 """对话交互服务
-作用：封装交互会话的开启、患者消息落库与关键词拦截、对话历史查询。
-      遵循计划约束：本服务仅落库 + 发布事件，AI 回复由 Dialog Agent 异步产出经 SSE 回推。
+作用：保存患者答案、发布关键词约束与患者事件，并查询完整会话历史。
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,122 +14,31 @@ from sqlalchemy.orm import Session
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.managers.keyword_matcher import MatchResult, get_keyword_matcher
+from app.models.assessment_execution import AssessmentInstance
+from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask
 from app.schemas.dialog import (
     DialogHistoryResponse,
-    DialogResponse,
     MessageItem,
     SendMessageRequest,
     SendMessageResponse,
-    StartDialogRequest,
 )
 from app.schemas.events import ConstraintEvent, PatientAnswerEvent
 from app.workers.event_publisher import DialogEventPublisher
 
 logger = logging.getLogger(__name__)
-
-# 会话锁：TTL 秒数，防止同一会话并发处理消息
 _DIALOG_LOCK_TTL = 30
 
 
-def _gen_session_no() -> str:
-    """生成会话编号。"""
-    return f"SESS-{uuid.uuid4().hex[:12]}"
-
-
-def _gen_message_no() -> str:
-    """生成消息编号。"""
-    return f"MSG-{uuid.uuid4().hex[:16]}"
-
-
-def start_dialog(db: Session, req: StartDialogRequest) -> DialogResponse:
-    """开始对话
-    作用：校验任务可对话后创建 interaction_session，并触发 Dialog Agent 预热。
-    Args:
-        - db: 数据库会话
-        - req: 开始对话请求
-    Return:
-        - DialogResponse: 新建会话详情
-    """
-    # 校验任务存在且为 AI 对话采集模式
-    task = db.execute(
-        select(CareTask).where(
-            CareTask.task_no == req.task_no, CareTask.deleted == 0
-        )
-    ).scalar_one_or_none()
-    if task is None:
-        raise AppError(ErrorCode.ERR_DIALOG_004)
-    if task.collection_mode != "ai_dialogue":
-        raise AppError(ErrorCode.ERR_DIALOG_004, "任务采集模式不是 AI 对话，无法开启对话")
-
-    now = datetime.now(UTC)
-    session = InteractionSession(
-        session_no=_gen_session_no(),
-        task_id=task.id,
-        patient_id=task.patient_id,
-        encounter_id=task.encounter_id,
-        participant_type="patient",
-        interaction_type="assessment",
-        channel_type=req.channel_type,
-        session_status="active",
-        started_at=now,
-        creator="system",
-    )
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-
-    # 触发 Dialog Agent 预热（异步；失败不阻断会话创建）
-    _trigger_preheat(session.session_no, task, req)
-
-    logger.info(f"交互会话创建成功: session_no={session.session_no} task_no={req.task_no}")
-    return DialogResponse(
-        session_no=session.session_no,
-        task_no=req.task_no,
-        session_status=session.session_status,
-        started_at=session.started_at,
-    )
-
-
-def _trigger_preheat(session_no: str, task: CareTask, req: StartDialogRequest) -> None:
-    """触发 Dialog Agent 预热任务
-    作用：向 Celery 投递 dialog_agent_preheat；投递失败仅记录日志，不阻断主流程。
-    Args:
-        - session_no: 会话编号（作为 Agent 侧 session_id）
-        - task: 关联任务
-        - req: 开始对话请求
-    """
-    try:
-        from app.celery_app.tasks import dialog_agent_preheat
-
-        dialog_agent_preheat.delay(
-            session_id=session_no,
-            patient_info={"patient_id": task.patient_id, "encounter_id": task.encounter_id},
-            task_config={
-                "scale_codes": req.scale_codes,
-                "engine_type": req.engine_type,
-            },
-        )
-        logger.info(f"Dialog Agent 预热任务已投递: session_no={session_no}")
-    except Exception as e:
-        logger.error(f"投递预热任务失败（不阻断会话创建）: session_no={session_no} -> {e}")
-
-
 def _load_active_session(db: Session, session_no: str) -> InteractionSession:
-    """加载处于活动状态的会话
-    Args:
-        - db: 数据库会话
-        - session_no: 会话编号
-    Return:
-        - InteractionSession
-    """
-    session = db.execute(
+    """加载活动会话。"""
+    session = db.scalar(
         select(InteractionSession).where(
             InteractionSession.session_no == session_no,
             InteractionSession.deleted == 0,
         )
-    ).scalar_one_or_none()
+    )
     if session is None:
         raise AppError(ErrorCode.ERR_DIALOG_001)
     if session.session_status != "active":
@@ -137,190 +46,215 @@ def _load_active_session(db: Session, session_no: str) -> InteractionSession:
     return session
 
 
-def _next_turn_no(db: Session, interaction_session_id: int) -> int:
-    """计算下一轮次序号
-    Args:
-        - db: 数据库会话
-        - interaction_session_id: 会话主键
-    Return:
-        - 下一轮次序号（从 1 开始）
-    """
-    current = db.scalar(
+def _task_matches(task: CareTask, task_ref: int | str) -> bool:
+    """判断请求任务标识是否与会话任务一致。"""
+    value = str(task_ref)
+    return value == str(task.id) or value == task.task_no
+
+
+def _current_question_turn(db: Session, session_id: int) -> int:
+    """获取当前等待患者回答的AI问句轮次。"""
+    turn_no = db.scalar(
         select(func.max(InteractionMessage.turn_no)).where(
-            InteractionMessage.interaction_session_id == interaction_session_id,
+            InteractionMessage.interaction_session_id == session_id,
+            InteractionMessage.role_type == "AI",
             InteractionMessage.deleted == 0,
         )
     )
-    return int(current or 0) + 1
-
-
-async def send_message(
-    db: Session, req: SendMessageRequest
-) -> SendMessageResponse:
-    """发送患者消息（统一入口）
-    作用：加会话锁防并发 -> 落库患者消息 -> 关键词拦截并发约束事件 -> 发布 DialogTurnEvent。
-          不同步调用模型；AI 回复由 Dialog Agent 消费事件后异步产出。
-    Args:
-        - db: 数据库会话
-        - req: 发送消息请求（包含 session_id/task_id/content/client_message_id/input_mode）
-    Return:
-        - SendMessageResponse: 落库消息编号、轮次与是否命中拦截
-    """
-    from app.utils.redis_client import get_async_redis
-
-    session = _load_active_session(db, req.session_id)
-
-    if not req.content:
-        raise AppError(ErrorCode.ERR_COMMON_001, "content 不能为空")
-
-    redis = get_async_redis()
-    lock_key = f"dialog_lock:{req.session_id}"
-    lock_token = uuid.uuid4().hex
-
-    # 获取会话锁，防止同一会话并发处理消息
-    acquired = await redis.acquire_lock(lock_key, lock_token, ttl=_DIALOG_LOCK_TTL)
-    if not acquired:
-        raise AppError(ErrorCode.ERR_DIALOG_003)
-
-    try:
-        turn_no = _next_turn_no(db, session.id)
-        message_no = _gen_message_no()
-
-        # 落库患者消息
-        message = InteractionMessage(
-            interaction_session_id=session.id,
-            message_no=message_no,
-            turn_no=turn_no,
-            role_type="患者",
-            message_type="text" if req.input_mode == "text" else "audio",
-            content_text=req.content,
-            audio_url=None,
-            occurred_at=datetime.now(UTC),
-            creator="patient",
-        )
-        db.add(message)
-        db.commit()
-
-        # 关键词拦截（步骤7）
-        matches = get_keyword_matcher().match(req.content)
-        intercepted = bool(matches)
-
-        publisher = DialogEventPublisher(session_id=req.session_id)
-
-        # 发布患者答案事件（供 Dialog/Schedule/Extraction 三 Agent 消费）
-        publisher.publish(
-            PatientAnswerEvent(
-                session_id=req.session_id,
-                turn_number=turn_no,
-                role="user",
-                content=req.content,
-                client_message_id=req.client_message_id,
-                input_mode=req.input_mode,
-            )
-        )
-
-        # 命中关键词则追加约束事件，供 Agent 注入下一轮约束提示
-        if intercepted:
-            _publish_constraint(publisher, req.session_id, matches)
-
-        logger.info(
-            f"患者消息处理完成: session_id={req.session_id} turn={turn_no} "
-            f"intercepted={intercepted} matched={[m.rule_code for m in matches]}"
-        )
-        return SendMessageResponse(
-            session_no=req.session_id,
-            message_no=message_no,
-            turn_no=turn_no,
-            intercepted=intercepted,
-        )
-    finally:
-        await redis.release_lock(lock_key, lock_token)
+    if turn_no is None:
+        raise AppError(ErrorCode.ERR_DIALOG_002, "AI首个问诊问题尚未就绪，请稍后重试")
+    return int(turn_no)
 
 
 def _publish_constraint(
     publisher: DialogEventPublisher,
-    session_no: str,
+    session: InteractionSession,
+    task: CareTask,
     matches: list[MatchResult],
 ) -> None:
-    """发布关键词命中的约束事件
-    作用：将命中规则的约束提示合并后发布 ConstraintEvent。
-    Args:
-        - publisher: 事件发布器
-        - session_no: 会话编号
-        - matches: 命中规则列表（已按优先级降序）
-    """
-    prompts = [m.constraint_prompt for m in matches if m.constraint_prompt]
+    """发布关键词命中的问诊约束。"""
+    prompts = [match.constraint_prompt for match in matches if match.constraint_prompt]
     if not prompts:
         return
     publisher.publish(
         ConstraintEvent(
-            session_id=session_no,
+            session_id=session.session_no,
+            task_id=task.id,
             constraint_type="keyword_hit",
             constraint_prompt="\n".join(prompts),
             remaining_tasks=[],
         )
     )
-    logger.info(f"关键词约束事件已发布: session_no={session_no} 命中 {len(matches)} 条规则")
+
+
+async def send_message(db: Session, req: SendMessageRequest) -> SendMessageResponse:
+    """保存并发布患者答案。"""
+    from app.utils.redis_client import get_redis
+
+    session = _load_active_session(db, req.session_id)
+    task = db.get(CareTask, session.task_id)
+    if task is None or not _task_matches(task, req.task_id):
+        raise AppError(ErrorCode.ERR_DIALOG_004, "task_id 与会话不匹配")
+
+    existing = db.scalar(
+        select(InteractionMessage).where(
+            InteractionMessage.message_no == req.client_message_id,
+            InteractionMessage.deleted == 0,
+        )
+    )
+    if existing is not None:
+        return SendMessageResponse(
+            session_no=req.session_id,
+            message_no=existing.message_no,
+            turn_no=existing.turn_no,
+            intercepted=False,
+        )
+
+    redis = get_redis()
+    lock_key = f"dialog_lock:{req.session_id}"
+    lock_token = uuid.uuid4().hex
+    if not redis.acquire_lock(lock_key, lock_token, ttl=_DIALOG_LOCK_TTL):
+        raise AppError(ErrorCode.ERR_DIALOG_003)
+
+    try:
+        turn_no = _current_question_turn(db, session.id)
+        answered = db.scalar(
+            select(InteractionMessage.id).where(
+                InteractionMessage.interaction_session_id == session.id,
+                InteractionMessage.turn_no == turn_no,
+                InteractionMessage.role_type.in_(["患者", "家属"]),
+                InteractionMessage.deleted == 0,
+            )
+        )
+        if answered is not None:
+            raise AppError(ErrorCode.ERR_DIALOG_003, "当前问句已经提交答案")
+
+        message = InteractionMessage(
+            interaction_session_id=session.id,
+            message_no=req.client_message_id,
+            turn_no=turn_no,
+            role_type="家属" if session.participant_type == "family" else "患者",
+            message_type="文本",
+            intent_type="回答",
+            content_text=req.content.strip(),
+            occurred_at=datetime.now(UTC),
+            creator="patient",
+            updator="patient",
+        )
+        db.add(message)
+        db.commit()
+        db.refresh(message)
+
+        matches = get_keyword_matcher().match(req.content)
+        publisher = DialogEventPublisher(session_id=req.session_id)
+        _publish_constraint(publisher, session, task, matches)
+        publisher.publish(
+            PatientAnswerEvent(
+                session_id=req.session_id,
+                task_id=task.id,
+                message_id=message.message_no,
+                turn_number=turn_no,
+                role="user",
+                content=req.content.strip(),
+                client_message_id=req.client_message_id,
+                input_mode=req.input_mode,
+            )
+        )
+        return SendMessageResponse(
+            session_no=req.session_id,
+            message_no=message.message_no,
+            turn_no=turn_no,
+            intercepted=bool(matches),
+        )
+    finally:
+        redis.release_lock(lock_key, lock_token)
 
 
 async def get_history(
-    db: Session, session_no: str, limit: int = 100, offset: int = 0
+    db: Session,
+    session_no: str,
+    limit: int = 100,
+    offset: int = 0,
 ) -> DialogHistoryResponse:
-    """获取对话历史
-    Args:
-        - db: 数据库会话
-        - session_no: 会话编号
-        - limit: 返回消息数量上限（默认100）
-        - offset: 偏移量（默认0）
-    Return:
-        - DialogHistoryResponse: 会话历史消息列表
-    """
-    session = db.execute(
+    """分页查询会话历史与评估进度。"""
+    session = db.scalar(
         select(InteractionSession).where(
             InteractionSession.session_no == session_no,
             InteractionSession.deleted == 0,
         )
-    ).scalar_one_or_none()
+    )
     if session is None:
         raise AppError(ErrorCode.ERR_DIALOG_001)
+    task = db.get(CareTask, session.task_id)
+    if task is None:
+        raise AppError(ErrorCode.ERR_DIALOG_004)
 
-    # 查询消息（带分页）
-    rows = list(
+    base_filter = (
+        InteractionMessage.interaction_session_id == session.id,
+        InteractionMessage.deleted == 0,
+    )
+    total = int(db.scalar(select(func.count(InteractionMessage.id)).where(*base_filter)) or 0)
+    messages = list(
         db.scalars(
             select(InteractionMessage)
-            .where(
-                InteractionMessage.interaction_session_id == session.id,
-                InteractionMessage.deleted == 0,
-            )
+            .where(*base_filter)
             .order_by(
                 InteractionMessage.turn_no.asc(),
                 InteractionMessage.occurred_at.asc(),
                 InteractionMessage.id.asc(),
             )
-            .limit(limit)
             .offset(offset)
+            .limit(limit)
         ).all()
     )
-
-    messages = [
-        MessageItem(
-            message_no=row.message_no,
-            turn_no=row.turn_no,
-            role_type=row.role_type,
-            message_type=row.message_type,
-            content_text=row.content_text,
-            occurred_at=row.occurred_at,
+    version_ids = list(
+        db.scalars(
+            select(AssessmentInstance.scale_version_id).where(
+                AssessmentInstance.task_id == task.id,
+                AssessmentInstance.deleted == 0,
+            )
+        ).all()
+    )
+    total_questions = 0
+    if version_ids:
+        total_questions = int(
+            db.scalar(
+                select(func.count(AssessmentQuestion.id)).where(
+                    AssessmentQuestion.scale_version_id.in_(version_ids),
+                    AssessmentQuestion.derived.is_(False),
+                    AssessmentQuestion.deleted == 0,
+                )
+            )
+            or 0
         )
-        for row in rows
-    ]
+    answered_questions = int(
+        db.scalar(
+            select(func.count(func.distinct(InteractionMessage.turn_no))).where(
+                InteractionMessage.interaction_session_id == session.id,
+                InteractionMessage.role_type.in_(["患者", "家属"]),
+                InteractionMessage.deleted == 0,
+            )
+        )
+        or 0
+    )
     return DialogHistoryResponse(
-        session_id=session_no,
-        task_id=str(session.task_id),
+        session_id=session.session_no,
+        task_id=task.id,
+        task_no=task.task_no,
         session_status=session.session_status,
-        current_cicare_stage=None,  # 第一期不实现 CICARE 阶段跟踪
-        answered_question_count=None,
-        total_question_count=None,
+        answered_question_count=answered_questions,
+        total_question_count=total_questions,
         ai_summary=session.ai_summary,
-        total=len(messages),
-        messages=messages,
+        total=total,
+        messages=[
+            MessageItem(
+                message_no=message.message_no,
+                turn_no=message.turn_no,
+                role_type=message.role_type,
+                message_type=message.message_type,
+                content_text=message.content_text,
+                occurred_at=message.occurred_at,
+            )
+            for message in messages
+        ],
     )

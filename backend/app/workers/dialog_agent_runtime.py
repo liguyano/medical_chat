@@ -11,21 +11,17 @@ from __future__ import annotations
 from typing import Any
 
 from medagent.agents.middlewares import (
-    EventPublishMiddleware,
     KeywordInterceptMiddleware,
     ScheduleConstraintMiddleware,
     TimeoutMiddleware,
 )
-from medagent.agents.service_agent.dialog_agent import DialogAgent, DialogEngine
 from medagent.agents.service_agent.dialog_agent.tools import execute_tool
-from medagent.agents.service_agent.schedule_agent import QuestionTask
 
 from app.managers.agent_state_manager import AsyncAgentStateManager
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.managers.session_timeout_manager import SessionTimeoutManager
-from app.schemas.events import DialogTurnEvent, EventType, ToolCallEvent
+from app.schemas.events import EventType
 from app.utils.redis_client import RedisClient
-from app.workers.event_publisher import DialogEventPublisher
 
 
 def _decode(value: Any) -> Any:
@@ -70,24 +66,6 @@ class RedisConstraintSource:
         return constraints
 
 
-class AppDialogEventSink:
-    """将 SDK 事件字典转换为应用层 Pydantic 事件并发布。"""
-
-    def __init__(self, session_id: str) -> None:
-        self.publisher = DialogEventPublisher(session_id)
-
-    def __call__(self, event: dict[str, Any]) -> str | None:
-        event_type = event.get("event_type")
-        model: DialogTurnEvent | ToolCallEvent
-        if event_type == EventType.DIALOG_TURN.value:
-            model = DialogTurnEvent.model_validate(event)
-        elif event_type == EventType.TOOL_CALL.value:
-            model = ToolCallEvent.model_validate(event)
-        else:
-            raise ValueError(f"不支持的 Dialog Agent 事件类型: {event_type}")
-        return self.publisher.publish(model)
-
-
 def get_runtime_dependencies(session_id: str) -> dict[str, Any]:
     """组装 Dialog Agent 运行时依赖（App 层注入）
     作用：返回 middlewares / state_store / history_store / tool_executor，
@@ -106,10 +84,6 @@ def get_runtime_dependencies(session_id: str) -> dict[str, Any]:
         "middlewares": [
             KeywordInterceptMiddleware(),
             ScheduleConstraintMiddleware(RedisConstraintSource(redis_client)),
-            EventPublishMiddleware(
-                session_id,
-                AppDialogEventSink(session_id),
-            ),
             TimeoutMiddleware(timeout_manager.update_activity),
         ],
         "state_store": AsyncAgentStateManager(),

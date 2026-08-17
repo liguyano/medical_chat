@@ -40,7 +40,7 @@ class ExtractedAnswer(BaseModel):
     extraction_confidence: float = Field(
         ..., ge=0.0, le=1.0, description="抽取置信度（0.0-1.0）"
     )
-    source_message_ids: list[int] = Field(
+    source_message_ids: list[str] = Field(
         default_factory=list, description="来源消息ID列表"
     )
 

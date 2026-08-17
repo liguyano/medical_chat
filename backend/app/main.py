@@ -2,6 +2,7 @@
 作用：创建 FastAPI 实例、配置 CORS、注册路由与全局异常处理器，并在 lifespan
       内初始化日志 / 数据库 / Redis，供 uvicorn 启动。
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,8 +68,6 @@ def create_app() -> FastAPI:
     Return:
         - app: 已注册 CORS / 异常处理器 / 路由的 FastAPI 实例
     """
-    config = get_app_config()
-
     app = FastAPI(
         title="入院量表评估 - AI 对话服务",
         description="住院患者入院评估的任务创建、AI 对话交互与 SSE 流式推送接口",
@@ -79,8 +78,11 @@ def create_app() -> FastAPI:
     # 配置 CORS：批次 A 不做鉴权，开发期放开跨域
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -89,11 +91,10 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # 注册业务路由
-    from app.api import dialog, dialog_unified, extraction, patients, scales, sse, tasks
+    from app.api import dialog, extraction, patients, scales, sse, tasks
 
     app.include_router(tasks.router)
     app.include_router(dialog.router)
-    app.include_router(dialog_unified.router)
     app.include_router(sse.router)
     app.include_router(patients.router)
     app.include_router(scales.router)
