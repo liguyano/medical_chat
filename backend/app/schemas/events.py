@@ -111,9 +111,9 @@ class ExtractionResultEvent(BaseEvent):
     作用：Field Extraction Agent抽取完成后发布
     """
     event_type: EventType = EventType.EXTRACTION_RESULT
-    form_id: str
-    extracted_fields: dict[str, Any]      # {field_name: value}
-    confidence_scores: dict[str, float]   # {field_name: confidence}
+    form_id: str | None = None
+    extracted_fields: dict[str, Any]      # {question_id: value}
+    confidence_scores: dict[str, float]   # {question_id: confidence}
 
 
 # 事件类型映射

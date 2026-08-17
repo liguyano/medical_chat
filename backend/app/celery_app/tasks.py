@@ -209,6 +209,69 @@ def extraction_agent_worker(self, session_id: str, form_ids: list):
         raise self.retry(exc=e, countdown=10, max_retries=3)
 
 
+# ==================== Field Extraction Agent任务 ====================
+
+@celery_app.task(name="app.celery_app.tasks.extraction_agent_worker", bind=True)
+def extraction_agent_worker(self, session_id: str, task_config: dict):
+    """Field Extraction Agent 后台任务
+    作用：订阅对话流，调用抽取 Agent，写入数据库，发布结果
+    Args:
+        - session_id: 会话ID
+        - task_config: 任务配置
+            必需字段：
+            - scale_codes: List[str] - 量表编码列表
+            可选字段：
+            - check_interval: int - Redis Stream 阻塞读取间隔（秒，默认 5）
+    """
+    import asyncio
+
+    from openai import AsyncOpenAI
+
+    from app.celery_app.runtime import ensure_worker_runtime
+    from app.configs.app_config import get_app_config
+    from app.managers.assessment_loader import AssessmentQuestionLoader
+    from app.managers.dialog_history_manager import DialogHistoryManager
+    from app.managers.extraction_result_writer import ExtractionResultWriter
+    from app.utils.redis_client import get_redis
+    from app.workers.event_publisher import DialogEventPublisher
+    from app.workers.extraction_agent_runner import ExtractionAgentRunner
+
+    try:
+        config = get_app_config()
+        model_config = config.get_agent_model_config("extraction_agent")
+        if model_config is None:
+            return {"status": "failed", "reason": "llm_not_configured"}
+
+        ensure_worker_runtime()
+        client = AsyncOpenAI(
+            api_key=model_config.resolved_api_key(),
+            base_url=model_config.api_base,
+            timeout=model_config.timeout,
+            max_retries=model_config.max_retries,
+        )
+
+        runner = ExtractionAgentRunner(
+            loader=AssessmentQuestionLoader(),
+            history_manager=DialogHistoryManager(),
+            writer_factory=ExtractionResultWriter,
+            redis_client=get_redis(),
+            publisher_factory=DialogEventPublisher,
+            llm_client=client,
+            model_config=model_config.model_dump(),
+        )
+
+        return asyncio.run(
+            runner.run(
+                session_id,
+                scale_codes=task_config.get("scale_codes", []),
+                check_interval=task_config.get("check_interval", 5),
+            )
+        )
+    except Exception as exc:
+        logger.exception("[Extraction Agent] Celery任务失败: session=%s", session_id)
+        raise self.retry(exc=exc, countdown=10, max_retries=3)
+
+
 # ==================== 定时任务 ====================
 
 @celery_app.task(name="app.celery_app.tasks.cleanup_expired_sessions")
