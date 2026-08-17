@@ -277,6 +277,56 @@ class AsyncRedisClient:
         """异步删除缓存"""
         return await self.client.delete(*keys)
 
+    # ==================== Stream 操作（SSE 消费用） ====================
+
+    async def xread(
+        self,
+        streams: Dict[str, str],
+        count: Optional[int] = None,
+        block: Optional[int] = None,
+    ) -> List[Tuple[bytes, List[Tuple[bytes, Dict[bytes, bytes]]]]]:
+        """异步从 Stream 读取消息
+        作用：供 SSE 端点持续消费 dialog_stream，支持阻塞等待新消息。
+        Args:
+            - streams: {stream_key: last_id} 字典，last_id 之后的消息将被返回
+            - count: 单次最多读取条数
+            - block: 阻塞时间（毫秒），None 表示非阻塞
+        Return:
+            - messages: [(stream_key, [(message_id, fields)])]，无消息时为空列表
+        """
+        return await self.client.xread(streams=streams, count=count, block=block)
+
+    # ==================== 分布式锁（对话并发控制用） ====================
+
+    async def acquire_lock(self, key: str, token: str, ttl: int = 30) -> bool:
+        """获取分布式锁
+        作用：基于 SET NX PX 实现，防止同一会话并发处理消息。
+        Args:
+            - key: 锁键名，如 dialog_lock:{session_id}
+            - token: 持有者标识（释放时校验，避免误删他人锁）
+            - ttl: 锁过期秒数，防止持有者崩溃导致死锁
+        Return:
+            - bool: 是否成功获取
+        """
+        result = await self.client.set(key, token, nx=True, ex=ttl)
+        return bool(result)
+
+    async def release_lock(self, key: str, token: str) -> bool:
+        """释放分布式锁
+        作用：仅当锁归属该 token 时才删除，使用 Lua 脚本保证原子性。
+        Args:
+            - key: 锁键名
+            - token: 持有者标识
+        Return:
+            - bool: 是否成功释放（token 不匹配返回 False）
+        """
+        lua = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end"
+        )
+        released = await self.client.eval(lua, 1, key, token)
+        return bool(released)
+
     async def close(self):
         """关闭连接"""
         await self.client.close()

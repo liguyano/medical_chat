@@ -1,0 +1,86 @@
+{
+  "version": "1.0",
+  "description": "入院评估对话关键词规则种子数据，导入到 interaction_rule 表。trigger_condition.keywords 为精确匹配词，trigger_condition.patterns 为正则；action_type=constraint_prompt 时 action_payload.prompt 为注入下一轮的约束提示。",
+  "rules": [
+    {
+      "rule_code": "KW_SMOKING",
+      "rule_name": "吸烟史关键词",
+      "scope_type": "global",
+      "trigger_condition": {
+        "keywords": ["抽烟", "吸烟", "香烟", "烟龄", "戒烟"],
+        "patterns": ["每天\\s*\\d+\\s*(支|包)烟"]
+      },
+      "action_type": "constraint_prompt",
+      "action_payload": {
+        "prompt": "患者提及吸烟相关信息，请追问：每日吸烟量、烟龄、是否已戒烟及戒烟时长，并做戒烟宣教。",
+        "tags": ["吸烟史"]
+      },
+      "priority": 100,
+      "status": "active"
+    },
+    {
+      "rule_code": "KW_DRINKING",
+      "rule_name": "饮酒史关键词",
+      "scope_type": "global",
+      "trigger_condition": {
+        "keywords": ["喝酒", "饮酒", "白酒", "啤酒", "酗酒", "戒酒"],
+        "patterns": []
+      },
+      "action_type": "constraint_prompt",
+      "action_payload": {
+        "prompt": "患者提及饮酒相关信息，请追问：饮酒频率、每次饮酒量、酒类及是否戒酒，并评估戒断风险。",
+        "tags": ["饮酒史"]
+      },
+      "priority": 100,
+      "status": "active"
+    },
+    {
+      "rule_code": "KW_ALLERGY",
+      "rule_name": "过敏史关键词",
+      "scope_type": "global",
+      "trigger_condition": {
+        "keywords": ["过敏", "过敏史", "皮疹", "药物过敏", "青霉素"],
+        "patterns": ["对.{1,10}(过敏|不耐受)"]
+      },
+      "action_type": "constraint_prompt",
+      "action_payload": {
+        "prompt": "患者提及过敏相关信息，请务必追问：过敏原、过敏反应表现、严重程度，并在病历显著标注。",
+        "tags": ["过敏史"]
+      },
+      "priority": 200,
+      "status": "active"
+    },
+    {
+      "rule_code": "KW_EDUCATION",
+      "rule_name": "宣教触发关键词",
+      "scope_type": "global",
+      "trigger_condition": {
+        "keywords": ["怎么办", "注意什么", "要注意", "饮食", "康复", "怎么护理"],
+        "patterns": []
+      },
+      "action_type": "trigger_education",
+      "action_payload": {
+        "prompt": "患者有健康宣教需求，可调用 get_education_material 工具提供对应宣教材料。",
+        "tags": ["宣教"]
+      },
+      "priority": 50,
+      "status": "active"
+    },
+    {
+      "rule_code": "KW_CONSENT",
+      "rule_name": "知情同意关键词",
+      "scope_type": "global",
+      "trigger_condition": {
+        "keywords": ["同意书", "知情同意", "签字", "签署"],
+        "patterns": []
+      },
+      "action_type": "trigger_consent",
+      "action_payload": {
+        "prompt": "患者提及知情同意相关，可调用 trigger_consent_form 工具触发对应知情同意书签署流程。",
+        "tags": ["知情同意"]
+      },
+      "priority": 60,
+      "status": "active"
+    }
+  ]
+}
