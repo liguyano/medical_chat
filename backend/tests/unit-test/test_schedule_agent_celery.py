@@ -36,9 +36,9 @@ def test_worker_reports_missing_model_binding(monkeypatch):
     assert result == {"status": "failed", "reason": "llm_not_configured"}
 
 
-def test_worker_builds_runner_with_openai_compatible_client(monkeypatch):
-    """任务应按配置创建 OpenAI 兼容客户端并透传运行参数。"""
-    import openai
+def test_worker_builds_runner_with_chat_model(monkeypatch):
+    """任务应用 create_chat_model 构造 BaseChatModel 并注入运行器。"""
+    import medagent.providers as providers_module
 
     import app.celery_app.runtime as runtime_module
     import app.configs.app_config as config_module
@@ -51,8 +51,9 @@ def test_worker_builds_runner_with_openai_compatible_client(monkeypatch):
         "get_app_config",
         lambda: SimpleNamespace(get_agent_model_config=lambda _: config),
     )
-    client_factory = Mock(return_value=object())
-    monkeypatch.setattr(openai, "AsyncOpenAI", client_factory)
+    fake_model = object()
+    model_factory = Mock(return_value=fake_model)
+    monkeypatch.setattr(providers_module, "create_chat_model", model_factory)
     runtime_initializer = Mock()
     monkeypatch.setattr(runtime_module, "ensure_worker_runtime", runtime_initializer)
     monkeypatch.setattr(redis_module, "get_redis", lambda: object())
@@ -69,12 +70,8 @@ def test_worker_builds_runner_with_openai_compatible_client(monkeypatch):
     )
 
     assert result == {"status": "completed", "turns": 5}
-    client_factory.assert_called_once_with(
-        api_key="key",
-        base_url="https://example.com/v1",
-        timeout=600.0,
-        max_retries=2,
-    )
+    model_factory.assert_called_once_with(config)
+    assert runner_factory.call_args.kwargs["model"] is fake_model
     runtime_initializer.assert_called_once_with()
     fake_runner.run.assert_awaited_once_with(
         "session",
@@ -85,7 +82,7 @@ def test_worker_builds_runner_with_openai_compatible_client(monkeypatch):
 
 def test_worker_retries_unhandled_failure(monkeypatch):
     """运行器异常必须交给 Celery 重试。"""
-    import openai
+    import medagent.providers as providers_module
 
     import app.celery_app.runtime as runtime_module
     import app.configs.app_config as config_module
@@ -98,7 +95,7 @@ def test_worker_retries_unhandled_failure(monkeypatch):
         "get_app_config",
         lambda: SimpleNamespace(get_agent_model_config=lambda _: config),
     )
-    monkeypatch.setattr(openai, "AsyncOpenAI", lambda **_: object())
+    monkeypatch.setattr(providers_module, "create_chat_model", lambda _: object())
     monkeypatch.setattr(runtime_module, "ensure_worker_runtime", Mock())
     monkeypatch.setattr(redis_module, "get_redis", lambda: object())
     monkeypatch.setattr(

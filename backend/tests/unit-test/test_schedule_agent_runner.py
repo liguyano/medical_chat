@@ -2,12 +2,11 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 
-from app.configs.app_config import ModelConfig
 from app.schemas.events import ConstraintEvent, SessionEndEvent
 from app.workers.schedule_agent_runner import (
     ScheduleAgentRunner,
@@ -86,30 +85,15 @@ def question() -> QuestionTask:
 
 
 def llm(payload):
-    """创建模型替身。"""
-    create = AsyncMock()
-    create.return_value = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(
-                    content=json.dumps(payload, ensure_ascii=False)
-                )
-            )
-        ]
-    )
+    """创建 BaseChatModel 替身。
+    说明：模拟 model.with_structured_output(Schema).ainvoke() 返回 payload dict，
+      ScheduleAgent 内部会 model_validate 兜底为 ScheduleAnalysis。
+    """
+    ainvoke = AsyncMock(return_value=payload)
+    structured = SimpleNamespace(ainvoke=ainvoke)
     return SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
-    )
-
-
-def model_config() -> ModelConfig:
-    """创建运行器模型配置。"""
-    return ModelConfig(
-        name="qwen-plus",
-        display_name="Qwen Plus",
-        model="qwen-plus",
-        api_base="https://example.com/v1",
-        api_key="key",
+        with_structured_output=Mock(return_value=structured),
+        ainvoke=ainvoke,
     )
 
 
@@ -137,8 +121,7 @@ def make_runner(redis, payload, *, questions=None, history=None, events=None):
             history_manager=FakeHistory(history),
             redis_client=redis,
             publisher_factory=lambda _: FakePublisher(published),
-            llm_client=llm(payload),
-            model_config=model_config(),
+            model=llm(payload),
             block_ms=0,
             max_idle_reads=1,
         ),

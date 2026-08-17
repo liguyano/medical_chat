@@ -9,9 +9,11 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
+
+from medagent.agents.factory import create_schedule_agent
 from medagent.agents.service_agent.schedule_agent import ScheduleAgent, ToolCallRecord
 
-from app.configs.app_config import ModelConfig
 from app.managers.assessment_loader import AssessmentQuestionLoader
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.schemas.events import ConstraintEvent, EventType, SessionEndEvent
@@ -55,8 +57,7 @@ class ScheduleAgentRunner:
         history_manager: DialogHistoryManager,
         redis_client: RedisClient,
         publisher_factory: Callable[[str], DialogEventPublisher],
-        llm_client: Any,
-        model_config: ModelConfig,
+        model: BaseChatModel,
         block_ms: int = 5000,
         max_idle_reads: int = 60,
     ) -> None:
@@ -65,8 +66,7 @@ class ScheduleAgentRunner:
         self.history_manager = history_manager
         self.redis = redis_client
         self.publisher_factory = publisher_factory
-        self.llm_client = llm_client
-        self.model_config = model_config
+        self.model = model
         self.block_ms = block_ms
         self.max_idle_reads = max_idle_reads
 
@@ -85,13 +85,11 @@ class ScheduleAgentRunner:
         if not questions:
             return {"status": "failed", "reason": "no_questions_loaded"}
 
-        agent = ScheduleAgent(
+        agent = create_schedule_agent(
             session_id=session_id,
             task_list=questions,
-            llm_client=self.llm_client,
-            model=self.model_config.model,
+            model=self.model,
             check_interval=check_interval,
-            temperature=0.1,
         )
         state_key = f"schedule_agent:state:{session_id}"
         state = self.redis.get(state_key)

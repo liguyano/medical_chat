@@ -4,7 +4,8 @@ import os
 
 import pytest
 from medagent.agents.service_agent.schedule_agent import QuestionTask, ScheduleAgent
-from openai import AsyncOpenAI
+from medagent.configs.model_config import ModelConfig, ModelType
+from medagent.providers import create_chat_model
 
 SCENARIOS = [
     (
@@ -88,53 +89,56 @@ async def test_real_llm_deviation_accuracy_exceeds_85_percent():
     if not api_key:
         pytest.skip("未配置 DASHSCOPE_API_KEY，无法执行真实模型测试")
 
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        timeout=60.0,
-        max_retries=1,
+    model = create_chat_model(
+        ModelConfig(
+            name="qwen-plus-precise",
+            display_name="Qwen Plus 确定性",
+            type=ModelType.LANGUAGE,
+            model="qwen-plus",
+            api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            api_key=api_key,
+            timeout=60.0,
+            max_retries=1,
+            temperature=0.1,
+            max_tokens=500,
+        )
     )
     matches: list[bool] = []
     details: list[str] = []
-    try:
-        for index, (expected, history) in enumerate(SCENARIOS, 1):
-            agent = ScheduleAgent(
-                session_id=f"real-llm-{index}",
-                task_list=[
-                    QuestionTask(
-                        question_id=1,
-                        question_code="smoking",
-                        question_name="吸烟情况",
-                        patient_text="请问您是否吸烟？",
-                        question_type="单选",
-                        required=True,
-                        sort_no=1,
-                    )
-                ],
-                llm_client=client,
-                model="qwen-plus",
-                check_interval=1,
-                max_tokens=500,
-            )
-            tool_calls = (
-                [
-                    {
-                        "name": "get_education_material",
-                        "arguments": {"category": "tobacco"},
-                    }
-                ]
-                if index in {2, 4}
-                else []
-            )
-            result = await agent.evaluate(history, tool_calls=tool_calls)
-            matched = result.is_deviation is expected
-            matches.append(matched)
-            if not matched:
-                details.append(
-                    f"场景{index}: expected={expected}, actual={result.is_deviation}"
+    for index, (expected, history) in enumerate(SCENARIOS, 1):
+        agent = ScheduleAgent(
+            session_id=f"real-llm-{index}",
+            task_list=[
+                QuestionTask(
+                    question_id=1,
+                    question_code="smoking",
+                    question_name="吸烟情况",
+                    patient_text="请问您是否吸烟？",
+                    question_type="单选",
+                    required=True,
+                    sort_no=1,
                 )
-    finally:
-        await client.close()
+            ],
+            model=model,
+            check_interval=1,
+        )
+        tool_calls = (
+            [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "tobacco"},
+                }
+            ]
+            if index in {2, 4}
+            else []
+        )
+        result = await agent.evaluate(history, tool_calls=tool_calls)
+        matched = result.is_deviation is expected
+        matches.append(matched)
+        if not matched:
+            details.append(
+                f"场景{index}: expected={expected}, actual={result.is_deviation}"
+            )
 
     accuracy = sum(matches) / len(matches)
     assert accuracy > 0.85, f"准确率={accuracy:.2%}; " + "; ".join(details)

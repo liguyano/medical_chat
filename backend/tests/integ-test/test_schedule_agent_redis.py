@@ -2,13 +2,12 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 
-from app.configs.app_config import ModelConfig
 from app.schemas.events import ConstraintEvent, DialogTurnEvent, EventType
 from app.utils.redis_client import RedisClient, init_redis
 from app.workers.event_publisher import DialogEventPublisher
@@ -48,27 +47,22 @@ class DictHistoryManager:
 
 
 def fake_llm():
-    """返回稳定偏离判断。"""
-    create = AsyncMock()
-    create.return_value = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(
-                    content=json.dumps(
-                        {
-                            "is_deviation": True,
-                            "reason": "持续讨论食堂",
-                            "completed_questions": [],
-                            "suggested_action": "请回到吸烟评估。",
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-            )
-        ]
+    """返回稳定偏离判断的 BaseChatModel 替身。
+    说明：模拟 model.with_structured_output(Schema).ainvoke() 返回 dict，
+      ScheduleAgent 内部 model_validate 兜底为 ScheduleAnalysis。
+    """
+    ainvoke = AsyncMock(
+        return_value={
+            "is_deviation": True,
+            "reason": "持续讨论食堂",
+            "completed_questions": [],
+            "suggested_action": "请回到吸烟评估。",
+        }
     )
+    structured = SimpleNamespace(ainvoke=ainvoke)
     return SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        with_structured_output=Mock(return_value=structured),
+        ainvoke=ainvoke,
     )
 
 
@@ -108,14 +102,7 @@ async def test_runner_consumes_bytes_event_and_publishes_constraint(redis_client
         history_manager=DictHistoryManager(),
         redis_client=client,
         publisher_factory=DialogEventPublisher,
-        llm_client=fake_llm(),
-        model_config=ModelConfig(
-            name="qwen-plus",
-            display_name="Qwen Plus",
-            model="qwen-plus",
-            api_base="https://example.com/v1",
-            api_key="key",
-        ),
+        model=fake_llm(),
         block_ms=1,
         max_idle_reads=1,
     )
