@@ -24,7 +24,7 @@ from app.schemas.dialog import (
     SendMessageResponse,
     StartDialogRequest,
 )
-from app.schemas.events import ConstraintEvent, DialogTurnEvent
+from app.schemas.events import ConstraintEvent, PatientAnswerEvent
 from app.workers.event_publisher import DialogEventPublisher
 
 logger = logging.getLogger(__name__)
@@ -207,14 +207,15 @@ async def send_message(
 
         publisher = DialogEventPublisher(session_id=req.session_id)
 
-        # 发布对话轮次事件，交由 Dialog Agent 异步生成回复
+        # 发布患者答案事件（供 Dialog/Schedule/Extraction 三 Agent 消费）
         publisher.publish(
-            DialogTurnEvent(
+            PatientAnswerEvent(
                 session_id=req.session_id,
                 turn_number=turn_no,
-                question=req.content,
-                answer="",
-                metadata={"message_no": message_no, "intercepted": intercepted},
+                role="user",
+                content=req.content,
+                client_message_id=req.client_message_id,
+                input_mode=req.input_mode,
             )
         )
 

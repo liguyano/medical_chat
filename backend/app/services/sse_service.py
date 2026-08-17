@@ -18,16 +18,20 @@ logger = logging.getLogger(__name__)
 # 心跳间隔（秒）：空闲时定期发送 ping 事件保活
 HEARTBEAT_INTERVAL = 30
 
-# 事件类型 -> SSE event 名称映射（对齐计划 8.2：dialog_message / progress_update / error）
+# 事件类型 -> SSE event 名称映射（对齐前端 SseEventType）
 _EVENT_NAME_MAP: dict[str, str] = {
-    EventType.DIALOG_TURN.value: "dialog_message",
-    EventType.DIALOG_TEXT.value: "dialog_message",
-    EventType.DIALOG_AUDIO.value: "dialog_message",
-    EventType.TOOL_CALL.value: "progress_update",
-    EventType.CONSTRAINT.value: "progress_update",
-    EventType.SESSION_START.value: "progress_update",
-    EventType.SESSION_END.value: "progress_update",
-    EventType.EXTRACTION_RESULT.value: "progress_update",
+    # 核心事件（第一期）
+    EventType.DIALOG_MESSAGE.value: "assistant_text_delta",
+    EventType.PATIENT_ANSWER.value: "user_transcript_completed",
+    EventType.EXTRACTION_RESULT.value: "extraction_updated",
+    EventType.TOOL_CALL.value: "progress_updated",
+    EventType.CONSTRAINT.value: "progress_updated",
+    EventType.SESSION_END.value: "task_status_updated",
+    # 兼容旧事件（后补）
+    EventType.DIALOG_TURN.value: "assistant_text_delta",
+    EventType.DIALOG_TEXT.value: "assistant_text_delta",
+    EventType.DIALOG_AUDIO.value: "assistant_audio_delta",
+    EventType.SESSION_START.value: "session_status",
 }
 
 
@@ -73,12 +77,77 @@ def format_sse_event(message_id: str, fields: dict[bytes, bytes]) -> dict[str, s
     """
     data = _decode_fields(fields)
     event_type = str(data.get("event_type", ""))
-    event_name = _EVENT_NAME_MAP.get(event_type, "dialog_message")
+    event_name = _EVENT_NAME_MAP.get(event_type, "heartbeat")
+
+    # 构建前端预期的 SseEnvelope 格式
+    envelope = {
+        "event_id": message_id,
+        "event_type": event_name,
+        "task_id": data.get("task_id", ""),
+        "session_id": data.get("session_id"),
+        "message_id": data.get("message_id"),
+        "occurred_at": data.get("timestamp", data.get("occurred_at", "")),
+        "payload": _build_payload(event_type, data),
+    }
+
     return {
         "event": event_name,
         "id": message_id,
-        "data": json.dumps(data, ensure_ascii=False),
+        "data": json.dumps(envelope, ensure_ascii=False),
     }
+
+
+def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+    """构建前端预期的 payload 字段
+    作用：根据事件类型提取/转换字段，对齐前端 applyRealtimeEvent 消费逻辑。
+    Args:
+        - event_type: 后端事件类型（EventType 枚举值）
+        - data: 解码后的事件字段
+    Return:
+        - payload 字典
+    """
+    if event_type == EventType.DIALOG_MESSAGE.value:
+        # AI 问诊问题事件 -> assistant_text_delta
+        return {
+            "content_text": data.get("content", ""),
+            "delta": data.get("content", ""),
+            "text": data.get("content", ""),
+            "turn_no": data.get("turn_number", 0),
+            "question_id": data.get("question_id"),
+            "role": "assistant",
+            "cicare_stage": data.get("cicare_stage", "connect"),
+        }
+    elif event_type == EventType.PATIENT_ANSWER.value:
+        # 患者答案事件 -> user_transcript_completed
+        return {
+            "content_text": data.get("content", ""),
+            "text": data.get("content", ""),
+            "turn_no": data.get("turn_number", 0),
+            "role": "user",
+            "client_message_id": data.get("client_message_id"),
+        }
+    elif event_type == EventType.EXTRACTION_RESULT.value:
+        # 字段抽取结果 -> extraction_updated
+        return {
+            "fields": data.get("extracted_fields", {}),
+            "confidence_scores": data.get("confidence_scores", {}),
+        }
+    elif event_type in (EventType.TOOL_CALL.value, EventType.CONSTRAINT.value):
+        # 工具调用/约束事件 -> progress_updated
+        return {
+            "message": data.get("constraint_prompt") or data.get("tool_name", ""),
+            "detail": data,
+        }
+    elif event_type == EventType.SESSION_END.value:
+        # 会话结束 -> task_status_updated
+        return {
+            "status": "completed",
+            "end_reason": data.get("end_reason", "completed"),
+            "total_turns": data.get("total_turns", 0),
+        }
+    else:
+        # 其他事件保持原样
+        return data
 
 
 async def stream_dialog_events(

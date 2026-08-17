@@ -14,6 +14,8 @@ class EventType(str, Enum):
     DIALOG_TURN = "dialog_turn"           # 对话轮次事件
     DIALOG_TEXT = "dialog_text"           # 文本输出事件
     DIALOG_AUDIO = "dialog_audio"         # 音频输出事件
+    DIALOG_MESSAGE = "dialog_message"     # AI问诊问题事件（Dialog Agent输出）
+    PATIENT_ANSWER = "patient_answer"     # 患者答案事件（POST /api/dialog/message输入）
     TOOL_CALL = "tool_call"               # 工具调用事件
     CONSTRAINT = "constraint"             # 约束提示事件
     SESSION_START = "session_start"       # 会话启动事件
@@ -116,11 +118,36 @@ class ExtractionResultEvent(BaseEvent):
     confidence_scores: dict[str, float]   # {question_id: confidence}
 
 
+class DialogMessageEvent(BaseEvent):
+    """AI问诊问题事件
+    作用：Dialog Agent产出下一个问诊问题时发布（供患者端SSE消费）
+    """
+    event_type: EventType = EventType.DIALOG_MESSAGE
+    turn_number: int
+    role: str = "assistant"               # assistant（AI问）
+    content: str                          # 问诊问题文本
+    question_id: str | None = None        # 对应Task-todo问题ID
+
+
+class PatientAnswerEvent(BaseEvent):
+    """患者答案事件
+    作用：POST /api/dialog/message接收患者输入后发布（供三个Agent消费）
+    """
+    event_type: EventType = EventType.PATIENT_ANSWER
+    turn_number: int
+    role: str = "user"                    # user（患者答）
+    content: str                          # 患者答案文本
+    client_message_id: str | None = None  # 前端消息ID
+    input_mode: str = "text"              # text | voice
+
+
 # 事件类型映射
 EVENT_TYPE_MAP = {
     EventType.DIALOG_TURN: DialogTurnEvent,
     EventType.DIALOG_TEXT: DialogTextEvent,
     EventType.DIALOG_AUDIO: DialogAudioEvent,
+    EventType.DIALOG_MESSAGE: DialogMessageEvent,
+    EventType.PATIENT_ANSWER: PatientAnswerEvent,
     EventType.TOOL_CALL: ToolCallEvent,
     EventType.CONSTRAINT: ConstraintEvent,
     EventType.SESSION_START: SessionStartEvent,
