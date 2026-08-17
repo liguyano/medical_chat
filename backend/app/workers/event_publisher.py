@@ -18,14 +18,15 @@ class DialogEventPublisher:
     作用：发布对话事件到Redis Stream
     """
 
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str = None, redis_client=None):
         """初始化事件发布器
         Args:
-            - session_id: 会话ID
+            - session_id: 会话ID（可选）
+            - redis_client: Redis客户端（可选，用于依赖注入）
         """
         self.session_id = session_id
-        self.stream_key = f"dialog_stream:{session_id}"
-        self.redis = get_redis()
+        self.stream_key = f"dialog_stream:{session_id}" if session_id else None
+        self.redis = redis_client or get_redis()
         config = get_app_config()
         self.max_len = config.redis.stream_maxlen
 
@@ -128,3 +129,46 @@ class StreamKeyHelper:
             - stream_key: extraction_stream:{session_id}
         """
         return f"extraction_stream:{session_id}"
+
+    async def publish_extraction_result(
+        self,
+        session_id: str,
+        extracted_fields: dict,
+        confidence_scores: dict,
+    ) -> str | None:
+        """发布字段抽取结果事件
+        作用：发布 ExtractionResultEvent 到 extraction_result_stream
+        Args:
+            - session_id: 会话ID
+            - extracted_fields: 抽取的字段 {question_id: answer_value}
+            - confidence_scores: 置信度 {question_id: confidence}
+        Return:
+            - message_id 或 None
+        """
+        from app.schemas.events import ExtractionResultEvent
+
+        event = ExtractionResultEvent(
+            event_type="extraction_result",
+            session_id=session_id,
+            extracted_fields=extracted_fields,
+            confidence_scores=confidence_scores,
+            timestamp=datetime.now().isoformat(),
+        )
+
+        stream_key = f"extraction_result_stream:{session_id}"
+
+        try:
+            event_dict = event.model_dump(mode="json")
+            message_id = self.redis.xadd(
+                stream_key=stream_key, fields=event_dict, max_len=self.max_len
+            )
+
+            logger.debug(
+                f"[EventPublisher] 发布抽取结果: session={session_id}, "
+                f"fields={len(extracted_fields)}, message_id={message_id}"
+            )
+            return message_id
+
+        except Exception as e:
+            logger.error(f"[EventPublisher] 发布抽取结果失败: {e}")
+            return None

@@ -94,7 +94,9 @@ class DialogHistoryManager:
                 db.add(message)
                 db.commit()
                 db.refresh(message)
-                logger.info("对话消息保存成功: session=%s message=%s", session_no, message.message_no)
+                logger.info(
+                    "对话消息保存成功: session=%s message=%s", session_no, message.message_no
+                )
                 return message
             except Exception:
                 db.rollback()
@@ -237,3 +239,73 @@ class DialogHistoryManager:
             parts.insert(0, part)
             used += len(part)
         return "".join(parts)
+
+    async def summarize_history(
+        self,
+        session_no: str,
+        llm_client,
+        max_turns: int = 20,
+    ) -> str:
+        """生成对话摘要（2-3句话）
+        作用：调用 LLM 将历史对话压缩，保留关键医疗信息
+        Args:
+            - session_no: 会话编号
+            - llm_client: AsyncOpenAI 客户端
+            - max_turns: 最多摘要多少轮对话
+        Return:
+            - 摘要文本（2-3句话）
+        """
+        from medagent.agents.service_agent.extraction_agent.prompt import (
+            get_summarization_prompt,
+        )
+
+        history = await self.get_recent_messages(session_no, count=max_turns)
+        if not history:
+            return ""
+
+        # 构建对话列表
+        messages_for_summary = []
+        turn = 1
+        for msg in history:
+            content = msg.content_text or msg.asr_text or ""
+            if not content:
+                continue
+
+            messages_for_summary.append(
+                {
+                    "turn": turn,
+                    "patient": content if msg.role_type in ["患者", "user"] else "",
+                    "ai": content if msg.role_type in ["AI", "assistant"] else "",
+                }
+            )
+            turn += 1
+
+        if not messages_for_summary:
+            return ""
+
+        # 调用 LLM 生成摘要
+        prompt = get_summarization_prompt(messages_for_summary)
+
+        try:
+            response = await llm_client.chat.completions.create(
+                model="qwen-plus",  # 使用快速模型
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                timeout=15.0,
+            )
+
+            summary = response.choices[0].message.content
+            if not summary:
+                return ""
+
+            logger.info(
+                f"[DialogHistoryManager] 生成对话摘要: session={session_no}, "
+                f"turns={len(messages_for_summary)}, summary_length={len(summary)}"
+            )
+            return summary.strip()
+
+        except Exception as e:
+            logger.warning(
+                f"[DialogHistoryManager] 对话摘要生成失败: session={session_no}, error={e}"
+            )
+            return ""
