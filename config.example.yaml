@@ -51,3 +51,34 @@ logging:
   level: INFO          # DEBUG | INFO | WARNING | ERROR
   json: false          # true 时输出结构化 JSON 日志
   file: null           # 指定路径则同时写文件，如 logs/app.log
+
+# LLM 模型配置（OpenAI 兼容接口）
+llm_models:
+  # Schedule Agent 使用的模型（用于偏离检测）
+  - name: schedule_agent
+    model: qwen-plus
+    api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: $DASHSCOPE_API_KEY
+    timeout: 30.0
+    max_retries: 2
+    temperature: 0.1  # 低温度，提高判断稳定性
+    max_tokens: 2000
+
+  # Dialog Agent 使用的模型（豆包语音全双工，配置可能不同）
+  - name: dialog_agent
+    model: doubao-voice-v1
+    api_base: wss://openspeech.bytedance.com/api/v1/tts/ws_binary
+    api_key: $DOUBAO_API_KEY
+    timeout: 60.0
+    max_retries: 2
+    temperature: 0.7
+
+  # Field Extraction Agent 使用的模型
+  - name: extraction_agent
+    model: qwen-plus
+    api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: $DASHSCOPE_API_KEY
+    timeout: 30.0
+    max_retries: 2
+    temperature: 0.1  # 低温度，提高抽取准确性
+    max_tokens: 4000
