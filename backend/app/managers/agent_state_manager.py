@@ -2,11 +2,12 @@
 作用：管理智能体运行态的 Redis 存储与 TTL。
 说明：数据库事实来源已废弃 agent_states 表；可审计业务数据由 interaction/assessment 域持久化。
 """
-import logging
-from typing import Any, Dict, Optional
-from datetime import datetime
 
-from app.utils.redis_client import get_redis, get_async_redis
+import logging
+from datetime import UTC, datetime
+from typing import Any
+
+from app.utils.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class AgentStateManager:
         """
         return f"agent_state:{session_id}"
 
-    def save_agent_state(self, session_id: str, agent_state: Dict[str, Any]) -> bool:
+    def save_agent_state(self, session_id: str, agent_state: dict[str, Any]) -> bool:
         """保存智能体状态到Redis
         作用：序列化智能体状态，TTL=1小时
         Args:
@@ -52,9 +53,9 @@ class AgentStateManager:
             state_key = self._get_state_key(session_id)
 
             # 添加时间戳
-            agent_state["updated_at"] = datetime.now()
+            agent_state["updated_at"] = datetime.now(UTC)
             if "created_at" not in agent_state:
-                agent_state["created_at"] = datetime.now()
+                agent_state["created_at"] = datetime.now(UTC)
 
             # 序列化并保存
             success = self.redis.set(state_key, agent_state, ex=self.state_ttl)
@@ -65,11 +66,11 @@ class AgentStateManager:
                 logger.error(f"智能体状态保存失败: {session_id}")
 
             return success
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"保存智能体状态异常: {session_id} -> {e}")
             return False
 
-    def load_agent_state(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def load_agent_state(self, session_id: str) -> dict[str, Any] | None:
         """从Redis加载智能体状态
         Args:
             - session_id: 会话ID
@@ -86,7 +87,7 @@ class AgentStateManager:
                 logger.info(f"智能体状态加载成功: {session_id}")
 
             return agent_state
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"加载智能体状态异常: {session_id} -> {e}")
             return None
 
@@ -108,7 +109,7 @@ class AgentStateManager:
             else:
                 logger.warning(f"智能体状态不存在: {session_id}")
                 return False
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"删除智能体状态异常: {session_id} -> {e}")
             return False
 
@@ -122,7 +123,7 @@ class AgentStateManager:
         try:
             state_key = self._get_state_key(session_id)
             return self.redis.exists(state_key) > 0
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"检查智能体状态异常: {session_id} -> {e}")
             return False
 
@@ -137,7 +138,7 @@ class AgentStateManager:
         try:
             state_key = self._get_state_key(session_id)
             return self.redis.expire(state_key, self.state_ttl)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"延长智能体状态TTL异常: {session_id} -> {e}")
             return False
 
@@ -151,9 +152,10 @@ class AgentStateManager:
         try:
             state_key = self._get_state_key(session_id)
             return self.redis.ttl(state_key)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"获取智能体状态TTL异常: {session_id} -> {e}")
             return -2
+
 
 class AsyncAgentStateManager:
     """异步智能体状态管理器
@@ -162,23 +164,23 @@ class AsyncAgentStateManager:
 
     def __init__(self):
         """初始化异步状态管理器"""
-        self.redis = get_async_redis()
+        self.redis = get_redis()
         self.state_ttl = 3600
 
     def _get_state_key(self, session_id: str) -> str:
         """生成状态键名"""
         return f"agent_state:{session_id}"
 
-    async def save_agent_state(self, session_id: str, agent_state: Dict[str, Any]) -> bool:
+    async def save_agent_state(self, session_id: str, agent_state: dict[str, Any]) -> bool:
         """异步保存智能体状态"""
         try:
             state_key = self._get_state_key(session_id)
 
-            agent_state["updated_at"] = datetime.now()
+            agent_state["updated_at"] = datetime.now(UTC)
             if "created_at" not in agent_state:
-                agent_state["created_at"] = datetime.now()
+                agent_state["created_at"] = datetime.now(UTC)
 
-            success = await self.redis.set(state_key, agent_state, ex=self.state_ttl)
+            success = self.redis.set(state_key, agent_state, ex=self.state_ttl)
 
             if success:
                 logger.info(f"智能体状态保存成功（异步）: {session_id}")
@@ -186,15 +188,15 @@ class AsyncAgentStateManager:
                 logger.error(f"智能体状态保存失败（异步）: {session_id}")
 
             return success
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"保存智能体状态异常（异步）: {session_id} -> {e}")
             return False
 
-    async def load_agent_state(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def load_agent_state(self, session_id: str) -> dict[str, Any] | None:
         """异步加载智能体状态"""
         try:
             state_key = self._get_state_key(session_id)
-            agent_state = await self.redis.get(state_key)
+            agent_state = self.redis.get(state_key)
 
             if agent_state is None:
                 logger.warning(f"Redis中未找到智能体状态（异步）: {session_id}")
@@ -202,7 +204,7 @@ class AsyncAgentStateManager:
                 logger.info(f"智能体状态加载成功（异步）: {session_id}")
 
             return agent_state
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"加载智能体状态异常（异步）: {session_id} -> {e}")
             return None
 
@@ -210,7 +212,7 @@ class AsyncAgentStateManager:
         """异步删除智能体状态"""
         try:
             state_key = self._get_state_key(session_id)
-            deleted_count = await self.redis.delete(state_key)
+            deleted_count = self.redis.delete(state_key)
 
             if deleted_count > 0:
                 logger.info(f"智能体状态删除成功（异步）: {session_id}")
@@ -218,6 +220,6 @@ class AsyncAgentStateManager:
             else:
                 logger.warning(f"智能体状态不存在（异步）: {session_id}")
                 return False
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"删除智能体状态异常（异步）: {session_id} -> {e}")
             return False

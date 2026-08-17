@@ -1,6 +1,7 @@
 """患者相关 Schema
 作用：定义在院患者查询响应结构。
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -16,8 +17,8 @@ class PatientDto(BaseModel):
     id: int = Field(..., description="患者主键（返回前端时转字符串）")
     patient_no: str = Field(..., description="患者编号")
     patient_name: str = Field(..., description="患者姓名")
-    sex: str = Field(..., description="性别")
-    birthday: date = Field(..., description="出生日期")
+    sex: str | None = Field(default=None, description="性别")
+    birthday: date | None = Field(default=None, description="出生日期")
     phone: str | None = Field(default=None, description="联系电话")
 
 
@@ -28,12 +29,12 @@ class PatientEncounterDto(BaseModel):
 
     id: int = Field(..., description="住院记录主键")
     encounter_no: str = Field(..., description="就诊编号")
-    inpatient_no: str = Field(..., description="住院号")
+    inpatient_no: str | None = Field(default=None, description="住院号")
     patient_id: int = Field(..., description="患者ID")
-    department_code: str = Field(..., description="科室代码")
-    department_name: str = Field(..., description="科室名称")
-    ward_name: str = Field(..., description="病区名称")
-    bed_no: str = Field(..., description="床号")
+    department_code: str | None = Field(default=None, description="科室代码")
+    department_name: str | None = Field(default=None, description="科室名称")
+    ward_name: str | None = Field(default=None, description="病区名称")
+    bed_no: str | None = Field(default=None, description="床号")
     admission_time: datetime = Field(..., description="入院时间")
     encounter_status: str = Field(..., description="就诊状态")
     diagnosis_snapshot: dict | None = Field(default=None, description="诊断快照")

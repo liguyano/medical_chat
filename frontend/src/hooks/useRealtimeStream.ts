@@ -34,7 +34,10 @@ export function useRealtimeStream({
     const client = new SseClient({
       path,
       onEvent: applyRealtimeEvent,
-      onStatusChange: setStatus,
+      onStatusChange: (nextStatus) => {
+        setStatus(nextStatus);
+        if (nextStatus === 'connected') setError('');
+      },
       onError: (streamError) => setError(streamError.message),
     });
     client.connect();

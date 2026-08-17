@@ -1,6 +1,7 @@
 """量表服务
 作用：封装量表与量表题目的查询逻辑。
 """
+
 from __future__ import annotations
 
 import logging
@@ -85,10 +86,10 @@ def list_published_scales(db: Session) -> list[AssessmentScaleDto]:
                 id=scale.id,
                 scale_code=scale.scale_code,
                 scale_name=scale.scale_name,
-                form_type=scale.form_type,
+                scale_type=scale.scale_type,
                 question_count=int(question_count or 0),
                 version_code=version.version_code,
-                description=scale.description,
+                description=scale.clinical_purpose,
             )
         )
 

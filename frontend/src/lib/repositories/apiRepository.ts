@@ -1,32 +1,26 @@
 import type {
+  AssessmentScaleDto,
   BackendTaskDto,
   CreateTaskResponse,
   DialogHistoryResponse,
   ExtractedFieldsResponse,
+  InHospitalPatientDto,
 } from '@/lib/api/contracts';
 import { apiRequest } from '@/lib/api/httpClient';
 import {
   mapCreateTaskRequest,
+  mapAssessmentScale,
   mapDialogHistory,
   mapExtractedField,
+  mapInHospitalPatient,
   mapTaskDto,
 } from '@/lib/api/mappers';
-import type {
-  AssessmentScale,
-  CareTask,
-  Patient,
-  PatientEncounter,
-} from '@/lib/types';
+import type { AssessmentScale, CareTask } from '@/lib/types';
 import type {
   CareRepository,
   CreateTaskInput,
   PatientWithEncounter,
 } from '@/lib/repositories/types';
-
-interface InHospitalPatientDto {
-  patient: Patient;
-  encounter: PatientEncounter;
-}
 
 function buildTaskFallback(
   input: CreateTaskInput,
@@ -72,17 +66,18 @@ export class ApiCareRepository implements CareRepository {
   async listInHospitalPatients(
     signal?: AbortSignal
   ): Promise<PatientWithEncounter[]> {
-    const response = await apiRequest<
-      InHospitalPatientDto[] | { items: InHospitalPatientDto[] }
-    >('/api/patients/in-hospital', { signal });
-    return Array.isArray(response) ? response : response.items;
+    const response = await apiRequest<InHospitalPatientDto[]>(
+      '/api/patients/in-hospital',
+      { signal }
+    );
+    return response.map(mapInHospitalPatient);
   }
 
   async listScales(signal?: AbortSignal): Promise<AssessmentScale[]> {
-    const response = await apiRequest<
-      AssessmentScale[] | { items: AssessmentScale[] }
-    >('/api/scales', { signal });
-    return Array.isArray(response) ? response : response.items;
+    const response = await apiRequest<AssessmentScaleDto[]>('/api/scales', {
+      signal,
+    });
+    return response.map(mapAssessmentScale);
   }
 
   async createTask(input: CreateTaskInput, signal?: AbortSignal) {
@@ -91,17 +86,12 @@ export class ApiCareRepository implements CareRepository {
       body: mapCreateTaskRequest({
         patient_id: input.patient.id,
         encounter_id: input.encounter.id,
-        nurse_id: input.nurseId,
+        assigned_nurse_id: input.nurseId,
         scale_ids: input.scaleIds,
         collection_mode: input.collectionMode,
         participant_type: input.participantType,
-        participant_name: input.participantName,
-        relationship_to_patient: input.relationshipToPatient,
         assessment_scene: input.assessmentScene,
-        consent_required: input.consentRequired,
-        education_topics: input.educationTopics,
         planned_start_time: input.plannedStartTime,
-        notes: input.notes,
       }),
       signal,
     });

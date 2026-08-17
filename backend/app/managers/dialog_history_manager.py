@@ -1,6 +1,7 @@
 """对话历史管理器
 作用：基于 interaction_session / interaction_message 保存、查询和格式化对话消息。
 """
+
 import logging
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -259,7 +260,7 @@ class DialogHistoryManager:
             get_summarization_prompt,
         )
 
-        history = await self.get_recent_messages(session_no, count=max_turns)
+        history = await self.get_latest_messages(session_no, count=max_turns)
         if not history:
             return ""
 
@@ -298,7 +299,7 @@ class DialogHistoryManager:
             )
             return summary.strip()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"[DialogHistoryManager] 对话摘要生成失败: session={session_no}, error={e}"
             )

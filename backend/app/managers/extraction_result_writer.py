@@ -39,9 +39,7 @@ class ExtractionResultWriter:
             raise RuntimeError("数据库未初始化，请先调用 init_db()")
         return factory()
 
-    async def get_previous_extraction(
-        self, submission_id: int
-    ) -> dict[int, dict]:
+    async def get_previous_extraction(self, submission_id: int) -> dict[int, dict]:
         """读取上次抽取结果
         作用：获取历史抽取字段，用于增量更新
         Args:
@@ -50,21 +48,22 @@ class ExtractionResultWriter:
             - {question_id: {"answer": "...", "confidence": 0.90, "source_turns": [5, 6]}}
         """
         with self._new_session() as db:
-            answers = db.execute(
-                select(AssessmentAnswer).where(
-                    AssessmentAnswer.submission_id == submission_id,
-                    AssessmentAnswer.deleted == 0,
+            answers = (
+                db.execute(
+                    select(AssessmentAnswer).where(
+                        AssessmentAnswer.submission_id == submission_id,
+                        AssessmentAnswer.deleted == 0,
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             result = {}
             for ans in answers:
                 # 提取答案值
                 answer_value = (
-                    ans.answer_text
-                    or ans.answer_number
-                    or ans.answer_boolean
-                    or ans.answer_date
+                    ans.answer_text or ans.answer_number or ans.answer_boolean or ans.answer_date
                 )
 
                 result[ans.question_id] = {
@@ -81,6 +80,7 @@ class ExtractionResultWriter:
         interaction_session_id: int,
         assessment_instance_id: int,
         extraction_result,
+        total_question_count: int | None = None,
         creator: str = "system",
     ) -> AssessmentSubmission:
         """创建或更新 AI 提交记录
@@ -104,26 +104,33 @@ class ExtractionResultWriter:
                     )
                 )
 
-                total_questions = len(extraction_result.extracted_answers)
-                answered_questions = len(
-                    [
-                        ans
-                        for ans in extraction_result.extracted_answers
-                        if ans.answer_value is not None or ans.selected_option_codes
-                    ]
+                existing_question_ids = set(
+                    db.scalars(
+                        select(AssessmentAnswer.question_id).where(
+                            AssessmentAnswer.submission_id == existing.id,
+                            AssessmentAnswer.deleted == 0,
+                        )
+                    ).all()
+                    if existing
+                    else []
                 )
+                extracted_question_ids = {
+                    answer.question_id
+                    for answer in extraction_result.extracted_answers
+                    if answer.answer_value is not None or answer.selected_option_codes
+                }
+                total_questions = total_question_count or len(
+                    existing_question_ids | extracted_question_ids
+                )
+                answered_questions = len(existing_question_ids | extracted_question_ids)
 
                 submission_status = (
-                    "completed"
-                    if answered_questions == total_questions
-                    else "in_progress"
+                    "completed" if answered_questions == total_questions else "in_progress"
                 )
 
                 if existing:
                     # 更新
-                    existing.confidence_score = Decimal(
-                        str(extraction_result.overall_confidence)
-                    )
+                    existing.confidence_score = Decimal(str(extraction_result.overall_confidence))
                     existing.total_question_count = total_questions
                     existing.answered_question_count = answered_questions
                     existing.submission_status = submission_status
@@ -149,9 +156,7 @@ class ExtractionResultWriter:
                         submission_type="ai_extraction",
                         submitter_type="ai",
                         submission_status=submission_status,
-                        confidence_score=Decimal(
-                            str(extraction_result.overall_confidence)
-                        ),
+                        confidence_score=Decimal(str(extraction_result.overall_confidence)),
                         total_question_count=total_questions,
                         answered_question_count=answered_questions,
                         interaction_session_id=interaction_session_id,
@@ -284,8 +289,8 @@ class ExtractionResultWriter:
     async def upsert_answer_options(
         self,
         answer_id: int,
+        question_id: int,
         selected_option_codes: list[str],
-        option_definitions: dict,
         extra_inputs: dict,
         creator: str = "system",
     ) -> list[AssessmentAnswerOption]:
@@ -294,7 +299,7 @@ class ExtractionResultWriter:
         Args:
             - answer_id: 答案记录ID
             - selected_option_codes: 选中的选项编码列表
-            - option_definitions: 选项定义字典 {code: {"id": x, "label": "...", "score": 2.0}}
+            - question_id: 问题ID
             - extra_inputs: 附加输入
             - creator: 创建者
         Return:
@@ -309,25 +314,31 @@ class ExtractionResultWriter:
                     AssessmentAnswerOption.assessment_answer_id == answer_id
                 ).delete()
 
+                from app.models.assessment_template import AssessmentOption
+
+                definitions = {
+                    option.option_code: option
+                    for option in db.scalars(
+                        select(AssessmentOption).where(
+                            AssessmentOption.question_id == question_id,
+                            AssessmentOption.option_code.in_(selected_option_codes),
+                            AssessmentOption.deleted == 0,
+                        )
+                    ).all()
+                }
                 results = []
                 for code in selected_option_codes:
-                    opt_def = option_definitions.get(code, {})
-                    if not opt_def:
-                        logger.warning(
-                            f"[ExtractionResultWriter] 选项定义缺失: code={code}"
-                        )
+                    definition = definitions.get(code)
+                    if definition is None:
+                        logger.warning(f"选项定义缺失: question={question_id} code={code}")
                         continue
 
                     option = AssessmentAnswerOption(
                         assessment_answer_id=answer_id,
-                        option_id=opt_def["id"],
+                        option_id=definition.id,
                         option_code_snapshot=code,
-                        option_label_snapshot=opt_def.get("label", code),
-                        clinical_score=(
-                            Decimal(str(opt_def["score"]))
-                            if opt_def.get("score")
-                            else None
-                        ),
+                        option_label_snapshot=definition.option_label,
+                        clinical_score=definition.clinical_score,
                         extra_text=extra_inputs.get("text"),
                         extra_number=(
                             Decimal(str(extra_inputs["number"]))
@@ -374,16 +385,18 @@ class ExtractionResultWriter:
                 # TODO: 从 scale_version 加载 scoring_rules（批次B实现）
                 # 这里简化处理：汇总所有 clinical_score
 
-                answers = db.execute(
-                    select(AssessmentAnswer).where(
-                        AssessmentAnswer.submission_id == submission_id,
-                        AssessmentAnswer.deleted == 0,
+                answers = (
+                    db.execute(
+                        select(AssessmentAnswer).where(
+                            AssessmentAnswer.submission_id == submission_id,
+                            AssessmentAnswer.deleted == 0,
+                        )
                     )
-                ).scalars().all()
-
-                total_score = sum(
-                    float(ans.clinical_score or 0.0) for ans in answers
+                    .scalars()
+                    .all()
                 )
+
+                total_score = sum(float(ans.clinical_score or 0.0) for ans in answers)
 
                 # 简化风险等级判断（实际需要按量表规则）
                 if total_score >= 10:

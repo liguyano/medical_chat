@@ -2,11 +2,13 @@
 作用：提供患者端与医护端的对话事件订阅接口，消费 dialog_stream 并以 SSE 推送。
       支持 Last-Event-ID 断线续读与 30 秒心跳保活。
 """
+
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -42,8 +44,9 @@ def _ensure_session_exists(db: Session, session_no: str) -> None:
 async def subscribe_dialog(
     session_no: str,
     request: Request,
-    db: Session = Depends(get_db),
-    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    db: Annotated[Session, Depends(get_db)],
+    last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
+    last_event_id: str | None = Query(default=None),
 ) -> EventSourceResponse:
     """患者端订阅对话事件流
     作用：消费 dialog_stream:{session_no}，实时推送 AI 回复与进度事件。
@@ -56,9 +59,10 @@ async def subscribe_dialog(
         - EventSourceResponse: SSE 事件流
     """
     _ensure_session_exists(db, session_no)
-    logger.info(f"患者端订阅 SSE: session_no={session_no} last_event_id={last_event_id}")
+    resume_from = last_event_id_header or last_event_id
+    logger.info(f"患者端订阅 SSE: session_no={session_no} last_event_id={resume_from}")
     return EventSourceResponse(
-        stream_dialog_events(session_no, last_event_id),
+        stream_dialog_events(session_no, resume_from),
         ping=HEARTBEAT_INTERVAL,
     )
 
@@ -67,8 +71,9 @@ async def subscribe_dialog(
 async def monitor_dialog(
     session_no: str,
     request: Request,
-    db: Session = Depends(get_db),
-    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    db: Annotated[Session, Depends(get_db)],
+    last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
+    last_event_id: str | None = Query(default=None),
 ) -> EventSourceResponse:
     """医护端只读监听对话事件流
     作用：复用 dialog_stream 做单会话只读监听（多会话聚合后补）。
@@ -81,8 +86,9 @@ async def monitor_dialog(
         - EventSourceResponse: SSE 事件流
     """
     _ensure_session_exists(db, session_no)
-    logger.info(f"医护端监听 SSE: session_no={session_no} last_event_id={last_event_id}")
+    resume_from = last_event_id_header or last_event_id
+    logger.info(f"医护端监听 SSE: session_no={session_no} last_event_id={resume_from}")
     return EventSourceResponse(
-        stream_dialog_events(session_no, last_event_id),
+        stream_dialog_events(session_no, resume_from),
         ping=HEARTBEAT_INTERVAL,
     )

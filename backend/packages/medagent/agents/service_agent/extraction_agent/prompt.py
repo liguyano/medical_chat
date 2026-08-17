@@ -57,7 +57,7 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
       "extra_inputs": {{"frequency": 15, "unit": "支/天"}},  // 附加输入
       "clinical_score": 2.0,
       "extraction_confidence": 0.92,
-      "source_message_ids": [301, 302],
+      "source_message_ids": ["MSG-301", "MSG-302"],
       "reasoning": "患者在第5轮明确说'我抽烟'，第6轮补充'每天15支左右'"
     }}
   ],
@@ -114,9 +114,10 @@ def build_user_prompt(
     prompt_parts.append("## 新对话（当前轮）")
     for turn_data in new_dialog:
         turn_num = turn_data.get("turn", "?")
+        message_id = turn_data.get("message_id", "")
         patient_text = turn_data.get("patient", "")
         ai_text = turn_data.get("ai", "")
-        prompt_parts.append(f"[轮次{turn_num}]")
+        prompt_parts.append(f"[轮次{turn_num} | message_id={message_id}]")
         prompt_parts.append(f"患者：{patient_text}")
         prompt_parts.append(f"AI：{ai_text}")
         prompt_parts.append("")

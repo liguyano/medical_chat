@@ -1,4 +1,5 @@
 import { runtimeConfig } from '@/lib/runtime/config';
+import type { ApiResponse } from '@/lib/api/contracts';
 
 export class ApiError extends Error {
   constructor(
@@ -68,23 +69,39 @@ export async function apiRequest<T>(
       signal: controller.signal,
     });
     const payload = await parseResponseBody(response);
+    const responseBody =
+      payload && typeof payload === 'object'
+        ? (payload as Partial<ApiResponse<unknown>> &
+            Record<string, unknown>)
+        : undefined;
     if (!response.ok) {
-      const errorPayload =
-        payload && typeof payload === 'object'
-          ? (payload as Record<string, unknown>)
-          : undefined;
       throw new ApiError(
         String(
-          errorPayload?.message ??
-            errorPayload?.detail ??
+          responseBody?.message ??
+            responseBody?.detail ??
             `请求失败（HTTP ${response.status}）`
         ),
         response.status,
-        typeof errorPayload?.code === 'string'
-          ? errorPayload.code
+        typeof responseBody?.code === 'string'
+          ? responseBody.code
           : undefined,
         payload
       );
+    }
+    if (
+      responseBody &&
+      typeof responseBody.code === 'string' &&
+      'data' in responseBody
+    ) {
+      if (responseBody.code !== 'OK') {
+        throw new ApiError(
+          String(responseBody.message ?? '请求失败'),
+          response.status,
+          responseBody.code,
+          payload
+        );
+      }
+      return responseBody.data as T;
     }
     return payload as T;
   } catch (error) {

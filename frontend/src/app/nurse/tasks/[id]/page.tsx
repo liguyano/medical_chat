@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card';
@@ -10,6 +10,8 @@ import { Progress } from '@/components/shared/Progress';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { getTaskById } from '@/lib/mock/data';
+import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import type { CareTask } from '@/lib/types';
 import {
   ArrowLeftIcon,
@@ -26,21 +28,46 @@ import {
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { tasks, updateTaskStatus } = useTaskStore();
+  const { tasks, addTask, updateTaskStatus } = useTaskStore();
   const structuredAnswersByTask = useChatStore((state) => state.structuredAnswers);
   const interactionEventsByTask = useChatStore((state) => state.events);
   const structuredAnswers = structuredAnswersByTask[id] ?? [];
   const interactionEvents = interactionEventsByTask[id] ?? [];
   const [loading, setLoading] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
-  const task: CareTask | null = tasks.find((item) => item.id === id) ?? getTaskById(id) ?? null;
+  const [taskLoadError, setTaskLoadError] = useState('');
+  const storedTask = tasks.find((item) => item.id === id);
+  const task: CareTask | null =
+    storedTask ??
+    (runtimeConfig.dataMode === 'mock' ? getTaskById(id) : null) ??
+    null;
+
+  useEffect(() => {
+    if (runtimeConfig.dataMode !== 'api' || storedTask) return;
+    const controller = new AbortController();
+    void careRepository
+      .getTask(id, controller.signal)
+      .then((loadedTask) => {
+        addTask(loadedTask);
+        setTaskLoadError('');
+      })
+      .catch((loadError) => {
+        if (controller.signal.aborted) return;
+        setTaskLoadError(
+          loadError instanceof Error ? loadError.message : '任务加载失败'
+        );
+      });
+    return () => controller.abort();
+  }, [addTask, id, storedTask]);
 
   if (!task) {
     return (
       <NurseLayout>
         <div className="flex items-center justify-center h-[60vh]">
           <div className="text-center">
-            <p className="text-foreground-muted">任务不存在</p>
+            <p className="text-foreground-muted">
+              {taskLoadError || '正在加载任务...'}
+            </p>
             <Button
               variant="outline"
               onClick={() => router.push('/nurse/tasks')}
@@ -66,6 +93,10 @@ export default function TaskDetailPage() {
   };
 
   const statusInfo = getStatusInfo(task.taskStatus);
+  const progressCurrent = task.progress?.current ?? 0;
+  const progressTotal = task.progress?.total ?? 0;
+  const scaleName =
+    task.scaleNames?.join('、') ?? task.scaleName ?? '未配置量表';
 
   const handleStartTask = async () => {
     setLoading(true);
@@ -188,7 +219,8 @@ export default function TaskDetailPage() {
                     <div className="flex-1">
                       <label className="text-xs text-foreground-muted">量表信息</label>
                       <p className="text-sm font-medium text-foreground mt-1">
-                        {task.scaleName} ({task.scaleVersion})
+                        {scaleName}
+                        {task.scaleVersion ? ` (${task.scaleVersion})` : ''}
                       </p>
                     </div>
                   </div>
@@ -235,9 +267,15 @@ export default function TaskDetailPage() {
                   <CardTitle>评估进度</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Progress value={45} max={100} variant="primary" size="md" showLabel />
+                  <Progress
+                    value={progressCurrent}
+                    max={Math.max(progressTotal, 1)}
+                    variant="primary"
+                    size="md"
+                    showLabel
+                  />
                   <p className="text-xs text-foreground-muted mt-3">
-                    患者正在填写评估问卷，已完成 45%
+                    患者正在进行 AI 问诊，已完成 {progressCurrent}/{progressTotal}
                   </p>
                 </CardContent>
               </Card>

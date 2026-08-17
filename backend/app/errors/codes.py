@@ -1,6 +1,7 @@
 """统一错误码体系
 作用：集中定义业务错误码，格式为 ERR_<域>_<三位序号>，供 API 层与异常处理器使用。
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -13,28 +14,30 @@ class ErrorCode(str, Enum):
     """
 
     # 通用域
-    OK = "OK"                                   # 成功（非错误，占位）
-    ERR_COMMON_001 = "ERR_COMMON_001"           # 请求参数校验失败
-    ERR_COMMON_002 = "ERR_COMMON_002"           # 资源不存在
-    ERR_COMMON_003 = "ERR_COMMON_003"           # 资源状态冲突
-    ERR_COMMON_500 = "ERR_COMMON_500"           # 服务器内部错误
+    OK = "OK"  # 成功（非错误，占位）
+    ERR_COMMON_001 = "ERR_COMMON_001"  # 请求参数校验失败
+    ERR_COMMON_002 = "ERR_COMMON_002"  # 资源不存在
+    ERR_COMMON_003 = "ERR_COMMON_003"  # 资源状态冲突
+    ERR_COMMON_500 = "ERR_COMMON_500"  # 服务器内部错误
 
     # 任务域
-    ERR_TASK_001 = "ERR_TASK_001"               # 患者不存在
-    ERR_TASK_002 = "ERR_TASK_002"               # 住院记录不存在
-    ERR_TASK_003 = "ERR_TASK_003"               # 任务不存在
+    ERR_TASK_001 = "ERR_TASK_001"  # 患者不存在
+    ERR_TASK_002 = "ERR_TASK_002"  # 住院记录不存在
+    ERR_TASK_003 = "ERR_TASK_003"  # 任务不存在
+    ERR_TASK_004 = "ERR_TASK_004"  # 量表不存在或不可用
+    ERR_TASK_005 = "ERR_TASK_005"  # 后台任务派发失败
 
     # 对话域
-    ERR_DIALOG_001 = "ERR_DIALOG_001"           # 会话不存在
-    ERR_DIALOG_002 = "ERR_DIALOG_002"           # 会话状态不允许当前操作
-    ERR_DIALOG_003 = "ERR_DIALOG_003"           # 并发冲突（未获取到会话锁）
-    ERR_DIALOG_004 = "ERR_DIALOG_004"           # 关联任务不存在或不可对话
+    ERR_DIALOG_001 = "ERR_DIALOG_001"  # 会话不存在
+    ERR_DIALOG_002 = "ERR_DIALOG_002"  # 会话状态不允许当前操作
+    ERR_DIALOG_003 = "ERR_DIALOG_003"  # 并发冲突（未获取到会话锁）
+    ERR_DIALOG_004 = "ERR_DIALOG_004"  # 关联任务不存在或不可对话
 
     # SSE 域
-    ERR_SSE_001 = "ERR_SSE_001"                 # 会话流不存在
+    ERR_SSE_001 = "ERR_SSE_001"  # 会话流不存在
 
     # 关键词域
-    ERR_KEYWORD_001 = "ERR_KEYWORD_001"         # 规则加载失败
+    ERR_KEYWORD_001 = "ERR_KEYWORD_001"  # 规则加载失败
 
 
 # 错误码 -> 默认中文提示
@@ -47,6 +50,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ERR_TASK_001: "患者不存在",
     ErrorCode.ERR_TASK_002: "住院记录不存在",
     ErrorCode.ERR_TASK_003: "评估任务不存在",
+    ErrorCode.ERR_TASK_004: "量表不存在、未发布或已失效",
+    ErrorCode.ERR_TASK_005: "后台任务派发失败",
     ErrorCode.ERR_DIALOG_001: "交互会话不存在",
     ErrorCode.ERR_DIALOG_002: "会话当前状态不允许该操作",
     ErrorCode.ERR_DIALOG_003: "会话正在处理其他消息，请稍后重试",
@@ -65,6 +70,8 @@ ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ERR_TASK_001: 404,
     ErrorCode.ERR_TASK_002: 404,
     ErrorCode.ERR_TASK_003: 404,
+    ErrorCode.ERR_TASK_004: 422,
+    ErrorCode.ERR_TASK_005: 503,
     ErrorCode.ERR_DIALOG_001: 404,
     ErrorCode.ERR_DIALOG_002: 409,
     ErrorCode.ERR_DIALOG_003: 409,

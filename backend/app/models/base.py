@@ -1,6 +1,7 @@
 """数据库模型基础设施
 作用：定义 SQLAlchemy 2.0 声明基类、统一业务字段和数据库会话。
 """
+
 from collections.abc import Generator
 from datetime import UTC, datetime
 
@@ -18,8 +19,12 @@ class BusinessBaseMixin:
     """
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    creator: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="创建人账号或系统标识")
-    updator: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="最后更新人账号或系统标识")
+    creator: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="创建人账号或系统标识"
+    )
+    updator: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="最后更新人账号或系统标识"
+    )
     create_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -65,8 +70,12 @@ def init_db(
         - echo: 是否输出 SQL 日志
     """
     global engine, SessionLocal
+    resolved_url = database_url.replace(
+        "@localhost:",
+        "@127.0.0.1:",
+    )
     engine = create_engine(
-        database_url,
+        resolved_url,
         pool_pre_ping=pool_pre_ping,
         pool_size=pool_size,
         max_overflow=max_overflow,

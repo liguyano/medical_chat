@@ -1,12 +1,13 @@
 """患者服务
 作用：封装患者与住院记录的查询逻辑。
 """
+
 from __future__ import annotations
 
 import logging
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.models.patient_task import Patient, PatientEncounter
 from app.schemas.patient import InHospitalPatientDto, PatientDto, PatientEncounterDto
@@ -24,31 +25,28 @@ def list_in_hospital_patients(db: Session) -> list[InHospitalPatientDto]:
     """
     rows = list(
         db.execute(
-            select(PatientEncounter)
-            .options(joinedload(PatientEncounter.patient))
+            select(Patient, PatientEncounter)
+            .join(PatientEncounter, PatientEncounter.patient_id == Patient.id)
             .where(
+                Patient.deleted == 0,
                 PatientEncounter.encounter_status == "在院",
                 PatientEncounter.deleted == 0,
             )
             .order_by(PatientEncounter.admission_time.desc())
-        )
-        .scalars()
-        .all()
+        ).all()
     )
 
     result = []
-    for enc in rows:
-        if enc.patient is None or enc.patient.deleted != 0:
-            continue
+    for patient, enc in rows:
         result.append(
             InHospitalPatientDto(
                 patient=PatientDto(
-                    id=enc.patient.id,
-                    patient_no=enc.patient.patient_no,
-                    patient_name=enc.patient.patient_name,
-                    sex=enc.patient.sex,
-                    birthday=enc.patient.birthday,
-                    phone=enc.patient.phone,
+                    id=patient.id,
+                    patient_no=patient.patient_no,
+                    patient_name=patient.patient_name,
+                    sex=patient.sex,
+                    birthday=patient.birthday,
+                    phone=patient.phone,
                 ),
                 encounter=PatientEncounterDto(
                     id=enc.id,
