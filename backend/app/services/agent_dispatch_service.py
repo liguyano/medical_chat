@@ -82,13 +82,31 @@ def dispatch_opening_workers(
     db: Session,
     session: InteractionSession,
 ) -> None:
-    """派发预热和 AI 首问任务。"""
-    from app.celery_app.tasks import dialog_agent_preheat, dialog_agent_worker
+    """按 Schedule prepare → Dialog 预热 → AI 首问顺序派发后台准备任务。"""
+    from celery import chain
+
+    from app.celery_app.tasks import (
+        dialog_agent_preheat,
+        dialog_agent_worker,
+        schedule_agent_worker,
+    )
 
     patient_info, task_config = build_session_agent_payload(db, session)
+    prepared_config = {**task_config, "patient_info": patient_info}
     try:
-        dialog_agent_preheat.delay(session.session_no, patient_info, task_config)
-        dialog_agent_worker.delay(session.session_no, patient_info, task_config)
+        chain(
+            schedule_agent_worker.si(session.session_no, prepared_config),
+            dialog_agent_preheat.si(
+                session.session_no,
+                patient_info,
+                prepared_config,
+            ),
+            dialog_agent_worker.si(
+                session.session_no,
+                patient_info,
+                prepared_config,
+            ),
+        ).apply_async()
     except Exception as exc:
         logger.exception("AI 首问任务派发失败: session=%s", session.session_no)
         raise AppError(
@@ -105,9 +123,9 @@ def dispatch_answer_workers(
     source_message_id: str,
     source_event_id: str | None,
 ) -> None:
-    """按 Schedule → Dialog + Extraction 顺序派发患者答案流水线。"""
-    from celery import chain, group
-
+    """独立派发 Dialog、Schedule observe 与 Extraction。
+    Dialog 只读取后台最后一次成功结果，不等待另外两个 Agent。
+    """
     from app.celery_app.tasks import (
         dialog_agent_worker,
         extraction_agent_worker,
@@ -117,25 +135,19 @@ def dispatch_answer_workers(
     patient_info, task_config = build_session_agent_payload(db, session)
     turn_config = {
         **task_config,
+        "patient_info": patient_info,
         "source_message_id": source_message_id,
         "source_event_id": source_event_id,
     }
     try:
-        workflow = chain(
-            schedule_agent_worker.si(session.session_no, turn_config),
-            group(
-                dialog_agent_worker.si(
-                    session.session_no,
-                    patient_info,
-                    turn_config,
-                ),
-                extraction_agent_worker.si(session.session_no, turn_config),
-            ),
+        dialog_agent_worker.delay(
+            session.session_no,
+            patient_info,
+            turn_config,
         )
-        workflow.apply_async()
     except Exception as exc:
         logger.exception(
-            "患者答案 Agent 流水线派发失败: session=%s message=%s",
+            "患者答案 Dialog 任务派发失败: session=%s message=%s",
             session.session_no,
             source_message_id,
         )
@@ -144,3 +156,17 @@ def dispatch_answer_workers(
             f"后台任务派发失败: {type(exc).__name__}",
             http_status=503,
         ) from exc
+
+    for agent_name, task in (
+        ("schedule", schedule_agent_worker),
+        ("extraction", extraction_agent_worker),
+    ):
+        try:
+            task.delay(session.session_no, turn_config)
+        except Exception:
+            logger.exception(
+                "后台 %s 任务派发失败，不阻塞患者对话: session=%s message=%s",
+                agent_name,
+                session.session_no,
+                source_message_id,
+            )

@@ -317,12 +317,13 @@ export default function PatientDialoguePage() {
     [session?.messages]
   );
   const completed = session?.sessionStatus === 'completed';
+  const preparing = session?.sessionStatus === 'pending';
   const awaitingReply =
     !completed &&
     session?.messages.at(-1)?.role === 'patient' &&
     runtimeConfig.dataMode === 'api';
   const isStreaming =
-    streamingTaskId === taskId || isSending || awaitingReply;
+    preparing || streamingTaskId === taskId || isSending || awaitingReply;
   const displayedTotalQuestions =
     runtimeConfig.dataMode === 'api'
       ? session?.totalQuestionCount ?? task?.progress?.total ?? totalQuestions

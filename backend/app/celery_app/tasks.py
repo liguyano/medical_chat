@@ -52,6 +52,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
                 source_message_id=task_config.get("source_message_id"),
                 source_event_id=task_config.get("source_event_id"),
                 check_interval=task_config.get("check_interval", 1),
+                patient_info=task_config.get("patient_info", {}),
             )
         )
         if result.get("status") == "already_running":
@@ -108,6 +109,7 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
             runner.run(
                 source_message_id=task_config.get("source_message_id"),
                 source_event_id=task_config.get("source_event_id"),
+                finalize=bool(task_config.get("finalize")),
             )
         )
         if result.get("status") == "already_running":
@@ -134,35 +136,36 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
     import asyncio
 
     from app.celery_app.runtime import ensure_worker_runtime
-    from app.managers.assessment_loader import AssessmentQuestionLoader
     from app.utils.redis_client import get_redis
+    from app.workers.schedule_task_store import ScheduleTaskStore
 
     async def _run_preheat():
         """异步执行预热逻辑"""
         try:
             logger.info(f"[Dialog Agent] 预热任务启动: session_id={session_id}")
 
-            # 1. 加载量表问题列表
+            # 1. 读取 Schedule Agent 已生成的 Task-todo
             scale_codes = task_config.get("scale_codes", [])
             if not scale_codes:
                 logger.error(f"[Dialog Agent] 缺少量表编码列表: {task_config}")
                 return {"status": "failed", "reason": "missing_scale_codes"}
 
             ensure_worker_runtime()
-            loader = AssessmentQuestionLoader()
-            questions = await loader.load_questions_by_scale_codes(scale_codes)
-            if not questions:
-                logger.error(f"[Dialog Agent] 未加载到问题: scale_codes={scale_codes}")
-                return {"status": "failed", "reason": "no_questions_loaded"}
-
-            logger.info(f"[Dialog Agent] 加载量表问题: {len(questions)} 项")
-
-            # 2. 第一期仅允许文本引擎
             engine_type = task_config.get("engine_type", "text")
             if engine_type != "text":
                 logger.error(f"[Dialog Agent] 未知引擎类型: {engine_type}")
                 return {"status": "failed", "reason": "unknown_engine_type"}
             redis = get_redis()
+            plan = ScheduleTaskStore(redis).get_plan(session_id)
+            questions = plan.tasks if plan is not None else []
+            if plan is None:
+                raise RuntimeError(f"Schedule Task-todo 尚未就绪: {session_id}")
+            if not questions:
+                return {"status": "failed", "reason": "no_questions_loaded"}
+
+            logger.info(f"[Dialog Agent] 加载量表问题: {len(questions)} 项")
+
+            # 2. 第一期仅允许文本引擎
             saved = redis.set(
                 f"dialog_agent:preheated:{session_id}",
                 {
@@ -170,6 +173,7 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
                     "scale_codes": scale_codes,
                     "question_count": len(questions),
                     "patient_info": patient_info,
+                    "opening_guidance": plan.opening_guidance if plan else "",
                 },
                 ex=3600,
             )
@@ -255,6 +259,18 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
         )
         if result.get("status") == "already_running":
             raise self.retry(countdown=2, max_retries=10)
+        if result.get("assessment_completed"):
+            completion_config = {
+                **task_config,
+                "source_message_id": None,
+                "source_event_id": None,
+                "finalize": True,
+            }
+            dialog_agent_worker.delay(
+                session_id,
+                task_config.get("patient_info", {}),
+                completion_config,
+            )
         return result
     except Exception as exc:
         logger.exception("[Extraction Agent] Celery任务失败: session=%s", session_id)

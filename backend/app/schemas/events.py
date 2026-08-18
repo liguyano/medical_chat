@@ -24,6 +24,7 @@ class EventType(str, Enum):
     SESSION_START = "session_start"  # 会话启动事件
     SESSION_END = "session_end"  # 会话结束事件
     EXTRACTION_RESULT = "extraction_result"  # 字段抽取结果事件
+    PROGRESS_UPDATED = "progress_updated"  # 结构化评估进度事件
     AGENT_ERROR = "agent_error"  # Agent 真实模型调用失败事件
 
 
@@ -135,6 +136,16 @@ class ExtractionResultEvent(BaseEvent):
     confidence_scores: dict[str, float]  # {question_id: confidence}
 
 
+class ProgressUpdatedEvent(BaseEvent):
+    """结构化评估进度事件。"""
+
+    event_type: EventType = EventType.PROGRESS_UPDATED
+    current: int
+    total: int
+    completed: bool = False
+    remaining_question_ids: list[int] = Field(default_factory=list)
+
+
 class DialogMessageEvent(BaseEvent):
     """AI问诊问题事件
     作用：Dialog Agent产出下一个问诊问题时发布（供患者端SSE消费）
@@ -201,4 +212,5 @@ EVENT_TYPE_MAP = {
     EventType.SESSION_START: SessionStartEvent,
     EventType.SESSION_END: SessionEndEvent,
     EventType.EXTRACTION_RESULT: ExtractionResultEvent,
+    EventType.PROGRESS_UPDATED: ProgressUpdatedEvent,
 }

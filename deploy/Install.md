@@ -101,6 +101,10 @@ uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --co
 每个队列只启动一个 Worker。Worker 进程常驻，Agent 按首问或患者答案按需创建，
 单轮完成后释放。修改代码或 `config.yaml` 后必须重启 Worker。
 
+任务创建阶段由 `schedule_queue` 先生成 Task-todo，再由 `dialog_queue` 预热和生成首问。
+患者对话阶段三个队列彼此独立，`schedule_queue` 或 `extraction_queue` 卡住不得阻塞
+`dialog_queue`。进度完成后 Extraction 会向 `dialog_queue` 追加 CICARE Exit 任务。
+
 另开一个 PowerShell 窗口启动补偿扫描：
 
 ```powershell

@@ -261,19 +261,27 @@ Content-Type: application/json
 2. `interaction_session`
 3. 每张量表一个 `assessment_instance`
 
-事务提交后派发：
-
-- `dialog_agent_preheat`
-- `dialog_agent_worker`（只生成 AI 首问）
-
-患者每次提交答案后，服务端按以下顺序派发单轮任务：
+事务提交后按后台链路派发：
 
 ```text
-schedule_agent_worker
-    └─ 完成后并行派发 dialog_agent_worker + extraction_agent_worker
+schedule_agent_worker（prepare Task-todo）
+    -> dialog_agent_preheat
+    -> dialog_agent_worker（生成 AI 首问）
+```
+
+准备期间 `interaction_session.session_status=pending`，首问落库后转为 `active`。
+
+患者每次提交答案后，服务端独立派发三个任务：
+
+```text
+dialog_agent_worker       -> 立即生成患者可见回复，不等待后台
+schedule_agent_worker     -> 异步检查对话、更新下一轮引导
+extraction_agent_worker   -> 异步抽取字段、更新结构化进度
 ```
 
 Celery Worker 进程常驻，但 Agent 实例按轮创建，单轮完成后释放。
+Schedule/Extraction 失败由各自任务重试，不阻塞 Dialog。只有全部必填、非派生问题
+形成有效结构化答案后，系统才异步生成 CICARE Exit 并将任务转为 `pending_review`。
 后台 Beat 每 30 秒扫描活动会话，自动补派未完成的患者答案任务。
 
 响应 `data`：
@@ -464,7 +472,7 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 | `assistant_message_completed` | AI 问诊问题完成并已落库 | `content_text`, `is_final=true`, `turn_no`, `question_id`, `role` |
 | `user_transcript_completed` | 患者答案已落库 | `content_text`, `turn_no`, `client_message_id` |
 | `extraction_updated` | 抽取字段增量 | `fields[]`, `confidence_scores` |
-| `progress_updated` | 约束或工具调用 | `message`, `detail` |
+| `progress_updated` | 必填、非派生结构化答案进度 | `current`, `total`, `completed`, `remaining_question_ids` |
 | `task_status_updated` | 会话完成 | `task_status=pending_review`, `end_reason`, `total_turns` |
 | `ping` | 30 秒心跳 | 空 |
 | `error` | Agent 模型调用或 Stream 读取失败 | `agent_name`, `error_code`, `message`, `retrying` |

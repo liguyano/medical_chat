@@ -147,27 +147,6 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
     case 'user_transcript_completed': {
       const message = buildMessage(event, 'patient', false);
       chatStore.upsertMessage(event.task_id, message);
-      const updatedSession = currentSession(event.task_id);
-      if (updatedSession) {
-        const answeredQuestionCount = updatedSession.messages.filter(
-          (item) => item.role === 'patient'
-        ).length;
-        const totalQuestionCount =
-          updatedSession.totalQuestionCount ??
-          taskStore.tasks.find((item) => item.id === event.task_id)?.progress
-            ?.total ??
-          answeredQuestionCount;
-        chatStore.setSession(event.task_id, {
-          ...updatedSession,
-          answeredQuestionCount,
-          totalQuestionCount,
-        });
-        taskStore.updateTaskProgress(
-          event.task_id,
-          answeredQuestionCount,
-          totalQuestionCount
-        );
-      }
       break;
     }
     case 'assistant_message_started': {

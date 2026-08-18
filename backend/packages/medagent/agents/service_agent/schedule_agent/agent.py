@@ -13,9 +13,16 @@ from .models import (
     QuestionTask,
     ScheduleAgentOutput,
     ScheduleAnalysis,
+    SchedulePlanDraft,
+    ScheduleTaskTodo,
     ToolCallRecord,
 )
-from .prompts import DEVIATION_CHECK_SYSTEM_PROMPT, build_deviation_check_prompt
+from .prompts import (
+    DEVIATION_CHECK_SYSTEM_PROMPT,
+    TASK_TODO_SYSTEM_PROMPT,
+    build_deviation_check_prompt,
+    build_task_todo_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,84 @@ class ScheduleAgent:
             task.question_code for task in task_list if task.completed
         }
         self.question_map = {task.question_code: task for task in task_list}
+
+    async def prepare_task_todo(
+        self,
+        patient_info: dict[str, Any],
+    ) -> ScheduleTaskTodo:
+        """生成会话级 Task-todo
+        作用：由 Schedule Agent 规划问题顺序；模型失败时使用确定性顺序，
+        确保首问预热不会因规划模型异常而永久阻塞。
+        """
+        grouped: dict[str, list[QuestionTask]] = {}
+        for task in self.task_list:
+            if not task.required:
+                continue
+            grouped.setdefault(task.question_code, []).append(task)
+
+        draft = await self._plan_task_todo(patient_info)
+        ordered_codes: list[str] = []
+        for code in draft.ordered_question_codes:
+            if code in grouped and code not in ordered_codes:
+                ordered_codes.append(code)
+        for task in self.task_list:
+            if (
+                task.required
+                and task.question_code in grouped
+                and task.question_code not in ordered_codes
+            ):
+                ordered_codes.append(task.question_code)
+
+        planned_tasks: list[QuestionTask] = []
+        for code in ordered_codes:
+            sources = grouped[code]
+            primary = sources[0]
+            planned_tasks.append(
+                primary.model_copy(
+                    update={
+                        "source_question_ids": [item.question_id for item in sources],
+                        "dialogue_goal": primary.question_name,
+                    }
+                )
+            )
+        return ScheduleTaskTodo(
+            session_id=self.session_id,
+            tasks=planned_tasks,
+            opening_guidance=draft.opening_guidance,
+            planning_reason=draft.planning_reason,
+        )
+
+    async def _plan_task_todo(
+        self,
+        patient_info: dict[str, Any],
+    ) -> SchedulePlanDraft:
+        """调用模型生成 Task-todo 草稿。"""
+        messages = [
+            SystemMessage(content=TASK_TODO_SYSTEM_PROMPT),
+            HumanMessage(
+                content=build_task_todo_prompt(
+                    patient_info=patient_info,
+                    questions=self.task_list,
+                )
+            ),
+        ]
+        try:
+            structured = self.model.with_structured_output(SchedulePlanDraft)
+            result = await structured.ainvoke(messages)
+            return (
+                result
+                if isinstance(result, SchedulePlanDraft)
+                else SchedulePlanDraft.model_validate(result)
+            )
+        except Exception:
+            logger.exception("[Schedule Agent] Task-todo 规划失败，使用确定性顺序")
+            return SchedulePlanDraft(
+                opening_guidance=(
+                    "按 CICARE 完成身份核实、自我介绍和流程说明后，"
+                    "自然询问第一个待评估问题。"
+                ),
+                planning_reason="模型规划失败，使用量表审核顺序",
+            )
 
     async def evaluate(
         self,
@@ -190,6 +275,13 @@ class ScheduleAgent:
                 "get_education_material(category='tobacco')",
             ),
             (
+                ("抽烟", "吸烟"),
+                ("不抽烟", "不吸烟", "已经戒烟", "戒烟了"),
+                "trigger_consent_form",
+                {"form_type": "tobacco"},
+                "trigger_consent_form(form_type='tobacco')",
+            ),
+            (
                 ("喝酒", "饮酒"),
                 ("不喝酒", "不饮酒", "已经戒酒", "戒酒了"),
                 "get_education_material",
@@ -202,6 +294,13 @@ class ScheduleAgent:
                 "trigger_consent_form",
                 {"form_type": "surgery"},
                 "trigger_consent_form(form_type='surgery')",
+            ),
+            (
+                ("青霉素过敏", "药物过敏"),
+                ("无药物过敏", "没有药物过敏", "不过敏"),
+                "get_education_material",
+                {"category": "allergy"},
+                "get_education_material(category='allergy')",
             ),
         ]
 
@@ -243,11 +342,16 @@ class ScheduleAgent:
 
         for tool in missing_tools:
             if "tobacco" in tool:
-                prompts.append("必须调用戒烟宣教工具，并完成吸烟频率与吸烟量追问。")
+                if "consent" in tool:
+                    prompts.append("必须触发戒烟知情宣教书。")
+                else:
+                    prompts.append("必须调用戒烟宣教工具，并完成吸烟频率与吸烟量追问。")
             elif "alcohol" in tool:
                 prompts.append("必须调用饮酒宣教工具，并完成饮酒频率与饮酒量追问。")
             elif "surgery" in tool:
                 prompts.append("必须调用手术知情同意书工具，引导患者阅读并确认。")
+            elif "allergy" in tool:
+                prompts.append("必须完成药物过敏安全宣教并提醒患者以后就医主动告知医护人员。")
         return "\n".join(dict.fromkeys(prompts))
 
     def _build_output(
