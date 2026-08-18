@@ -186,10 +186,27 @@ pnpm dev
 
 ## Step6：生产环境启动
 
+生产构建和生产服务必须按“停止旧服务 → 构建 → 启动”的顺序执行。
+禁止在旧的 `pnpm start` 仍运行时执行 `pnpm build` 后继续复用旧进程。
+旧进程会保留上一版路由和资源清单，而新的构建会替换磁盘上的 chunk，
+两者混用会导致浏览器出现 `ChunkLoadError`。
+
+如果生产服务已经运行，先在对应 PowerShell 窗口按 `Ctrl+C` 停止。
+随后确认 3000 端口已释放：
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue
+```
+
+命令无输出后，再执行：
+
 ```powershell
 pnpm build
 pnpm start
 ```
+
+每次重新执行 `pnpm build` 后都必须重新启动 `pnpm start`。不要让多个
+`pnpm dev` 或 `pnpm start` 实例同时监听 3000 端口。
 
 浏览器访问：
 

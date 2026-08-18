@@ -41,4 +41,14 @@ pnpm build
 pnpm check
 ```
 
+## 本地服务与生产构建
+
+- `pnpm dev` 使用 Next.js 16 的 `.next/dev` 开发输出。
+- `pnpm build` 生成 `.next` 生产输出，`pnpm start` 只运行已经生成的生产构建。
+- 禁止在旧的 `pnpm start` 仍运行时重新执行 `pnpm build` 后继续复用旧进程；
+  构建前必须停止生产服务，构建完成后重新启动，否则旧清单可能引用已被新构建
+  替换的 chunk，导致 `ChunkLoadError`。
+- 开发服务与生产服务不得同时占用 3000 端口。排查页面异常时必须记录
+  `next start` 进程启动时间和 `.next/BUILD_ID` 写入时间，生产进程应晚于构建完成时间。
+
 涉及页面交互的修改还需使用真实浏览器验证桌面端和 390px 手机视图，并检查浏览器控制台无错误。
