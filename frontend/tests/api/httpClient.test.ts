@@ -59,9 +59,12 @@ describe('HTTP client', () => {
     abortRequest(controller);
 
     expect(controller.signal.aborted).toBe(true);
+    expect(controller.signal.reason).toBeInstanceOf(DOMException);
+    expect(controller.signal.reason.name).toBe('AbortError');
     expect(
       isRequestCancelled(new ApiError('请求已取消', 0))
     ).toBe(true);
+    expect(isRequestCancelled(controller.signal.reason)).toBe(true);
     expect(isRequestCancelled(new Error('网络错误'))).toBe(false);
   });
 });

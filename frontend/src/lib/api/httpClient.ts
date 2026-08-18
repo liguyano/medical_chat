@@ -25,7 +25,9 @@ export function isRequestCancelled(error: unknown): boolean {
 
 export function abortRequest(controller: AbortController): void {
   if (!controller.signal.aborted) {
-    controller.abort('component-unmounted');
+    // 使用浏览器标准 AbortError，避免把组件卸载原因作为异常字符串暴露给
+    // Chrome inspector 等调试扩展，同时仍由 apiRequest 统一转换成静默取消。
+    controller.abort();
   }
 }
 

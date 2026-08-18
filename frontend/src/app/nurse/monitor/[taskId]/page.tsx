@@ -275,27 +275,87 @@ export default function NurseMonitorDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[230px_minmax(0,1fr)_360px] gap-4 min-h-[70vh]">
-        <Card padding="md" className="xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto">
-          <h2 className="font-semibold mb-3">任务进度</h2>
-          <Progress value={task.progress?.current ?? 0} max={task.progress?.total ?? 12} size="sm" />
-          <p className="text-xs text-foreground-muted mt-2">
-            {task.progress?.current ?? 0}/{task.progress?.total ?? 12} · {progressStatus}
-          </p>
-          <div className="mt-5 space-y-2">
-            {task.scaleNames?.map((name) => (
-              <div key={name} className="rounded-xl bg-surface-secondary p-3 text-sm">
-                {name}
-              </div>
-            ))}
-          </div>
-          <div className="mt-5">
-            <p className="text-xs text-foreground-muted">连接状态</p>
-            <Badge variant={session?.sessionStatus === 'active' ? 'success' : 'default'} size="sm" className="mt-2">
-              {session?.sessionStatus === 'active' ? '患者在线' : session?.sessionStatus === 'paused' ? '患者已暂停' : '会话已结束'}
-            </Badge>
-          </div>
-        </Card>
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(280px,0.95fr)_minmax(0,1.7fr)_minmax(320px,1fr)] gap-4 min-h-[70vh]">
+        <div className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1">
+          <Card padding="md">
+            <h2 className="font-semibold mb-3">任务进度</h2>
+            <Progress value={task.progress?.current ?? 0} max={task.progress?.total ?? 12} size="sm" />
+            <p className="text-xs text-foreground-muted mt-2">
+              {task.progress?.current ?? 0}/{task.progress?.total ?? 12} · {progressStatus}
+            </p>
+            <div className="mt-5 space-y-2">
+              {task.scaleNames?.map((name) => (
+                <div key={name} className="rounded-xl bg-surface-secondary p-3 text-sm">
+                  {name}
+                </div>
+              ))}
+            </div>
+            <div className="mt-5">
+              <p className="text-xs text-foreground-muted">连接状态</p>
+              <Badge variant={session?.sessionStatus === 'active' ? 'success' : 'default'} size="sm" className="mt-2">
+                {session?.sessionStatus === 'active' ? '患者在线' : session?.sessionStatus === 'paused' ? '患者已暂停' : '会话已结束'}
+              </Badge>
+            </div>
+          </Card>
+
+          <Card padding="md">
+            <h2 className="font-semibold mb-3">结构化答案</h2>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {answers.map((answer) => (
+                <div key={answer.questionId} className="rounded-xl bg-surface-secondary p-3">
+                  <div className="flex justify-between gap-2">
+                    <p className="text-xs text-foreground-muted">{answer.questionText}</p>
+                    <Badge variant={answer.extractionConfidence < 0.8 ? 'warning' : 'success'} size="sm">
+                      {Math.round(answer.extractionConfidence * 100)}%
+                    </Badge>
+                  </div>
+                  <p className="text-sm font-medium mt-1">
+                    {answer.answerText ??
+                      answer.answerNumber ??
+                      answer.selectedOptions?.join('、') ??
+                      '已记录'}
+                  </p>
+                  <p className="text-xs text-primary mt-1">证据消息 {answer.sourceMessageIds.join(', ')}</p>
+                </div>
+              ))}
+              {!answers.length && <p className="text-sm text-foreground-muted">暂无结构化答案</p>}
+            </div>
+          </Card>
+
+          <Card padding="md">
+            <h2 className="font-semibold mb-3">风险与宣教事件</h2>
+            <div className="space-y-2">
+              {events.map((event) => (
+                <div key={event.id} className="rounded-xl border border-border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">{event.title}</p>
+                      <p className="text-xs text-foreground-muted mt-1">{event.description}</p>
+                    </div>
+                    <Badge variant={event.priority === 'high' ? 'danger' : 'warning'} size="sm">
+                      {event.priority === 'high' ? '高' : '中'}
+                    </Badge>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => markEventHandled(taskId, event.id)}
+                    className="mt-2 text-xs text-primary"
+                  >
+                    {event.handled ? '已处理' : '标记已处理'}
+                  </button>
+                </div>
+              ))}
+              {!events.length && <p className="text-sm text-foreground-muted">暂无风险事件</p>}
+            </div>
+          </Card>
+
+          {session?.aiSummary && (
+            <Card padding="md">
+              <h2 className="font-semibold mb-2">AI评估总结</h2>
+              <p className="text-sm leading-6">{session.aiSummary}</p>
+            </Card>
+          )}
+        </div>
 
         <Card padding="md" className="overflow-y-auto max-h-[72vh]">
           <div className="flex items-center justify-between gap-3 mb-4">
@@ -514,63 +574,6 @@ export default function NurseMonitorDetailPage() {
             )}
           </Card>
 
-          <Card padding="md">
-            <h2 className="font-semibold mb-3">结构化答案</h2>
-            <div className="space-y-2 max-h-72 overflow-y-auto">
-              {answers.map((answer) => (
-                <div key={answer.questionId} className="rounded-xl bg-surface-secondary p-3">
-                  <div className="flex justify-between gap-2">
-                    <p className="text-xs text-foreground-muted">{answer.questionText}</p>
-                    <Badge variant={answer.extractionConfidence < 0.8 ? 'warning' : 'success'} size="sm">
-                      {Math.round(answer.extractionConfidence * 100)}%
-                    </Badge>
-                  </div>
-                  <p className="text-sm font-medium mt-1">
-                    {answer.answerText ??
-                      answer.answerNumber ??
-                      answer.selectedOptions?.join('、') ??
-                      '已记录'}
-                  </p>
-                  <p className="text-xs text-primary mt-1">证据消息 {answer.sourceMessageIds.join(', ')}</p>
-                </div>
-              ))}
-              {!answers.length && <p className="text-sm text-foreground-muted">暂无结构化答案</p>}
-            </div>
-          </Card>
-
-          <Card padding="md">
-            <h2 className="font-semibold mb-3">风险与宣教事件</h2>
-            <div className="space-y-2">
-              {events.map((event) => (
-                <div key={event.id} className="rounded-xl border border-border p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium">{event.title}</p>
-                      <p className="text-xs text-foreground-muted mt-1">{event.description}</p>
-                    </div>
-                    <Badge variant={event.priority === 'high' ? 'danger' : 'warning'} size="sm">
-                      {event.priority === 'high' ? '高' : '中'}
-                    </Badge>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => markEventHandled(taskId, event.id)}
-                    className="mt-2 text-xs text-primary"
-                  >
-                    {event.handled ? '已处理' : '标记已处理'}
-                  </button>
-                </div>
-              ))}
-              {!events.length && <p className="text-sm text-foreground-muted">暂无风险事件</p>}
-            </div>
-          </Card>
-
-          {session?.aiSummary && (
-            <Card padding="md">
-              <h2 className="font-semibold mb-2">AI评估总结</h2>
-              <p className="text-sm leading-6">{session.aiSummary}</p>
-            </Card>
-          )}
         </div>
       </div>
 

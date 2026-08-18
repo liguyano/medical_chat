@@ -29,14 +29,15 @@ const statusLabels = {
 
 export default function PatientTasksPage() {
   const router = useRouter();
-  const { user } = useUserStore();
+  const user = useUserStore((state) => state.user);
+  const hasHydrated = useUserStore((state) => state.hasHydrated);
   const allTasks = useTaskStore((state) => state.tasks);
   const setTasks = useTaskStore((state) => state.setTasks);
   const [loadError, setLoadError] = useState('');
   const tasks = allTasks.filter((task) => task.patientId === user?.id);
 
   useEffect(() => {
-    if (runtimeConfig.dataMode !== 'api') return;
+    if (runtimeConfig.dataMode !== 'api' || !hasHydrated) return;
     if (!user) {
       router.replace('/patient');
       return;
@@ -56,7 +57,7 @@ export default function PatientTasksPage() {
         );
       });
     return () => abortRequest(controller);
-  }, [router, setTasks, user]);
+  }, [hasHydrated, router, setTasks, user]);
 
   return (
     <PatientLayout title="我的护理任务" showNavigation>
