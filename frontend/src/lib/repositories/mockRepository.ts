@@ -189,6 +189,15 @@ export class MockCareRepository implements CareRepository {
     await wait(signal);
   }
 
+  async listMessageFeedback(
+    _taskId: string,
+    _reviewerId?: string,
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    return [];
+  }
+
   async submitConsent(
     _consent: Parameters<CareRepository['submitConsent']>[0],
     signal?: AbortSignal
@@ -201,6 +210,15 @@ export class MockCareRepository implements CareRepository {
     signal?: AbortSignal
   ) {
     await wait(signal);
+  }
+
+  async getQualityReview(
+    _taskId: string,
+    _reviewerId?: string,
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    return null;
   }
 
   async submitAssessmentReview(

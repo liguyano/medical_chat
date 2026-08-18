@@ -26,6 +26,12 @@ from app.models.interaction import (
     InteractionSession,
 )
 from app.models.patient_task import CareTask, Patient, PatientEncounter
+from app.models.quality_review import (
+    QualityReview,
+    QualityReviewDimension,
+    QualityReviewScore,
+    QualityReviewTemplate,
+)
 
 __all__ = [
     "AssessmentActionDefinition",
@@ -52,6 +58,10 @@ __all__ = [
     "InteractionSession",
     "Patient",
     "PatientEncounter",
+    "QualityReview",
+    "QualityReviewDimension",
+    "QualityReviewScore",
+    "QualityReviewTemplate",
     "get_db",
     "init_db",
 ]

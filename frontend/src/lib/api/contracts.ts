@@ -184,16 +184,50 @@ export interface ExtractedFieldsResponse {
 export interface RatingRequest {
   task_id: string;
   message_id: string;
-  rating: 'like' | 'dislike';
+  reviewer_id: number;
+  rating?: 'like' | 'dislike';
+  score?: number;
   issue_tags: string[];
   comment?: string;
 }
 
+export interface MessageRatingDto {
+  feedback_id: ApiId;
+  task_id: ApiId;
+  message_id: ApiId;
+  reviewer_id: ApiId;
+  rating: 'like' | 'dislike';
+  score?: number;
+  issue_tags: string[];
+  comment?: string;
+  reviewed_at: string;
+}
+
+export interface MessageRatingListResponse {
+  items: MessageRatingDto[];
+}
+
 export interface QualityReviewRequest {
   task_id: string;
+  reviewer_id: number;
   dialogue_scores: Record<string, number>;
   assessment_scores: Record<string, number>;
+  dialogue_comments?: Record<string, string>;
+  assessment_comments?: Record<string, string>;
+  evidence_message_ids?: Record<string, string[]>;
+  evidence_question_ids?: Record<string, string[]>;
   comment?: string;
+}
+
+export interface QualityReviewDto {
+  task_id: ApiId;
+  reviewer_id: ApiId;
+  dialogue_scores: Record<string, number>;
+  assessment_scores: Record<string, number>;
+  dialogue_comments?: Record<string, string>;
+  assessment_comments?: Record<string, string>;
+  comment?: string;
+  submitted_at?: string;
 }
 
 export interface ConsentSignRequest {

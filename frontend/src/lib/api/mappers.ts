@@ -7,7 +7,9 @@ import type {
   DialogMessageDto,
   ExtractedFieldDto,
   InHospitalPatientDto,
+  MessageRatingDto,
   PatientLoginResponse,
+  QualityReviewDto,
 } from '@/lib/api/contracts';
 import type {
   AssessmentScale,
@@ -15,8 +17,10 @@ import type {
   CollectionMode,
   InteractionMessage,
   InteractionSession,
+  MessageFeedback,
   Patient,
   PatientEncounter,
+  QualityReview,
   StructuredAnswer,
 } from '@/lib/types';
 
@@ -36,6 +40,15 @@ function optionalNumericId(value: string | number | undefined): number | undefin
   if (value === undefined) return undefined;
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+export function toReviewerId(value: string | number | undefined): number {
+  if (value === undefined) return 0;
+  const direct = Number(value);
+  if (Number.isSafeInteger(direct) && direct >= 0) return direct;
+  const numericSuffix = String(value).match(/\d+/g)?.join('');
+  const parsed = numericSuffix ? Number(numericSuffix) : 0;
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 export function toBackendCollectionMode(
@@ -282,5 +295,31 @@ export function mapExtractedField(
     sourceMessageIds: field.source_message_ids ?? [],
     extractionConfidence: field.confidence ?? 0,
     corrected: field.corrected ?? false,
+  };
+}
+
+export function mapMessageRating(dto: MessageRatingDto): MessageFeedback {
+  return {
+    messageId: id(dto.message_id),
+    taskId: id(dto.task_id),
+    reviewerId: id(dto.reviewer_id),
+    feedbackType: dto.rating,
+    score: dto.score,
+    issueTags: dto.issue_tags ?? [],
+    comment: dto.comment,
+    reviewedAt: dto.reviewed_at,
+  };
+}
+
+export function mapQualityReview(dto: QualityReviewDto): QualityReview {
+  return {
+    taskId: id(dto.task_id),
+    reviewerId: id(dto.reviewer_id),
+    dialogueScores: dto.dialogue_scores ?? {},
+    assessmentScores: dto.assessment_scores ?? {},
+    dialogueComments: dto.dialogue_comments ?? {},
+    assessmentComments: dto.assessment_comments ?? {},
+    comment: dto.comment,
+    submittedAt: dto.submitted_at,
   };
 }

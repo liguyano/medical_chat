@@ -17,7 +17,9 @@ export default function NurseQualityPage() {
       <div className="mb-6">
         <Badge variant="primary">AI质量改进</Badge>
         <h1 className="text-3xl mt-2">AI<span className="text-primary italic">质量评价</span></h1>
-        <p className="text-foreground-muted mt-1">对话质量与评估质量分开评价，逐轮反馈在监控页面完成</p>
+        <p className="text-foreground-muted mt-1">
+          这里完成整次会话评价；逐条 AI 消息可在实时监控中选中并评分
+        </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

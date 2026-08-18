@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   mapCreateTaskRequest,
+  mapMessageRating,
   mapPatientPortal,
+  mapQualityReview,
   mapTaskDto,
   toCollectionMode,
+  toReviewerId,
 } from '@/lib/api/mappers';
 
 describe('API mappers', () => {
@@ -37,6 +40,12 @@ describe('API mappers', () => {
       assessment_scene: 'admission',
     });
     expect(request.assigned_nurse_id).toBeUndefined();
+  });
+
+  it('将演示护士工号转换为质评接口数值ID', () => {
+    expect(toReviewerId('N001')).toBe(1);
+    expect(toReviewerId('2001')).toBe(2001);
+    expect(toReviewerId(undefined)).toBe(0);
   });
 
   it('将后端数字ID统一映射为字符串', () => {
@@ -96,5 +105,34 @@ describe('API mappers', () => {
     expect(portal.encounter.inpatientNo).toBe('ZY0004');
     expect(portal.tasks[0].id).toBe('10');
     expect(portal.tasks[0].sessionId).toBe('SESS-1');
+  });
+
+  it('映射逐条消息质评与整体质量评价', () => {
+    const feedback = mapMessageRating({
+      feedback_id: 10,
+      task_id: 3,
+      message_id: 'MSG-1',
+      reviewer_id: 1,
+      rating: 'dislike',
+      score: 2,
+      issue_tags: ['追问不合理'],
+      comment: '应先确认症状持续时间',
+      reviewed_at: '2026-08-18T10:00:00Z',
+    });
+    expect(feedback.messageId).toBe('MSG-1');
+    expect(feedback.score).toBe(2);
+    expect(feedback.issueTags).toEqual(['追问不合理']);
+
+    const review = mapQualityReview({
+      task_id: 3,
+      reviewer_id: 1,
+      dialogue_scores: { 追问合理性: 4 },
+      assessment_scores: { 答案完整性: 5 },
+      dialogue_comments: { 追问合理性: '基本合理' },
+      submitted_at: '2026-08-18T11:00:00Z',
+    });
+    expect(review.taskId).toBe('3');
+    expect(review.dialogueScores['追问合理性']).toBe(4);
+    expect(review.submittedAt).toBe('2026-08-18T11:00:00Z');
   });
 });

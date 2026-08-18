@@ -39,6 +39,13 @@ class ErrorCode(str, Enum):
     ERR_DIALOG_003 = "ERR_DIALOG_003"  # 并发冲突（未获取到会话锁）
     ERR_DIALOG_004 = "ERR_DIALOG_004"  # 关联任务不存在或不可对话
 
+    # AI质量评价域
+    ERR_QUALITY_001 = "ERR_QUALITY_001"  # 任务不存在
+    ERR_QUALITY_002 = "ERR_QUALITY_002"  # 任务没有可评价会话
+    ERR_QUALITY_003 = "ERR_QUALITY_003"  # 消息不存在
+    ERR_QUALITY_004 = "ERR_QUALITY_004"  # 只能评价AI消息
+    ERR_QUALITY_005 = "ERR_QUALITY_005"  # AI评估提交不存在
+
     # SSE 域
     ERR_SSE_001 = "ERR_SSE_001"  # 会话流不存在
 
@@ -66,6 +73,11 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ERR_DIALOG_002: "会话当前状态不允许该操作",
     ErrorCode.ERR_DIALOG_003: "会话正在处理其他消息，请稍后重试",
     ErrorCode.ERR_DIALOG_004: "关联任务不存在或不可进行对话",
+    ErrorCode.ERR_QUALITY_001: "评价任务不存在",
+    ErrorCode.ERR_QUALITY_002: "评价任务没有可用的 AI 对话会话",
+    ErrorCode.ERR_QUALITY_003: "待评价消息不存在或不属于当前任务",
+    ErrorCode.ERR_QUALITY_004: "只能对 AI 消息进行逐条质评",
+    ErrorCode.ERR_QUALITY_005: "任务尚未生成可评价的 AI 评估结果",
     ErrorCode.ERR_SSE_001: "会话事件流不存在",
     ErrorCode.ERR_KEYWORD_001: "关键词规则加载失败",
 }
@@ -90,6 +102,11 @@ ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ERR_DIALOG_002: 409,
     ErrorCode.ERR_DIALOG_003: 409,
     ErrorCode.ERR_DIALOG_004: 404,
+    ErrorCode.ERR_QUALITY_001: 404,
+    ErrorCode.ERR_QUALITY_002: 404,
+    ErrorCode.ERR_QUALITY_003: 404,
+    ErrorCode.ERR_QUALITY_004: 422,
+    ErrorCode.ERR_QUALITY_005: 409,
     ErrorCode.ERR_SSE_001: 404,
     ErrorCode.ERR_KEYWORD_001: 500,
 }

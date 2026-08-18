@@ -161,6 +161,7 @@ CREATE TABLE interaction_message_feedback (
     turn_no                INTEGER      NOT NULL DEFAULT 0,
     reviewer_id            BIGINT       NOT NULL,
     feedback_type          VARCHAR(16)  NOT NULL,
+    score                  INTEGER,
     comment                TEXT         NOT NULL DEFAULT '',
     issue_tags             JSONB        NOT NULL DEFAULT '[]'::JSONB,
     reviewed_at            TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -168,10 +169,12 @@ CREATE TABLE interaction_message_feedback (
     updator                VARCHAR(64)  NOT NULL DEFAULT '',
     create_time            TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time            TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted                SMALLINT     NOT NULL DEFAULT 0
+    deleted                SMALLINT     NOT NULL DEFAULT 0,
+    CONSTRAINT ck_message_feedback_score CHECK (score IS NULL OR score BETWEEN 1 AND 5)
 );
 COMMENT ON TABLE  interaction_message_feedback IS '【缺口1】护士对 AI 消息的逐轮 RLHF 标注';
 COMMENT ON COLUMN interaction_message_feedback.feedback_type IS 'like / dislike';
+COMMENT ON COLUMN interaction_message_feedback.score         IS '护士对单条 AI 消息的 1～5 分质量评价';
 COMMENT ON COLUMN interaction_message_feedback.issue_tags    IS 'JSONB 数组: follow_up_improper / expression_error / over_education / missed_risk / wrong_answer 等';
 COMMENT ON COLUMN interaction_message_feedback.turn_no       IS '冗余轮次，便于回放定位';
 CREATE UNIQUE INDEX ux_msg_feedback_reviewer ON interaction_message_feedback (interaction_message_id, reviewer_id) WHERE deleted = 0;

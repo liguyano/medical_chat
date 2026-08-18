@@ -21,6 +21,10 @@ from app.models import (
     InteractionSession,
     Patient,
     PatientEncounter,
+    QualityReview,
+    QualityReviewDimension,
+    QualityReviewScore,
+    QualityReviewTemplate,
 )
 
 
@@ -146,6 +150,7 @@ def _seed_domain_chain(session_factory) -> dict:
 
         return {
             "patient_id": patient.id,
+            "encounter_id": encounter.id,
             "task_id": task.id,
             "question_id": question.id,
             "session_id": interaction_session.id,
@@ -258,6 +263,7 @@ def test_message_feedback_unique_per_reviewer(postgres_session_factory):
                     turn_no=1,
                     reviewer_id=1001,
                     feedback_type=feedback_type,
+                    score=5 if feedback_type == "like" else 1,
                     reviewed_at=now,
                     creator="pytest",
                     updator="pytest",
@@ -265,6 +271,74 @@ def test_message_feedback_unique_per_reviewer(postgres_session_factory):
             )
         with pytest.raises(IntegrityError):
             db.commit()
+
+
+def test_quality_review_persists_dimension_score_and_evidence(postgres_session_factory):
+    """整体质量评价应保存模板、维度、分值意见和对话证据。"""
+    chain = _seed_domain_chain(postgres_session_factory)
+    now = datetime.now(UTC)
+    with postgres_session_factory() as db:
+        template = QualityReviewTemplate(
+            template_code=_uid("QUALITY"),
+            template_name="AI对话质量",
+            target_type="ai_dialogue",
+            score_scale="1-5",
+            version_code="v1",
+            status="enabled",
+            creator="pytest",
+            updator="pytest",
+        )
+        db.add(template)
+        db.flush()
+        dimension = QualityReviewDimension(
+            template_id=template.id,
+            dimension_code="follow_up_reasonableness",
+            dimension_name="追问合理性",
+            dimension_description="异常答案是否被合理追问",
+            weight=Decimal("1"),
+            max_score=Decimal("5"),
+            sort_no=1,
+            creator="pytest",
+            updator="pytest",
+        )
+        db.add(dimension)
+        db.flush()
+        review = QualityReview(
+            review_no=_uid("QR"),
+            template_id=template.id,
+            target_type="ai_dialogue",
+            target_id=chain["session_id"],
+            patient_id=chain["patient_id"],
+            encounter_id=chain["encounter_id"],
+            reviewer_id=1001,
+            overall_score=Decimal("4"),
+            review_comment="整体追问合理",
+            issue_tags=[],
+            reviewed_at=now,
+            creator="pytest",
+            updator="pytest",
+        )
+        db.add(review)
+        db.flush()
+        db.add(
+            QualityReviewScore(
+                quality_review_id=review.id,
+                dimension_id=dimension.id,
+                score_value=Decimal("4"),
+                score_comment="应进一步确认症状持续时间",
+                evidence_message_ids=["MSG-1"],
+                evidence_question_ids=[],
+                creator="pytest",
+                updator="pytest",
+            )
+        )
+        db.commit()
+
+        persisted = db.query(QualityReviewScore).filter_by(
+            quality_review_id=review.id
+        ).one()
+        assert persisted.score_value == Decimal("4")
+        assert persisted.evidence_message_ids == ["MSG-1"]
 
 
 @pytest.mark.asyncio

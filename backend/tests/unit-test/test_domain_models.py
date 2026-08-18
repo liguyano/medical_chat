@@ -27,6 +27,10 @@ EXPECTED_TABLES = {
     "assessment_answer_option",
     "assessment_score",
     "assessment_review",
+    "quality_review_template",
+    "quality_review_dimension",
+    "quality_review",
+    "quality_review_score",
 }
 
 OBSOLETE_TABLES = {
@@ -42,8 +46,8 @@ OBSOLETE_TABLES = {
 }
 
 
-def test_batch_a_registers_exactly_22_domain_tables():
-    """批次 A 应准确注册 22 张领域表。"""
+def test_quality_review_registers_all_domain_tables():
+    """批次 A 加质量评价域应准确注册 26 张领域表。"""
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert OBSOLETE_TABLES.isdisjoint(Base.metadata.tables)
 
@@ -80,7 +84,7 @@ def _unique_column_names(table_name: str, constraint_name: str) -> tuple[str, ..
 
 
 def test_human_ai_comparison_key_constraints():
-    """多提交、人机对比和逐轮标注的关键唯一约束必须存在。"""
+    """多提交、人机对比、逐轮标注和整体质评的关键唯一约束必须存在。"""
     assert _unique_column_names(
         "assessment_answer",
         "uq_answer_submission_question",
@@ -93,6 +97,18 @@ def test_human_ai_comparison_key_constraints():
         "assessment_scale_version",
         "uq_scale_version_code",
     ) == ("scale_id", "version_code")
+    assert _unique_column_names(
+        "quality_review_template",
+        "uq_quality_review_template_code",
+    ) == ("template_code", "version_code")
+    assert _unique_column_names(
+        "quality_review_dimension",
+        "uq_quality_review_dimension_code",
+    ) == ("template_id", "dimension_code")
+    assert _unique_column_names(
+        "quality_review_score",
+        "uq_quality_review_score_dimension",
+    ) == ("quality_review_id", "dimension_id")
 
 
 def test_requirement_gap_fields_are_present():

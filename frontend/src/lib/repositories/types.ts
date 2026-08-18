@@ -99,6 +99,11 @@ export interface CareRepository {
     feedback: MessageFeedback,
     signal?: AbortSignal
   ): Promise<void>;
+  listMessageFeedback(
+    taskId: string,
+    reviewerId?: string,
+    signal?: AbortSignal
+  ): Promise<MessageFeedback[]>;
   submitConsent(
     consent: ConsentProgress,
     signal?: AbortSignal
@@ -107,6 +112,11 @@ export interface CareRepository {
     review: QualityReview,
     signal?: AbortSignal
   ): Promise<void>;
+  getQualityReview(
+    taskId: string,
+    reviewerId?: string,
+    signal?: AbortSignal
+  ): Promise<QualityReview | null>;
   submitAssessmentReview(
     review: AssessmentReview,
     signal?: AbortSignal

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
@@ -16,14 +16,34 @@ import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { useUserStore } from '@/lib/stores/useUserStore';
 import { createMonitorSsePath } from '@/lib/transports/sseClient';
 import type { MessageFeedback } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import {
   ArrowLeftIcon,
+  CheckCircleIcon,
   HandThumbDownIcon,
   HandThumbUpIcon,
+  StarIcon,
   UserPlusIcon,
 } from '@heroicons/react/24/outline';
+
+const issueTagOptions = [
+  '表达不清晰',
+  '信息不准确',
+  '漏问关键信息',
+  '追问不合理',
+  '宣教不适宜',
+  '存在安全风险',
+];
+
+interface MessageFeedbackDraft {
+  score: number | null;
+  feedbackType: MessageFeedback['feedbackType'];
+  issueTags: string[];
+  comment: string;
+}
 
 export default function NurseMonitorDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
@@ -36,10 +56,16 @@ export default function NurseMonitorDetailPage() {
   const answers = structuredAnswers[taskId] ?? [];
   const events = interactionEvents[taskId] ?? [];
   const feedback = useChatStore((state) => state.feedback);
+  const setFeedback = useChatStore((state) => state.setFeedback);
   const saveFeedback = useChatStore((state) => state.saveFeedback);
   const markEventHandled = useChatStore((state) => state.markEventHandled);
-  const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
-  const [comment, setComment] = useState('');
+  const reviewerId = useUserStore((state) => state.user?.id ?? 'N001');
+  const ratingPanelRef = useRef<HTMLDivElement>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [feedbackDrafts, setFeedbackDrafts] = useState<
+    Record<string, MessageFeedbackDraft>
+  >({});
+  const [messageSaving, setMessageSaving] = useState(false);
   const [actionError, setActionError] = useState('');
 
   useEffect(() => {
@@ -60,6 +86,15 @@ export default function NurseMonitorDetailPage() {
             .getState()
             .setStructuredAnswers(taskId, snapshot.answers);
         }
+        const savedFeedback = await careRepository.listMessageFeedback(
+          currentTask.id,
+          reviewerId,
+          controller.signal
+        );
+        setFeedback(
+          taskId,
+          savedFeedback.map((item) => ({ ...item, taskId }))
+        );
         setActionError('');
       } catch (loadError) {
         if (!controller.signal.aborted && !isRequestCancelled(loadError)) {
@@ -73,7 +108,28 @@ export default function NurseMonitorDetailPage() {
     };
     void load();
     return () => abortRequest(controller);
-  }, [addTask, task, taskId]);
+  }, [addTask, reviewerId, setFeedback, task, taskId]);
+
+  const aiMessages = session?.messages.filter((message) => message.role === 'ai') ?? [];
+  const resolvedSelectedMessageId =
+    selectedMessageId && aiMessages.some((message) => message.id === selectedMessageId)
+      ? selectedMessageId
+      : aiMessages[0]?.id ?? null;
+  const selectedMessage = session?.messages.find(
+    (message) => message.id === resolvedSelectedMessageId && message.role === 'ai'
+  );
+  const selectedFeedback = resolvedSelectedMessageId
+    ? feedback[resolvedSelectedMessageId]
+    : undefined;
+  const selectedDraft = resolvedSelectedMessageId
+    ? feedbackDrafts[resolvedSelectedMessageId]
+    : undefined;
+  const messageScore = selectedDraft?.score ?? selectedFeedback?.score ?? null;
+  const messageRating =
+    selectedDraft?.feedbackType ?? selectedFeedback?.feedbackType ?? 'like';
+  const messageTags = selectedDraft?.issueTags ?? selectedFeedback?.issueTags ?? [];
+  const messageComment = selectedDraft?.comment ?? selectedFeedback?.comment ?? '';
+
   const { status: streamStatus, error: streamError } = useRealtimeStream({
     path: task?.sessionId ? createMonitorSsePath(task.sessionId) : undefined,
     enabled: Boolean(task?.sessionId),
@@ -89,21 +145,44 @@ export default function NurseMonitorDetailPage() {
         ? '已完成'
         : '采集中';
 
-  const submitFeedback = async (type: MessageFeedback['feedbackType']) => {
-    if (!feedbackMessageId) return;
+  const updateSelectedDraft = (updates: Partial<MessageFeedbackDraft>) => {
+    if (!resolvedSelectedMessageId) return;
+    setFeedbackDrafts((current) => {
+      const saved = feedback[resolvedSelectedMessageId];
+      const base = current[resolvedSelectedMessageId] ?? {
+        score: saved?.score ?? null,
+        feedbackType: saved?.feedbackType ?? 'like',
+        issueTags: saved?.issueTags ?? [],
+        comment: saved?.comment ?? '',
+      };
+      return {
+        ...current,
+        [resolvedSelectedMessageId]: { ...base, ...updates },
+      };
+    });
+  };
+
+  const submitFeedback = async () => {
+    if (!selectedMessage || messageScore === null) return;
     const nextFeedback: MessageFeedback = {
-      messageId: feedbackMessageId,
+      messageId: selectedMessage.id,
       taskId,
-      feedbackType: type,
-      issueTags: type === 'dislike' ? ['追问或表达需优化'] : [],
-      comment,
+      reviewerId,
+      feedbackType: messageRating,
+      score: messageScore,
+      issueTags: messageTags,
+      comment: messageComment.trim() || undefined,
       reviewedAt: new Date().toISOString(),
     };
+    setMessageSaving(true);
     try {
       await careRepository.submitMessageFeedback(nextFeedback);
       saveFeedback(nextFeedback);
-      setFeedbackMessageId(null);
-      setComment('');
+      setFeedbackDrafts((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([messageId]) => messageId !== selectedMessage.id)
+        )
+      );
       setActionError('');
     } catch (feedbackError) {
       setActionError(
@@ -111,7 +190,45 @@ export default function NurseMonitorDetailPage() {
           ? feedbackError.message
           : '反馈保存失败'
       );
+    } finally {
+      setMessageSaving(false);
     }
+  };
+
+  const toggleMessageTag = (tag: string) => {
+    updateSelectedDraft({
+      issueTags: messageTags.includes(tag)
+        ? messageTags.filter((item) => item !== tag)
+        : [...messageTags, tag],
+    });
+  };
+
+  const selectScore = (score: number) => {
+    updateSelectedDraft({
+      score,
+      feedbackType: score >= 4 ? 'like' : 'dislike',
+    });
+  };
+
+  const selectMessage = (messageId: string) => {
+    setSelectedMessageId(messageId);
+    setActionError('');
+    if (window.matchMedia('(max-width: 1279px)').matches) {
+      requestAnimationFrame(() => {
+        ratingPanelRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      });
+    }
+  };
+
+  const handleRatingChange = (rating: MessageFeedback['feedbackType']) => {
+    updateSelectedDraft({ feedbackType: rating });
+  };
+
+  const handleCommentChange = (comment: string) => {
+    updateSelectedDraft({ comment });
   };
 
   const handleResolveHandoff = async () => {
@@ -124,27 +241,6 @@ export default function NurseMonitorDetailPage() {
         handoffError instanceof Error
           ? handoffError.message
           : '接管操作失败'
-      );
-    }
-  };
-
-  const submitLike = async (messageId: string) => {
-    const nextFeedback: MessageFeedback = {
-      messageId,
-      taskId,
-      feedbackType: 'like',
-      issueTags: [],
-      reviewedAt: new Date().toISOString(),
-    };
-    try {
-      await careRepository.submitMessageFeedback(nextFeedback);
-      saveFeedback(nextFeedback);
-      setActionError('');
-    } catch (feedbackError) {
-      setActionError(
-        feedbackError instanceof Error
-          ? feedbackError.message
-          : '反馈保存失败'
       );
     }
   };
@@ -179,8 +275,8 @@ export default function NurseMonitorDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[230px_minmax(0,1fr)_340px] gap-4 min-h-[70vh]">
-        <Card padding="md">
+      <div className="grid grid-cols-1 xl:grid-cols-[230px_minmax(0,1fr)_360px] gap-4 min-h-[70vh]">
+        <Card padding="md" className="xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto">
           <h2 className="font-semibold mb-3">任务进度</h2>
           <Progress value={task.progress?.current ?? 0} max={task.progress?.total ?? 12} size="sm" />
           <p className="text-xs text-foreground-muted mt-2">
@@ -202,39 +298,222 @@ export default function NurseMonitorDetailPage() {
         </Card>
 
         <Card padding="md" className="overflow-y-auto max-h-[72vh]">
-          <h2 className="font-semibold mb-4">对话回放与逐轮反馈</h2>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="font-semibold">对话回放</h2>
+              <p className="text-xs text-foreground-muted mt-1">
+                点击 AI 消息，在右侧完成本轮质评
+              </p>
+            </div>
+            <Badge variant="primary" size="sm">
+              {Object.values(feedback).filter((item) => item.taskId === taskId).length} 条已评
+            </Badge>
+          </div>
           {session?.messages.length ? (
-            session.messages.map((message) => (
-              <div key={message.id} className="group">
+            session.messages.map((message) => {
+              const isAiMessage = message.role === 'ai';
+              const isSelected =
+                isAiMessage && resolvedSelectedMessageId === message.id;
+              const messageFeedback = feedback[message.id];
+              return (
+              <div
+                key={message.id}
+                role={isAiMessage ? 'button' : undefined}
+                tabIndex={isAiMessage ? 0 : undefined}
+                onClick={
+                  isAiMessage
+                    ? () => selectMessage(message.id)
+                    : undefined
+                }
+                onKeyDown={
+                  isAiMessage
+                    ? (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectMessage(message.id);
+                        }
+                      }
+                    : undefined
+                }
+                className={cn(
+                  'group rounded-2xl border border-transparent px-2 pt-2 transition-colors',
+                  isAiMessage && 'cursor-pointer hover:border-primary/30 hover:bg-primary-tint/30',
+                  isSelected && 'border-primary bg-primary-tint/50'
+                )}
+                aria-pressed={isAiMessage ? isSelected : undefined}
+                aria-label={isAiMessage ? `选择第 ${message.turnNo} 轮 AI 消息进行质评` : undefined}
+              >
                 <ChatBubble message={message} showTime animate={false} />
-                {runtimeConfig.dataMode === 'mock' && message.role === 'ai' && (
-                  <div className="flex justify-start gap-2 -mt-3 mb-4 ml-14">
-                    <button
-                      type="button"
-                      onClick={() => void submitLike(message.id)}
-                      className={`p-1.5 rounded-full ${feedback[message.id]?.feedbackType === 'like' ? 'bg-green-100 text-green-700' : 'text-foreground-muted hover:bg-surface-secondary'}`}
-                      aria-label="点赞此AI回复"
-                    >
-                      <HandThumbUpIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFeedbackMessageId(message.id)}
-                      className={`p-1.5 rounded-full ${feedback[message.id]?.feedbackType === 'dislike' ? 'bg-red-100 text-red-700' : 'text-foreground-muted hover:bg-surface-secondary'}`}
-                      aria-label="点踩此AI回复"
-                    >
-                      <HandThumbDownIcon className="w-4 h-4" />
-                    </button>
+                {isAiMessage && (
+                  <div className="flex items-center gap-2 -mt-3 mb-4 ml-14 text-xs">
+                    <span className={isSelected ? 'text-primary font-medium' : 'text-foreground-muted'}>
+                      {isSelected ? '正在评价此消息' : '点击评价'}
+                    </span>
+                    {messageFeedback?.score && (
+                      <Badge
+                        variant={messageFeedback.score >= 4 ? 'success' : 'warning'}
+                        size="sm"
+                      >
+                        {messageFeedback.score}分
+                      </Badge>
+                    )}
                   </div>
                 )}
               </div>
-            ))
+            );
+            })
           ) : (
             <p className="text-sm text-foreground-muted">该任务尚未产生对话消息。</p>
           )}
         </Card>
 
-        <div className="space-y-4">
+        <div
+          ref={ratingPanelRef}
+          className="space-y-4 scroll-mt-24 xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1"
+        >
+          <Card padding="md" className="border-primary/30">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <StarIcon className="w-5 h-5 text-primary" />
+                <div>
+                  <h2 className="font-semibold">本轮 AI 质评</h2>
+                  <p className="text-xs text-foreground-muted">评分可随时更新</p>
+                </div>
+              </div>
+              {selectedFeedback?.reviewedAt && (
+                <Badge variant="success" size="sm">
+                  已保存
+                </Badge>
+              )}
+            </div>
+
+            {selectedMessage ? (
+              <div className="space-y-4">
+                <div className="rounded-xl bg-surface-secondary p-3">
+                  <p className="text-xs text-foreground-muted mb-1">
+                    第 {selectedMessage.turnNo} 轮 · AI 消息
+                  </p>
+                  <p className="text-sm leading-6 line-clamp-4">
+                    {selectedMessage.contentText}
+                  </p>
+                </div>
+
+                <fieldset>
+                  <legend className="text-sm font-medium mb-2">
+                    质量评分 <span className="text-danger">*</span>
+                  </legend>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <button
+                        key={score}
+                        type="button"
+                        onClick={() => selectScore(score)}
+                        className={cn(
+                          'h-9 rounded-xl border text-sm font-medium transition-colors',
+                          messageScore === score
+                            ? 'border-primary bg-primary text-white'
+                            : 'border-border bg-surface hover:border-primary hover:text-primary'
+                        )}
+                        aria-pressed={messageScore === score}
+                        aria-label={`评分 ${score} 分`}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex justify-between mt-1 text-xs text-foreground-muted">
+                    <span>需改进</span>
+                    <span>优秀</span>
+                  </div>
+                </fieldset>
+
+                <div>
+                  <p className="text-sm font-medium mb-2">总体判断</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRatingChange('like')}
+                      className={cn(
+                        'flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm',
+                        messageRating === 'like'
+                          ? 'border-green-300 bg-green-50 text-green-700'
+                          : 'border-border text-foreground-muted'
+                      )}
+                      aria-pressed={messageRating === 'like'}
+                    >
+                      <HandThumbUpIcon className="w-4 h-4" />
+                      符合预期
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRatingChange('dislike')}
+                      className={cn(
+                        'flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm',
+                        messageRating === 'dislike'
+                          ? 'border-red-300 bg-red-50 text-red-700'
+                          : 'border-border text-foreground-muted'
+                      )}
+                      aria-pressed={messageRating === 'dislike'}
+                    >
+                      <HandThumbDownIcon className="w-4 h-4" />
+                      存在问题
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium mb-2">问题标签（可多选）</p>
+                  <div className="flex flex-wrap gap-2">
+                    {issueTagOptions.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleMessageTag(tag)}
+                        className={cn(
+                          'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                          messageTags.includes(tag)
+                            ? 'border-primary bg-primary-tint text-primary'
+                            : 'border-border text-foreground-muted hover:border-primary'
+                        )}
+                        aria-pressed={messageTags.includes(tag)}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="message-quality-comment" className="text-sm font-medium">
+                    自由评价
+                  </label>
+                  <textarea
+                    id="message-quality-comment"
+                    value={messageComment}
+                    onChange={(event) => handleCommentChange(event.target.value)}
+                    rows={3}
+                    className="w-full mt-2 rounded-xl border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    placeholder="记录具体问题、原因或改进建议"
+                  />
+                </div>
+
+                <Button
+                  className="w-full"
+                  loading={messageSaving}
+                  disabled={messageScore === null}
+                  onClick={() => void submitFeedback()}
+                >
+                  <CheckCircleIcon className="w-4 h-4 mr-2" />
+                  {selectedFeedback ? '更新本轮质评' : '保存本轮质评'}
+                </Button>
+              </div>
+            ) : (
+              <div className="rounded-xl bg-surface-secondary p-4 text-sm text-foreground-muted">
+                请先在中间对话区选择一条 AI 消息。
+              </div>
+            )}
+          </Card>
+
           <Card padding="md">
             <h2 className="font-semibold mb-3">结构化答案</h2>
             <div className="space-y-2 max-h-72 overflow-y-auto">
@@ -301,29 +580,6 @@ export default function NurseMonitorDetailPage() {
         </div>
       )}
 
-      {feedbackMessageId && (
-        <div className="fixed inset-0 z-[70] bg-black/30 flex items-center justify-center p-4">
-          <Card padding="lg" className="w-full max-w-md">
-            <h2 className="text-xl mb-3">标记AI回复问题</h2>
-            <textarea
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-              rows={4}
-              className="w-full rounded-xl border border-border p-3"
-              placeholder="例如：追问顺序不合理、表达不够清晰"
-            />
-            <div className="flex justify-end gap-2 mt-4">
-              <Button variant="ghost" onClick={() => setFeedbackMessageId(null)}>取消</Button>
-              <Button
-                variant="danger"
-                onClick={() => void submitFeedback('dislike')}
-              >
-                保存点踩意见
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
     </NurseLayout>
   );
 }

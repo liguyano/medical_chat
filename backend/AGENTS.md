@@ -197,3 +197,9 @@ from medagent.configs.agent_config import get_agent_config
 - 患者登录会话保存在 Redis，并通过 HttpOnly Cookie 识别当前患者。
 - 任务编号只用于任务审计与定位，不作为患者登录凭据。
 
+## 护士 AI 质量评价边界
+
+- `POST/GET /api/rating` 负责单条 AI 消息的逐轮评价，保存 1～5 分、like/dislike、问题标签和自由意见；提交前必须校验消息属于任务会话且角色为 AI。
+- `POST /api/quality-reviews` 与 `GET /api/quality-reviews/{task_id}` 负责整次 AI 对话和 AI 评估结果的维度评价。
+- 整体评价使用 `quality_review_template`、`quality_review_dimension`、`quality_review`、`quality_review_score`，维度不得硬编码为运行表字段；AI 评估评价的 `target_id` 必须指向 `assessment_submission.id`。
+

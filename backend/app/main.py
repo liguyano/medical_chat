@@ -91,7 +91,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # 注册业务路由
-    from app.api import dialog, extraction, patients, scales, sse, tasks
+    from app.api import dialog, extraction, patients, quality, scales, sse, tasks
 
     app.include_router(tasks.router)
     app.include_router(dialog.router)
@@ -99,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(patients.router)
     app.include_router(scales.router)
     app.include_router(extraction.router)
+    app.include_router(quality.router)
 
     # 健康检查
     @app.get("/health", tags=["system"])

@@ -27,6 +27,7 @@ interface TaskStore {
   submitForm: (taskId: string, total: number) => void;
   saveReview: (review: AssessmentReview) => void;
   saveQualityReview: (review: QualityReview) => void;
+  clearQualityReview: (taskId: string) => void;
   saveConsent: (consent: ConsentProgress) => void;
   requestHandoff: (taskId: string, reason: string) => void;
   resolveHandoff: (taskId: string) => void;
@@ -145,6 +146,15 @@ export const useTaskStore = create<TaskStore>()(
       saveQualityReview: (review) =>
         set((state) => ({
           qualityReviews: { ...state.qualityReviews, [review.taskId]: review },
+        })),
+
+      clearQualityReview: (taskId) =>
+        set((state) => ({
+          qualityReviews: Object.fromEntries(
+            Object.entries(state.qualityReviews).filter(
+              ([reviewTaskId]) => reviewTaskId !== taskId
+            )
+          ),
         })),
 
       saveConsent: (consent) =>

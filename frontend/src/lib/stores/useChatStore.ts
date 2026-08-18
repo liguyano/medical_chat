@@ -31,6 +31,7 @@ interface ChatStore {
   upsertStructuredAnswer: (taskId: string, answer: StructuredAnswer) => void;
   addEvent: (taskId: string, event: InteractionEvent) => void;
   markEventHandled: (taskId: string, eventId: string) => void;
+  setFeedback: (taskId: string, feedback: MessageFeedback[]) => void;
   saveFeedback: (feedback: MessageFeedback) => void;
   setStreaming: (taskId: string | null) => void;
   clearSession: (taskId: string) => void;
@@ -149,6 +150,18 @@ export const useChatStore = create<ChatStore>()(
             [taskId]: (state.events[taskId] ?? []).map((event) =>
               event.id === eventId ? { ...event, handled: true } : event
             ),
+          },
+        })),
+
+      setFeedback: (taskId, feedback) =>
+        set((state) => ({
+          feedback: {
+            ...Object.fromEntries(
+              Object.entries(state.feedback).filter(
+                ([, item]) => item.taskId !== taskId
+              )
+            ),
+            ...Object.fromEntries(feedback.map((item) => [item.messageId, item])),
           },
         })),
 

@@ -315,7 +315,9 @@ export interface InteractionEvent {
 export interface MessageFeedback {
   messageId: string;
   taskId: string;
+  reviewerId?: string;
   feedbackType: 'like' | 'dislike';
+  score?: number;
   issueTags: string[];
   comment?: string;
   reviewedAt: string;
@@ -333,8 +335,13 @@ export interface AssessmentReview {
 
 export interface QualityReview {
   taskId: string;
+  reviewerId?: string;
   dialogueScores: Record<string, number>;
   assessmentScores: Record<string, number>;
+  dialogueComments?: Record<string, string>;
+  assessmentComments?: Record<string, string>;
+  evidenceMessageIds?: Record<string, string[]>;
+  evidenceQuestionIds?: Record<string, string[]>;
   comment?: string;
   submittedAt?: string;
 }

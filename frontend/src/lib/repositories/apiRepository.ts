@@ -5,7 +5,9 @@ import type {
   DialogHistoryResponse,
   ExtractedFieldsResponse,
   InHospitalPatientDto,
+  MessageRatingListResponse,
   PatientLoginResponse,
+  QualityReviewDto,
 } from '@/lib/api/contracts';
 import { apiRequest } from '@/lib/api/httpClient';
 import {
@@ -14,8 +16,11 @@ import {
   mapDialogHistory,
   mapExtractedField,
   mapInHospitalPatient,
+  mapMessageRating,
   mapPatientPortal,
+  mapQualityReview,
   mapTaskDto,
+  toReviewerId,
 } from '@/lib/api/mappers';
 import type { AssessmentScale, CareTask } from '@/lib/types';
 import type {
@@ -241,12 +246,30 @@ export class ApiCareRepository implements CareRepository {
       body: {
         task_id: feedback.taskId,
         message_id: feedback.messageId,
+        reviewer_id: toReviewerId(feedback.reviewerId),
         rating: feedback.feedbackType,
+        score: feedback.score,
         issue_tags: feedback.issueTags,
         comment: feedback.comment,
       },
       signal,
     });
+  }
+
+  async listMessageFeedback(
+    taskId: string,
+    reviewerId?: string,
+    signal?: AbortSignal
+  ) {
+    const query = new URLSearchParams({
+      task_id: taskId,
+      reviewer_id: String(toReviewerId(reviewerId)),
+    });
+    const response = await apiRequest<MessageRatingListResponse>(
+      `/api/rating?${query.toString()}`,
+      { signal }
+    );
+    return response.items.map(mapMessageRating);
   }
 
   async submitConsent(
@@ -277,12 +300,32 @@ export class ApiCareRepository implements CareRepository {
       method: 'POST',
       body: {
         task_id: review.taskId,
+        reviewer_id: toReviewerId(review.reviewerId),
         dialogue_scores: review.dialogueScores,
         assessment_scores: review.assessmentScores,
+        dialogue_comments: review.dialogueComments,
+        assessment_comments: review.assessmentComments,
+        evidence_message_ids: review.evidenceMessageIds,
+        evidence_question_ids: review.evidenceQuestionIds,
         comment: review.comment,
       },
       signal,
     });
+  }
+
+  async getQualityReview(
+    taskId: string,
+    reviewerId?: string,
+    signal?: AbortSignal
+  ) {
+    const query = new URLSearchParams({
+      reviewer_id: String(toReviewerId(reviewerId)),
+    });
+    const response = await apiRequest<QualityReviewDto | null>(
+      `/api/quality-reviews/${encodeURIComponent(taskId)}?${query.toString()}`,
+      { signal }
+    );
+    return response ? mapQualityReview(response) : null;
   }
 
   async submitAssessmentReview(

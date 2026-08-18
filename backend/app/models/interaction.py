@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -191,6 +192,11 @@ class InteractionMessageFeedback(BusinessBaseMixin, Base):
     turn_no: Mapped[int] = mapped_column(Integer, nullable=False)
     reviewer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     feedback_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="护士对单条 AI 消息的 1～5 分质量评价",
+    )
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     issue_tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -200,6 +206,10 @@ class InteractionMessageFeedback(BusinessBaseMixin, Base):
             "interaction_message_id",
             "reviewer_id",
             name="uq_message_feedback_reviewer",
+        ),
+        CheckConstraint(
+            "score IS NULL OR score BETWEEN 1 AND 5",
+            name="ck_message_feedback_score",
         ),
         Index("idx_message_feedback_session", "interaction_session_id", "turn_no"),
         Index("idx_message_feedback_type", "feedback_type"),

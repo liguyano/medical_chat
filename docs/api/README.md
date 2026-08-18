@@ -605,9 +605,12 @@ data: {
 **请求体**:
 ```json
 {
+  "task_id": "3",
   "message_id": "msg_1234567890",
-  "nurse_id": 2001,
-  "rating_type": "like",
+  "reviewer_id": 2001,
+  "rating": "like",
+  "score": 5,
+  "issue_tags": [],
   "comment": "回复很自然，符合老年人沟通习惯"
 }
 ```
@@ -615,9 +618,12 @@ data: {
 **参数说明**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| message_id | string | 是 | 消息ID |
-| nurse_id | integer | 是 | 护士ID |
-| rating_type | string | 是 | 评分类型：`like`(点赞) 或 `dislike`(踩) |
+| task_id | string | 是 | 任务ID或任务编号 |
+| message_id | string | 是 | 消息ID或消息编号 |
+| reviewer_id | integer | 否 | 护士ID，未接入真实医护鉴权时为0 |
+| rating | string | 否 | 评分类型：`like`(点赞) 或 `dislike`(踩) |
+| score | integer | 否 | 1～5分；与 `rating` 至少填写一项 |
+| issue_tags | array | 否 | 问题标签数组 |
 | comment | string | 否 | 评价意见 |
 
 **成功响应** (200):
@@ -626,13 +632,36 @@ data: {
   "code": 200,
   "message": "评分成功",
   "data": {
-    "rating_id": 50001,
+    "feedback_id": 50001,
+    "task_id": "3",
     "message_id": "msg_1234567890",
-    "rating_type": "like",
-    "created_at": "2026-08-16T10:38:00Z"
+    "reviewer_id": 2001,
+    "rating": "like",
+    "score": 5,
+    "issue_tags": [],
+    "comment": "回复很自然，符合老年人沟通习惯",
+    "reviewed_at": "2026-08-16T10:38:00Z"
   }
 }
 ```
+
+### 5.2 查询任务逐条评分
+
+**接口**: `GET /api/rating?task_id={task_id}&reviewer_id={reviewer_id}`
+
+**描述**: 查询指定护士在任务下已经保存的逐条 AI 消息质评。
+
+### 5.3 提交整体AI质量评价
+
+**接口**: `POST /api/quality-reviews`
+
+**描述**: 按对话质量和评估质量两个模板保存1～5分维度评价、维度意见、证据消息和总体意见。
+
+### 5.4 查询整体AI质量评价
+
+**接口**: `GET /api/quality-reviews/{task_id}?reviewer_id={reviewer_id}`
+
+**描述**: 查询指定护士对任务的最新整体质量评价。
 
 ---
 
