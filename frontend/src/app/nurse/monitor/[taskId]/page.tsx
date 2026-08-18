@@ -11,6 +11,7 @@ import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
+import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
@@ -61,7 +62,7 @@ export default function NurseMonitorDetailPage() {
         }
         setActionError('');
       } catch (loadError) {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && !isRequestCancelled(loadError)) {
           setActionError(
             loadError instanceof Error
               ? `监控数据加载失败：${loadError.message}`
@@ -71,7 +72,7 @@ export default function NurseMonitorDetailPage() {
       }
     };
     void load();
-    return () => controller.abort();
+    return () => abortRequest(controller);
   }, [addTask, task, taskId]);
   const { status: streamStatus, error: streamError } = useRealtimeStream({
     path: task?.sessionId ? createMonitorSsePath(task.sessionId) : undefined,

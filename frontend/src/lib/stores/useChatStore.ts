@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   mockInteractionEvents,
   mockSessions,
@@ -174,6 +174,7 @@ export const useChatStore = create<ChatStore>()(
     }),
     {
       name: 'medical-evaluate-chat-storage',
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 );

@@ -14,6 +14,7 @@ from .engine import DialogEngine
 from .models import (
     DialogHistoryStore,
     DialogStateStore,
+    DialogTextDeltaSink,
     DialogToolExecutor,
 )
 from .prompt import build_constraint_update_prompt, build_system_prompt
@@ -39,6 +40,7 @@ class DialogAgent:
         state_store: DialogStateStore | None = None,
         history_store: DialogHistoryStore | None = None,
         tool_executor: DialogToolExecutor = execute_tool,
+        text_delta_sink: DialogTextDeltaSink | None = None,
     ) -> None:
         self.session_id = session_id
         self.patient_info = patient_info
@@ -48,6 +50,7 @@ class DialogAgent:
         self.state_store = state_store
         self.history_store = history_store
         self.tool_executor = tool_executor
+        self.text_delta_sink = text_delta_sink
         self.turn_counter = 0
         self.last_turn_context: dict[str, Any] = {}
 
@@ -135,7 +138,16 @@ class DialogAgent:
                                     asr_text=transcript,
                                 )
                     elif event_type == "text":
-                        full_response_text += str(event.get("content", ""))
+                        text_chunk = str(event.get("content", ""))
+                        full_response_text += text_chunk
+                        if self.text_delta_sink and text_chunk:
+                            await self.text_delta_sink(
+                                text_chunk,
+                                {
+                                    **context,
+                                    "full_response_text": full_response_text,
+                                },
+                            )
                     elif event_type == "audio":
                         context.setdefault("audio_chunks", []).append(event.get("data"))
                     elif event_type == "tool_call":

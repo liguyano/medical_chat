@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   mapCreateTaskRequest,
+  mapPatientPortal,
   mapTaskDto,
   toCollectionMode,
 } from '@/lib/api/mappers';
@@ -54,5 +55,46 @@ describe('API mappers', () => {
     expect(task.sessionId).toBe('88');
     expect(task.patientId).toBe('12');
     expect(task.assignedNurseId).toBe('14');
+  });
+
+  it('映射患者登录后的住院信息和本人任务', () => {
+    const portal = mapPatientPortal({
+      patient: {
+        id: 4,
+        patient_no: 'P-DEMO-0004',
+        patient_name: '陈建军',
+        sex: '男',
+        birthday: '1968-01-18',
+        phone: '13800000004',
+      },
+      encounter: {
+        id: 8,
+        encounter_no: 'E-DEMO-0004',
+        inpatient_no: 'ZY0004',
+        patient_id: 4,
+        department_name: '呼吸与危重症医学科',
+        ward_name: '呼吸内科病区',
+        bed_no: '16-1',
+        admission_time: '2026-08-17T10:00:00Z',
+        encounter_status: '在院',
+      },
+      tasks: [
+        {
+          task_id: 10,
+          task_no: 'TASK-1',
+          session_id: 'SESS-1',
+          patient_id: 4,
+          encounter_id: 8,
+          collection_mode: 'ai_dialogue',
+          task_status: 'in_progress',
+          created_at: '2026-08-18T10:00:00Z',
+        },
+      ],
+    });
+
+    expect(portal.patient.id).toBe('4');
+    expect(portal.encounter.inpatientNo).toBe('ZY0004');
+    expect(portal.tasks[0].id).toBe('10');
+    expect(portal.tasks[0].sessionId).toBe('SESS-1');
   });
 });

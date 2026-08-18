@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiRequest } from '@/lib/api/httpClient';
+import {
+  ApiError,
+  abortRequest,
+  apiRequest,
+  isRequestCancelled,
+} from '@/lib/api/httpClient';
 
 describe('HTTP client', () => {
   afterEach(() => {
@@ -47,5 +52,16 @@ describe('HTTP client', () => {
       code: 'ERR_TASK_003',
       message: '任务不存在',
     } satisfies Partial<ApiError>);
+  });
+
+  it('主动取消请求时可被页面静默识别', () => {
+    const controller = new AbortController();
+    abortRequest(controller);
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(
+      isRequestCancelled(new ApiError('请求已取消', 0))
+    ).toBe(true);
+    expect(isRequestCancelled(new Error('网络错误'))).toBe(false);
   });
 });

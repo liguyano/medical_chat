@@ -24,12 +24,14 @@ HEARTBEAT_INTERVAL = 30
 # 事件类型 -> SSE event 名称映射（对齐前端 SseEventType）
 _EVENT_NAME_MAP: dict[str, str] = {
     # 核心事件（第一期）
-    EventType.DIALOG_MESSAGE.value: "assistant_text_delta",
+    EventType.DIALOG_MESSAGE.value: "assistant_message_completed",
+    EventType.ASSISTANT_MESSAGE_STARTED.value: "assistant_message_started",
     EventType.PATIENT_ANSWER.value: "user_transcript_completed",
     EventType.EXTRACTION_RESULT.value: "extraction_updated",
     EventType.TOOL_CALL.value: "progress_updated",
     EventType.CONSTRAINT.value: "progress_updated",
     EventType.SESSION_END.value: "task_status_updated",
+    EventType.AGENT_ERROR.value: "error",
     # 兼容旧事件（后补）
     EventType.DIALOG_TEXT.value: "assistant_text_delta",
     EventType.DIALOG_AUDIO.value: "assistant_audio_delta",
@@ -109,16 +111,37 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
         - payload 字典
     """
     if event_type == EventType.DIALOG_MESSAGE.value:
-        # AI 问诊问题事件 -> assistant_text_delta
+        # AI 问诊问题完成事件 -> assistant_message_completed
         return {
             "content_text": data.get("content", ""),
-            "delta": data.get("content", ""),
             "text": data.get("content", ""),
             "is_final": True,
             "turn_no": data.get("turn_number", 0),
             "question_id": data.get("question_id"),
             "role": "assistant",
             "cicare_stage": data.get("cicare_stage", "connect"),
+        }
+    elif event_type == EventType.DIALOG_TEXT.value:
+        # 模型流式文本增量 -> assistant_text_delta
+        return {
+            "content_text": "",
+            "delta": data.get("text_chunk", ""),
+            "text": data.get("text_chunk", ""),
+            "is_final": bool(data.get("is_final", False)),
+            "turn_no": data.get("turn_number", 0),
+            "question_id": data.get("question_id"),
+            "role": "assistant",
+        }
+    elif event_type == EventType.ASSISTANT_MESSAGE_STARTED.value:
+        return {
+            "content_text": "",
+            "delta": "",
+            "text": "",
+            "is_final": False,
+            "turn_no": data.get("turn_number", 0),
+            "question_id": data.get("question_id"),
+            "generation_id": data.get("generation_id"),
+            "role": "assistant",
         }
     elif event_type == EventType.PATIENT_ANSWER.value:
         # 患者答案事件 -> user_transcript_completed
@@ -153,6 +176,13 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "end_reason": data.get("end_reason", "completed"),
             "total_turns": data.get("total_turns", 0),
         }
+    elif event_type == EventType.AGENT_ERROR.value:
+        return {
+            "agent_name": data.get("agent_name", ""),
+            "error_code": data.get("error_code", "MODEL_CALL_FAILED"),
+            "message": data.get("message", "AI 模型调用失败，请稍后重试"),
+            "retrying": data.get("retrying", True),
+        }
     else:
         # 其他事件保持原样
         return data
@@ -173,8 +203,17 @@ async def stream_dialog_events(
     """
     redis = get_async_redis()
     stream_key = dialog_stream_key(session_id)
-    # 首次连接从头回放，确保任务创建后立即产生的AI首问不会丢失。
-    last_id = last_event_id or "0-0"
+    latest_snapshot = await redis.get(f"dialog:output:latest:{session_id}")
+    snapshot_id = (
+        str(latest_snapshot.get("last_event_id"))
+        if isinstance(latest_snapshot, dict) and latest_snapshot.get("last_event_id")
+        else None
+    )
+    if isinstance(latest_snapshot, dict):
+        snapshot_event = _format_snapshot_event(latest_snapshot)
+        if snapshot_event is not None:
+            yield snapshot_event
+    last_id = _max_stream_id(last_event_id or "0-0", snapshot_id or "0-0")
 
     while True:
         try:
@@ -206,3 +245,66 @@ async def stream_dialog_events(
                 if decoded.get("event_type") == EventType.DIALOG_TURN.value:
                     continue
                 yield format_sse_event(message_id, fields)
+
+
+def _max_stream_id(left: str, right: str) -> str:
+    """比较 Redis Stream ID，避免快照回放后重复消费旧增量。"""
+    try:
+        left_pair = tuple(int(part) for part in left.split("-", 1))
+        right_pair = tuple(int(part) for part in right.split("-", 1))
+        return left if left_pair >= right_pair else right
+    except (TypeError, ValueError):
+        return left or right
+
+
+def _format_snapshot_event(snapshot: dict[str, Any]) -> dict[str, str] | None:
+    """将 Redis 完整文本快照转换为一次可幂等应用的 SSE 事件。"""
+    status = str(snapshot.get("status") or "")
+    if status not in {"streaming", "completed", "failed"}:
+        return None
+    if status == "failed":
+        event_name = "error"
+        payload = {
+            "agent_name": "dialog_agent",
+            "error_code": snapshot.get("error_code") or "MODEL_CALL_FAILED",
+            "message": snapshot.get("error_message")
+            or "AI 模型调用失败，请稍后重试",
+            "retrying": True,
+        }
+    elif status == "completed":
+        event_name = "assistant_message_completed"
+        payload = {
+            "content_text": snapshot.get("content", ""),
+            "text": snapshot.get("content", ""),
+            "snapshot": True,
+            "is_final": True,
+            "turn_no": snapshot.get("turn_number", 0),
+            "question_id": snapshot.get("question_id"),
+            "role": "assistant",
+        }
+    else:
+        event_name = "assistant_text_delta"
+        payload = {
+            "content_text": snapshot.get("content", ""),
+            "delta": snapshot.get("content", ""),
+            "text": snapshot.get("content", ""),
+            "snapshot": True,
+            "is_final": False,
+            "turn_no": snapshot.get("turn_number", 0),
+            "question_id": snapshot.get("question_id"),
+            "role": "assistant",
+            "generation_id": snapshot.get("generation_id"),
+        }
+    envelope = {
+        "event_id": f"snapshot:{snapshot.get('generation_id', '')}",
+        "event_type": event_name,
+        "task_id": str(snapshot.get("task_id", "")),
+        "session_id": snapshot.get("session_id"),
+        "message_id": snapshot.get("message_id"),
+        "occurred_at": snapshot.get("updated_at", ""),
+        "payload": payload,
+    }
+    return {
+        "event": event_name,
+        "data": json.dumps(envelope, ensure_ascii=False),
+    }

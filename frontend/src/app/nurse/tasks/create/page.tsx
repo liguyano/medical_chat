@@ -8,6 +8,7 @@ import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { mockEncounters, mockPatients, mockScales } from '@/lib/mock/data';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
@@ -107,7 +108,7 @@ function CreateTaskContent() {
         setDataNotice('');
       })
       .catch((loadError) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || isRequestCancelled(loadError)) return;
         setPatients([]);
         setEncounters([]);
         setScales([]);
@@ -117,7 +118,7 @@ function CreateTaskContent() {
           }`
         );
       });
-    return () => controller.abort();
+    return () => abortRequest(controller);
   }, []);
 
   const patient =

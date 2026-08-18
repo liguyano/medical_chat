@@ -83,10 +83,11 @@ function appendDelta(event: SseEnvelope, role: InteractionMessage['role']) {
   );
   const fullContent = value(event.payload, 'content_text', '');
   const delta = value(event.payload, 'delta', value(event.payload, 'text', ''));
+  const isSnapshot = Boolean(event.payload.snapshot);
   store.upsertMessage(event.task_id, {
     ...message,
     contentText:
-      isFinal && fullContent
+      (isFinal || isSnapshot) && fullContent
         ? fullContent
         : existing?.contentText === delta
           ? existing.contentText
@@ -317,6 +318,8 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       break;
     }
     case 'error':
+      chatStore.setStreaming(null);
+      break;
     case 'heartbeat':
     case 'assistant_audio_delta':
     case 'education_status_updated':

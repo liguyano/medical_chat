@@ -97,6 +97,7 @@ class DialogEventPublisher:
         task_id: int | str,
         extracted_fields: dict,
         confidence_scores: dict,
+        message_id: str | None = None,
     ) -> str | None:
         """发布字段抽取结果事件
         作用：发布 ExtractionResultEvent 到 dialog_stream（供前端 SSE 消费）
@@ -115,6 +116,7 @@ class DialogEventPublisher:
             event_type="extraction_result",
             session_id=session_id,
             task_id=task_id,
+            message_id=message_id,
             extracted_fields=extracted_fields,
             confidence_scores=confidence_scores,
             timestamp=datetime.now(UTC),

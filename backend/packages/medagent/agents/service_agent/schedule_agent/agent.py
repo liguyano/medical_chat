@@ -128,13 +128,35 @@ class ScheduleAgent:
             HumanMessage(content=prompt),
         ]
 
+        model_name = getattr(self.model, "model_name", None) or getattr(
+            self.model,
+            "model",
+            "unknown",
+        )
+        logger.info(
+            "[Schedule Agent] 调用真实模型: session=%s, model=%s, remaining=%s",
+            self.session_id,
+            model_name,
+            len(remaining_questions),
+        )
         try:
             structured = self.model.with_structured_output(ScheduleAnalysis)
             result = await structured.ainvoke(messages)
             if isinstance(result, ScheduleAnalysis):
+                logger.info(
+                    "[Schedule Agent] 真实模型结构化响应成功: session=%s, deviation=%s",
+                    self.session_id,
+                    result.is_deviation,
+                )
                 return result
             # 少数供应商可能返回 dict，做一次兜底校验
-            return ScheduleAnalysis.model_validate(result)
+            normalized = ScheduleAnalysis.model_validate(result)
+            logger.info(
+                "[Schedule Agent] 真实模型结构化响应成功: session=%s, deviation=%s",
+                self.session_id,
+                normalized.is_deviation,
+            )
+            return normalized
         except (AttributeError, TypeError, ValueError, ValidationError):
             logger.exception("[Schedule Agent] LLM 结构化响应解析失败")
         except Exception:

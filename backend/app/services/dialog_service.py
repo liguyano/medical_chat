@@ -103,6 +103,14 @@ async def send_message(db: Session, req: SendMessageRequest) -> SendMessageRespo
         )
     )
     if existing is not None:
+        from app.services.agent_dispatch_service import dispatch_answer_workers
+
+        dispatch_answer_workers(
+            db,
+            session,
+            source_message_id=existing.message_no,
+            source_event_id=None,
+        )
         return SendMessageResponse(
             session_no=req.session_id,
             message_no=existing.message_no,
@@ -148,7 +156,7 @@ async def send_message(db: Session, req: SendMessageRequest) -> SendMessageRespo
         matches = get_keyword_matcher().match(req.content)
         publisher = DialogEventPublisher(session_id=req.session_id)
         _publish_constraint(publisher, session, task, matches)
-        publisher.publish(
+        answer_event_id = publisher.publish(
             PatientAnswerEvent(
                 session_id=req.session_id,
                 task_id=task.id,
@@ -159,6 +167,14 @@ async def send_message(db: Session, req: SendMessageRequest) -> SendMessageRespo
                 client_message_id=req.client_message_id,
                 input_mode=req.input_mode,
             )
+        )
+        from app.services.agent_dispatch_service import dispatch_answer_workers
+
+        dispatch_answer_workers(
+            db,
+            session,
+            source_message_id=message.message_no,
+            source_event_id=answer_event_id,
         )
         return SendMessageResponse(
             session_no=req.session_id,

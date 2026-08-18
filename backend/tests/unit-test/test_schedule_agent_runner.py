@@ -1,67 +1,65 @@
-"""Schedule Agent 应用层运行器单元测试。"""
+"""Schedule Agent 单轮运行器测试。"""
 
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 
-from app.schemas.events import ConstraintEvent, SessionEndEvent
-from app.workers.schedule_agent_runner import (
-    ScheduleAgentRunner,
-    decode_stream_fields,
-)
+from app.workers.schedule_agent_runner import ScheduleAgentRunner
+
+
+def question() -> QuestionTask:
+    """创建测试题目。"""
+    return QuestionTask(
+        question_id=1,
+        question_code="q1",
+        question_name="问题",
+        patient_text="请回答问题",
+        question_type="文本",
+        required=True,
+        sort_no=1,
+    )
 
 
 class FakeLoader:
-    """可控量表加载器。"""
+    """测试量表加载器。"""
 
     def __init__(self, questions):
         self.questions = questions
 
-    async def load_questions_by_scale_codes(self, scale_codes):
+    async def load_questions_by_scale_codes(self, _scale_codes):
         return self.questions
 
 
 class FakeHistory:
-    """可控对话历史管理器。"""
+    """测试历史管理器。"""
 
-    def __init__(self, messages=None):
-        self.messages = messages or []
-
-    async def get_dialog_history(self, session_id, limit=None):
-        return self.messages
+    async def get_dialog_history(self, _session_id, *, limit=None, offset=0):
+        return []
 
     @staticmethod
-    def format_for_langchain(history):
-        return history
+    def format_for_langchain(_history):
+        return []
 
 
 class FakeRedis:
-    """内存 Redis 包装器替身。"""
+    """测试 Redis。"""
 
-    def __init__(self, reads=None, state=None, set_success=True):
-        self.reads = list(reads or [])
+    def __init__(self, state=None):
         self.state = state
-        self.set_success = set_success
-        self.set_calls = []
-        self.xread_calls = []
+        self.saved = None
 
-    def get(self, key):
+    def get(self, _key):
         return self.state
 
-    def set(self, key, value, ex=None):
-        self.set_calls.append((key, value, ex))
-        return self.set_success
-
-    def xread(self, streams, count=None, block=None):
-        self.xread_calls.append((streams, count, block))
-        return self.reads.pop(0) if self.reads else []
+    def set(self, _key, value, ex=None):
+        self.saved = value
+        return True
 
 
 class FakePublisher:
-    """收集已发布事件。"""
+    """测试事件发布器。"""
 
     def __init__(self, events):
         self.events = events
@@ -71,216 +69,99 @@ class FakePublisher:
         return "1-0"
 
 
-def question() -> QuestionTask:
-    """创建单问题任务。"""
-    return QuestionTask(
-        question_id=1,
-        question_code="smoking",
-        question_name="吸烟",
-        patient_text="您是否吸烟？",
-        question_type="单选",
-        required=True,
-        sort_no=1,
-    )
-
-
-def llm(payload):
-    """创建 BaseChatModel 替身。
-    说明：模拟 model.with_structured_output(Schema).ainvoke() 返回 payload dict，
-      ScheduleAgent 内部会 model_validate 兜底为 ScheduleAnalysis。
-    """
-    ainvoke = AsyncMock(return_value=payload)
-    structured = SimpleNamespace(ainvoke=ainvoke)
-    return SimpleNamespace(
-        with_structured_output=Mock(return_value=structured),
-        ainvoke=ainvoke,
-    )
-
-
-def dialog_event(
-    message_id=b"1-0",
-    *,
-    tool_calls=None,
-    event_type=b"dialog_turn",
-):
-    """创建 Redis Stream 事件。"""
-    fields = {
-        b"event_type": event_type,
-        b"turn_number": b"1",
-        b"tool_calls": json.dumps(tool_calls).encode("utf-8"),
-    }
-    return [(b"dialog_stream:session", [(message_id, fields)])]
-
-
-def make_runner(redis, payload, *, questions=None, history=None, events=None):
-    """创建运行器及事件收集器。"""
-    published = events if events is not None else []
-    return (
-        ScheduleAgentRunner(
-            loader=FakeLoader([question()] if questions is None else questions),
-            history_manager=FakeHistory(history),
-            redis_client=redis,
-            publisher_factory=lambda _: FakePublisher(published),
-            model=llm(payload),
-            block_ms=0,
-            max_idle_reads=1,
-        ),
-        published,
-    )
-
-
-def test_decode_stream_fields_handles_bytes_json_and_plain_values():
-    """Redis bytes 与 JSON 字段应正确解码。"""
-    decoded = decode_stream_fields(
-        {
-            b"event_type": b"dialog_turn",
-            b"tool_calls": b'[{"name":"tool"}]',
-            "turn_number": "5",
-        }
-    )
-    assert decoded == {
-        "event_type": "dialog_turn",
-        "tool_calls": [{"name": "tool"}],
-        "turn_number": "5",
-    }
-
-
-def test_decode_stream_fields_keeps_invalid_json(caplog):
-    """损坏 JSON 应记录警告且保留原值。"""
-    decoded = decode_stream_fields({b"tool_calls": b"invalid"})
-    assert decoded["tool_calls"] == "invalid"
-    assert "JSON 字段解析失败" in caplog.text
-
-
 @pytest.mark.asyncio
-async def test_missing_scale_codes_fails_without_reading_stream():
+async def test_missing_scale_codes_fails_without_agent_creation():
     """缺少量表编码应快速失败。"""
-    redis = FakeRedis()
-    runner, _ = make_runner(redis, {})
-    result = await runner.run("session", scale_codes=[])
+    runner = ScheduleAgentRunner(
+        loader=FakeLoader([question()]),
+        history_manager=FakeHistory(),
+        redis_client=FakeRedis(),
+        publisher_factory=lambda _session: FakePublisher([]),
+        model=object(),
+    )
+
+    result = await runner.run("session", scale_codes=[], source_message_id="msg")
+
     assert result == {"status": "failed", "reason": "missing_scale_codes"}
-    assert redis.xread_calls == []
 
 
 @pytest.mark.asyncio
-async def test_no_loaded_questions_fails():
-    """量表无可用问题时不得启动事件循环。"""
-    runner, _ = make_runner(FakeRedis(), {}, questions=[])
-    result = await runner.run("session", scale_codes=["unknown"])
-    assert result == {"status": "failed", "reason": "no_questions_loaded"}
-
-
-@pytest.mark.asyncio
-async def test_idle_timeout_is_controllable_without_sleep():
-    """空闲超时使用可控读取次数，不依赖长时间 sleep。"""
-    runner, _ = make_runner(FakeRedis(reads=[[]]), {})
-    result = await runner.run("session", scale_codes=["scale"])
-    assert result["status"] == "idle_timeout"
-    assert result["turns"] == 0
-
-
-@pytest.mark.asyncio
-async def test_non_dialog_event_is_ignored_but_checkpointed():
-    """非对话轮次事件不调用模型，但必须推进消费位置。"""
-    redis = FakeRedis(reads=[dialog_event(event_type=b"dialog_text"), []])
-    runner, _ = make_runner(redis, {})
-    result = await runner.run("session", scale_codes=["scale"])
-    assert result["status"] == "idle_timeout"
-    assert redis.set_calls[-1][1]["last_event_id"] == "1-0"
-
-
-@pytest.mark.asyncio
-async def test_deviation_publishes_constraint_event():
-    """偏离结果应发布约束事件。"""
-    redis = FakeRedis(reads=[dialog_event(), []])
-    runner, events = make_runner(
-        redis,
-        {
-            "is_deviation": True,
-            "completed_questions": [],
-            "suggested_action": "请回到量表。",
-        },
+async def test_opening_does_not_start_schedule_model():
+    """首问阶段不应启动 Schedule Agent。"""
+    runner = ScheduleAgentRunner(
+        loader=FakeLoader([question()]),
+        history_manager=FakeHistory(),
+        redis_client=FakeRedis(),
+        publisher_factory=lambda _session: FakePublisher([]),
+        model=object(),
     )
+
+    result = await runner.run("session", scale_codes=["adl"])
+
+    assert result["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_single_turn_evaluates_real_schedule_agent(monkeypatch):
+    """患者答案任务只执行一轮并保存处理游标。"""
+    import app.workers.schedule_agent_runner as module
+
+    events = []
+    redis = FakeRedis()
+    agent = SimpleNamespace(
+        restore_state=Mock(),
+        dump_state=Mock(
+            return_value={"turn_counter": 1, "completed_questions": []}
+        ),
+        evaluate=AsyncMock(
+            return_value=SimpleNamespace(
+                is_deviation=True,
+                missing_tool_calls=[],
+                constraint_prompt="请继续量表问诊",
+                remaining_questions=["q1"],
+            )
+        ),
+    )
+    monkeypatch.setattr(module, "create_schedule_agent", Mock(return_value=agent))
+    runner = ScheduleAgentRunner(
+        loader=FakeLoader([question()]),
+        history_manager=FakeHistory(),
+        redis_client=redis,
+        publisher_factory=lambda _session: FakePublisher(events),
+        model=object(),
+    )
+    monkeypatch.setattr(runner, "_load_task_id", lambda _session: 10)
+    monkeypatch.setattr(runner, "_load_recent_tool_calls", lambda _session: [])
+
     result = await runner.run(
         "session",
-        scale_codes=["scale"],
-        check_interval=1,
+        scale_codes=["adl"],
+        source_message_id="patient-msg-1",
+        source_event_id="2-0",
     )
-    assert result["status"] == "idle_timeout"
-    assert isinstance(events[0], ConstraintEvent)
-    assert events[0].constraint_prompt == "请回到量表。"
+
+    assert result["status"] == "turn_completed"
+    assert agent.evaluate.await_count == 1
+    assert len(events) == 1
+    assert redis.saved["processed_message_ids"] == ["patient-msg-1"]
 
 
 @pytest.mark.asyncio
-async def test_completed_assessment_publishes_end_and_exits():
-    """所有问题完成后应立即发布会话结束并退出。"""
-    redis = FakeRedis(reads=[dialog_event()])
-    runner, events = make_runner(
-        redis,
-        {
-            "is_deviation": False,
-            "completed_questions": ["smoking"],
-        },
+async def test_processed_message_is_idempotent():
+    """同一患者答案重复派发时不得再次调用模型。"""
+    redis = FakeRedis({"processed_message_ids": ["patient-msg-1"]})
+    runner = ScheduleAgentRunner(
+        loader=FakeLoader([question()]),
+        history_manager=FakeHistory(),
+        redis_client=redis,
+        publisher_factory=lambda _session: FakePublisher([]),
+        model=object(),
     )
+
     result = await runner.run(
         "session",
-        scale_codes=["scale"],
-        check_interval=1,
+        scale_codes=["adl"],
+        source_message_id="patient-msg-1",
     )
-    assert result["status"] == "completed"
-    assert isinstance(events[-1], SessionEndEvent)
-    assert events[-1].total_turns == 1
 
-
-@pytest.mark.asyncio
-async def test_tool_call_alias_shape_is_accepted():
-    """DialogTurnEvent 的 tool_name/tool_args 结构应被识别。"""
-    redis = FakeRedis(
-        reads=[
-            dialog_event(
-                tool_calls=[
-                    {
-                        "tool_name": "get_education_material",
-                        "tool_args": {"category": "tobacco"},
-                    }
-                ]
-            ),
-            [],
-        ]
-    )
-    runner, events = make_runner(
-        redis,
-        {"is_deviation": False, "completed_questions": []},
-        history=[{"role": "user", "content": "我吸烟"}],
-    )
-    await runner.run("session", scale_codes=["scale"], check_interval=1)
-    assert events == []
-
-
-@pytest.mark.asyncio
-async def test_state_restore_uses_last_event_id_and_turn_counter():
-    """重启后应从检查点继续消费且恢复轮次。"""
-    redis = FakeRedis(
-        reads=[[]],
-        state={
-            "turn_counter": 9,
-            "completed_questions": [],
-            "last_event_id": "8-0",
-        },
-    )
-    runner, _ = make_runner(redis, {})
-    result = await runner.run("session", scale_codes=["scale"])
-    assert result["turns"] == 9
-    assert redis.xread_calls[0][0] == {"dialog_stream:session": "8-0"}
-
-
-@pytest.mark.asyncio
-async def test_state_save_failure_is_not_silenced():
-    """检查点保存失败必须让 Celery 上层触发重试。"""
-    redis = FakeRedis(
-        reads=[dialog_event(event_type=b"dialog_text")],
-        set_success=False,
-    )
-    runner, _ = make_runner(redis, {})
-    with pytest.raises(RuntimeError, match="状态保存失败"):
-        await runner.run("session", scale_codes=["scale"])
+    assert result["status"] == "already_completed"

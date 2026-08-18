@@ -366,6 +366,33 @@ def text_engine(items):
     return engine, client
 
 
+def text_engine_with_options(items):
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(return_value=async_chunks(items))
+            )
+        ),
+        close=AsyncMock(),
+    )
+    engine = TextChatEngine(
+        api_key="key",
+        model="model",
+        api_base="https://example.com/v1",
+        request_options={
+            "temperature": 0.1,
+            "max_tokens": 321,
+            "extra_body": {"enable_thinking": False},
+        },
+        client=client,
+    )
+    return engine, client
+
+
+def empty_chunk():
+    return SimpleNamespace(choices=[])
+
+
 @pytest.mark.asyncio
 async def test_text_engine_streams_text_and_preserves_history():
     """文本流应逐片输出并保存完整 assistant 消息。"""
@@ -382,6 +409,37 @@ async def test_text_engine_streams_text_and_preserves_history():
     ]
     assert engine.messages[-1] == {"role": "assistant", "content": "您好"}
     client.chat.completions.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_text_engine_ignores_empty_usage_chunk():
+    """DashScope 末尾的 choices 为空的用量 chunk 不应导致真实响应失败。"""
+    engine, _ = text_engine([chunk(content="ok"), empty_chunk()])
+    await engine.create_session("system", [])
+    await engine.send_input("hello")
+
+    events = [event async for event in engine.stream_response()]
+
+    assert events == [
+        {"type": "text", "content": "ok"},
+        {"type": "response_done"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_text_engine_passes_real_model_request_options():
+    """TextChatEngine 应把配置的真实模型参数透传到 Chat Completions。"""
+    engine, client = text_engine_with_options([chunk(content="ok")])
+    await engine.create_session("system", [])
+    await engine.send_input("hello")
+
+    events = [event async for event in engine.stream_response()]
+
+    assert events[-1] == {"type": "response_done"}
+    request = client.chat.completions.create.await_args.kwargs
+    assert request["temperature"] == 0.1
+    assert request["max_tokens"] == 321
+    assert request["extra_body"] == {"enable_thinking": False}
 
 
 @pytest.mark.asyncio

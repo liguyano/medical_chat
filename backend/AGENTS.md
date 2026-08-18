@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## 真实模型联调约定
+
+- 文本模型统一使用 `ModelConfig.chat_completion_options()` 构建 Chat Completions 参数。
+- 第一阶段 `qwen3.5` 结构化链路使用 `extra_body.enable_thinking=false`，避免推理 token 截断 JSON。
+- Dialog 首问和后续问句均由真实语言模型生成；模型失败时发布 `agent_error` SSE 并触发 Celery 重试，禁止静默回退量表原文。
+- TextChatEngine 必须跳过供应商发送的 `choices=[]` 用量 chunk。
+
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
 # 开发规范
@@ -170,17 +177,23 @@ from medagent.configs.agent_config import get_agent_config
   直到生成患者可见回复或达到最大工具轮次；供应商错误不得直接暴露给患者。
 - 独立 Celery worker 的 `dialog_agent_preheat` 必须先调用
   `ensure_worker_runtime()`，再加载 PostgreSQL 量表并通过 App 适配层组装智能体。
-- 第一期文本闭环的 Dialog / Schedule / Extraction 都是长驻 Redis Stream 消费任务。
-  Windows `solo` 模式必须按 `dialog_queue`、`schedule_queue`、`extraction_queue`
-  各启动一个独立 Worker；禁止让单个 solo Worker 同时消费三个队列，否则第一个长驻任务
-  会阻塞其余 Agent。
+- 第一期文本闭环的 Celery Worker 进程常驻，但 Dialog / Schedule / Extraction Agent 按任务轮次
+  按需创建，不在会话上长驻 Redis Stream 消费。Windows `solo` 模式必须按
+  `dialog_queue`、`schedule_queue`、`extraction_queue` 各启动一个独立 Worker。
 - `POST /api/tasks` 在同一数据库事务内创建 `care_task`、`interaction_session` 和每张量表
-  对应的 `assessment_instance`，提交后再派发四个 Worker。AI 首问由
-  `dialog_agent_worker` 在任何患者输入前写入历史并发布 SSE。
+  对应的 `assessment_instance`，提交后派发预热和 AI 首问。患者答案进入 PostgreSQL 后按
+  `Schedule -> (Dialog + Extraction)` 派发单轮任务。
 - REST 统一使用 `{code,message,data}`；前端可见的核心 SSE 事件为
   `assistant_text_delta`、`user_transcript_completed`、`extraction_updated`、
   `progress_updated` 和 `task_status_updated`。`dialog_turn` 只供 Agent 内部协作。
 - `dialog_agent` 在 `agent_models` 中详写绑定两类模型：`language`（OpenAI 兼容文本降级）
   与 `voice`（豆包实时语音，`type: voice`）。豆包真实语音上线前必须用真实 App ID、
   Resource ID、API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。
+
+## 患者端身份边界
+
+- 患者端使用身份证号和手机号核验身份，仅允许存在“在院”住院记录的患者登录。
+- 身份证号以加密形式保存，API 不返回身份证号或密文。
+- 患者登录会话保存在 Redis，并通过 HttpOnly Cookie 识别当前患者。
+- 任务编号只用于任务审计与定位，不作为患者登录凭据。
 

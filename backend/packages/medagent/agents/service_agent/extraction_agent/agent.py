@@ -83,6 +83,12 @@ class FieldExtractionAgent:
         # 计算派生字段
         result = self._calculate_derived_fields(result)
 
+        logger.info(
+            "[Extraction Agent] 真实模型结构化响应成功: session=%s, fields=%s, confidence=%.3f",
+            self.session_id,
+            len(result.extracted_answers),
+            result.overall_confidence,
+        )
         return result
 
     async def extract_with_retry(
@@ -111,7 +117,7 @@ class FieldExtractionAgent:
                     scale_version,
                     questions,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     f"[Extraction Agent] 抽取失败 (attempt {attempt + 1}/{max_retries}): "
                     f"session={self.session_id}, error={type(e).__name__}: {e}"

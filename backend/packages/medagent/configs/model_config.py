@@ -84,6 +84,7 @@ class ModelConfig(BaseModel):
     when_thinking_enabled: dict[str, Any] | None = None
     when_thinking_disabled: dict[str, Any] | None = None
     context_window: int | None = None
+    enable_thinking: bool = False
 
     # ---- 语音模型（豆包 WebSocket）字段 ----
     websocket_url: str | None = None
@@ -108,3 +109,30 @@ class ModelConfig(BaseModel):
         """
         extra = getattr(self, "model_extra", None) or {}
         return {key: value for key, value in extra.items() if value is not None}
+
+    def chat_completion_options(self) -> dict[str, Any]:
+        """构建 Chat Completions 请求参数
+        作用：提取配置中的供应商通用参数，并将思考模式转换为兼容接口的
+              `extra_body.enable_thinking`，供 ChatOpenAI 和 TextChatEngine 共用。
+        Return:
+            - Chat Completions 请求参数字典，不包含模型、密钥和 endpoint。
+        """
+        allowed_keys = {
+            "temperature",
+            "max_tokens",
+            "max_completion_tokens",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+            "extra_body",
+        }
+        options = {
+            key: value
+            for key, value in self.extra_settings().items()
+            if key in allowed_keys
+        }
+        extra_body = dict(options.get("extra_body") or {})
+        extra_body["enable_thinking"] = self.enable_thinking
+        options["extra_body"] = extra_body
+        return options

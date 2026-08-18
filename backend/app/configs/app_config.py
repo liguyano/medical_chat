@@ -99,6 +99,17 @@ class CeleryConfig(BaseModel):
     task_soft_time_limit: int = 1500
 
 
+class SecurityConfig(BaseModel):
+    """安全配置
+    作用：保存患者身份校验与患者端登录会话的开发期配置。
+    """
+
+    patient_identity_secret: str = "medical-evaluate-development-identity-secret"
+    patient_session_ttl_seconds: int = 28800
+    patient_session_cookie: str = "medical_patient_session"
+    patient_session_secure: bool = False
+
+
 class LoggingConfig(BaseModel):
     """日志系统配置"""
 
@@ -172,6 +183,7 @@ class AppConfig(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     # 模型统一注册表（语言 + 语音，通过 type 区分），复用 medagent Schema
     models: list[ModelConfig] = Field(default_factory=list)

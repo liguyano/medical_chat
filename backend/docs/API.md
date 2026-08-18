@@ -2,7 +2,7 @@
 
 版本：`1.0.0`
 
-更新日期：`2026-08-17`
+更新日期：`2026-08-18`
 
 范围：在院患者、已发布量表、AI 对话任务、患者文本回答、字段抽取、患者/护士 SSE。
 
@@ -97,9 +97,85 @@ GET /api/scales
 
 只返回当前生效、`publish_status=已发布` 的版本；`question_count` 排除衍生题。
 
-## 4. 任务
+## 4. 患者端身份登录
 
-### 4.1 创建并启动 AI 对话任务
+患者端不使用任务编号登录。患者使用身份证号和手机号核验身份；只有存在
+`encounter_status=在院` 住院记录时，登录才会成功。
+
+### 4.1 患者登录
+
+```http
+POST /api/patients/login
+Content-Type: application/json
+```
+
+```json
+{
+  "id_card_no": "110101196801180043",
+  "phone": "13800000004"
+}
+```
+
+成功后服务端写入 HttpOnly Cookie：`medical_patient_session`。
+前端请求必须携带 `credentials: include`。
+
+响应 `data`：
+
+```json
+{
+  "patient": {
+    "id": 69,
+    "patient_no": "P-DEMO-0004",
+    "patient_name": "陈建军",
+    "sex": "男",
+    "birthday": "1968-01-18",
+    "phone": "13800000004"
+  },
+  "encounter": {
+    "id": 69,
+    "encounter_no": "E-DEMO-0004",
+    "inpatient_no": "ZY0004",
+    "patient_id": 69,
+    "department_name": "呼吸与危重症医学科",
+    "ward_name": "呼吸内科病区",
+    "bed_no": "16-1",
+    "encounter_status": "在院"
+  },
+  "tasks": []
+}
+```
+
+### 4.2 获取当前患者任务
+
+```http
+GET /api/patients/me/tasks
+```
+
+返回当前登录患者当前住院记录下的任务列表。
+
+### 4.3 获取当前患者信息
+
+```http
+GET /api/patients/me
+```
+
+返回当前患者、当前住院记录和任务列表。
+
+### 4.4 患者退出登录
+
+```http
+POST /api/patients/logout
+```
+
+错误：
+
+- `ERR_PATIENT_001`：身份证号或手机号不匹配；
+- `ERR_PATIENT_002`：您还未办理入院，暂不能进入患者端；
+- `ERR_PATIENT_003`：患者登录已失效，请重新登录。
+
+## 5. 任务
+
+### 5.1 创建并启动 AI 对话任务
 
 ```http
 POST /api/tasks
@@ -139,9 +215,17 @@ Content-Type: application/json
 事务提交后派发：
 
 - `dialog_agent_preheat`
-- `dialog_agent_worker`
-- `schedule_agent_worker`
-- `extraction_agent_worker`
+- `dialog_agent_worker`（只生成 AI 首问）
+
+患者每次提交答案后，服务端按以下顺序派发单轮任务：
+
+```text
+schedule_agent_worker
+    └─ 完成后并行派发 dialog_agent_worker + extraction_agent_worker
+```
+
+Celery Worker 进程常驻，但 Agent 实例按轮创建，单轮完成后释放。
+后台 Beat 每 30 秒扫描活动会话，自动补派未完成的患者答案任务。
 
 响应 `data`：
 
@@ -181,7 +265,7 @@ Content-Type: application/json
 
 AI 首问可能在 REST 响应前后立即产生。SSE 首次连接默认从 Stream 起点回放，不会漏掉首问。
 
-### 4.2 获取任务详情
+### 5.2 获取任务详情
 
 ```http
 GET /api/tasks/{task_ref}
@@ -189,9 +273,9 @@ GET /api/tasks/{task_ref}
 
 `task_ref` 可传数据库主键或 `TASK-*` 业务编号。响应 `data` 为上面的 `task` 对象。
 
-## 5. 对话
+## 6. 对话
 
-### 5.1 发送患者答案
+### 6.1 发送患者答案
 
 ```http
 POST /api/dialog/message
@@ -224,7 +308,7 @@ Content-Type: application/json
 }
 ```
 
-### 5.2 对话历史
+### 6.2 对话历史
 
 ```http
 GET /api/dialog/{session_no}/history?limit=100&offset=0
@@ -255,7 +339,7 @@ GET /api/dialog/{session_no}/history?limit=100&offset=0
 }
 ```
 
-## 6. 字段抽取
+## 7. 字段抽取
 
 ```http
 GET /api/extraction/{session_no}/fields
@@ -286,7 +370,7 @@ GET /api/extraction/{session_no}/fields
 
 多量表任务会分别写入各自 `assessment_instance / assessment_submission`。
 
-## 7. SSE
+## 8. SSE
 
 患者端：
 
@@ -305,6 +389,15 @@ GET /api/sse/monitor/{session_no}
 - HTTP `Last-Event-ID` 请求头
 - `last_event_id` 查询参数（浏览器自定义重连使用）
 
+模型输出期间同时维护三层数据：
+
+1. Redis Stream：追加增量事件；
+2. Redis 快照：`dialog:output:{session_id}:{message_id}`，保存完整文本和状态；
+3. PostgreSQL：模型完成后保存完整 AI 问句和抽取结果。
+
+SSE 建立或重连时，服务端先返回会话最新快照，再从快照中的
+`last_event_id` 继续读取 Stream。前端不直接连接模型接口。
+
 SSE 帧：
 
 ```text
@@ -317,17 +410,19 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 
 | event | 用途 | payload 核心字段 |
 | --- | --- | --- |
-| `assistant_text_delta` | AI 问诊问题（当前为整句） | `content_text`, `delta`, `is_final=true`, `turn_no`, `question_id`, `role` |
+| `assistant_message_started` | AI 开始生成 | `message_id`, `generation_id`, `turn_no`, `question_id` |
+| `assistant_text_delta` | AI 模型文本增量或最新完整快照 | `content_text`, `delta`, `is_final`, `snapshot`, `turn_no`, `question_id` |
+| `assistant_message_completed` | AI 问诊问题完成并已落库 | `content_text`, `is_final=true`, `turn_no`, `question_id`, `role` |
 | `user_transcript_completed` | 患者答案已落库 | `content_text`, `turn_no`, `client_message_id` |
 | `extraction_updated` | 抽取字段增量 | `fields[]`, `confidence_scores` |
 | `progress_updated` | 约束或工具调用 | `message`, `detail` |
 | `task_status_updated` | 会话完成 | `task_status=pending_review`, `end_reason`, `total_turns` |
 | `ping` | 30 秒心跳 | 空 |
-| `error` | Stream 读取失败 | `message` |
+| `error` | Agent 模型调用或 Stream 读取失败 | `agent_name`, `error_code`, `message`, `retrying` |
 
 `dialog_turn` 是 Agent 内部协作事件，不向前端推送。
 
-## 8. 错误码
+## 9. 错误码
 
 | code | HTTP | 说明 |
 | --- | ---: | --- |
@@ -340,6 +435,10 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 | `ERR_TASK_003` | 404 | 任务不存在 |
 | `ERR_TASK_004` | 422 | 量表不存在、未发布或已失效 |
 | `ERR_TASK_005` | 503 | Worker 派发失败 |
+| `ERR_PATIENT_001` | 401 | 身份证号或手机号不匹配 |
+| `ERR_PATIENT_002` | 403 | 患者未办理入院 |
+| `ERR_PATIENT_003` | 401 | 患者登录会话无效或已过期 |
+| `ERR_PATIENT_004` | 503 | 患者登录会话保存失败 |
 | `ERR_DIALOG_001` | 404 | 会话不存在 |
 | `ERR_DIALOG_002` | 409 | 会话状态不允许或首问未就绪 |
 | `ERR_DIALOG_003` | 409 | 并发冲突或当前问题已回答 |
@@ -347,7 +446,9 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 | `ERR_SSE_001` | 404 | 会话事件流不存在 |
 | `ERR_KEYWORD_001` | 500 | 关键词规则加载失败 |
 
-## 9. 前端时序
+## 10. 前端时序
+
+医护端：
 
 ```text
 GET  /api/patients/in-hospital
@@ -355,6 +456,13 @@ GET  /api/scales
 POST /api/tasks
   ├─ 立即保存 task_id/task_no/session_id
   └─ 立即连接两个 SSE 之一
+```
+
+患者端：
+
+```text
+POST /api/patients/login
+GET  /api/patients/me/tasks
 GET  /api/sse/dialog/{session_id}
   └─ 收到 AI 首问
 POST /api/dialog/message
@@ -367,10 +475,9 @@ GET  /api/dialog/{session_id}/history
 GET  /api/extraction/{session_id}/fields
 ```
 
-## 10. Worker 启动
+## 11. Worker 启动
 
-这些任务是长驻 Stream 消费者。Windows `solo` 模式不能用一个 Worker 同时消费三个队列，
-必须分别启动：
+Celery Worker 进程常驻，Agent 不常驻。Windows `solo` 模式仍需按队列分别启动：
 
 ```powershell
 uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat -Q dialog_queue -n dialog@%h --loglevel=info
@@ -378,9 +485,15 @@ uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --co
 uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat -Q extraction_queue -n extraction@%h --loglevel=info
 ```
 
+另开一个窗口启动 Beat：
+
+```powershell
+uv run celery -A app.celery_app.celery_config:celery_app beat --loglevel=info
+```
+
 本机配置使用 `localhost` 时，应用会规范化为 `127.0.0.1`，避免 Windows IPv6 解析超时。
 
-## 11. 第一期不支持
+## 12. 第一期不支持
 
 以下原型能力没有真实后端接口，API 模式不得调用：
 

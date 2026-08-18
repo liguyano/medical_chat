@@ -29,8 +29,12 @@ def patch_common(monkeypatch, questions=None):
     """替换 Celery 任务的应用层依赖（runtime / loader）。"""
     import app.celery_app.runtime as runtime_module
     import app.managers.assessment_loader as loader_module
+    import app.utils.redis_client as redis_module
 
     order = []
+    redis = SimpleNamespace(
+        set=Mock(return_value=True),
+    )
     monkeypatch.setattr(
         runtime_module,
         "ensure_worker_runtime",
@@ -44,6 +48,7 @@ def patch_common(monkeypatch, questions=None):
         )
     )
     monkeypatch.setattr(loader_module, "AssessmentQuestionLoader", lambda: loader)
+    monkeypatch.setattr(redis_module, "get_redis", lambda: redis)
     return order, loader
 
 
@@ -77,9 +82,9 @@ def test_dialog_preheat_rejects_missing_scale_codes():
 
 
 def test_dialog_preheat_text_engine_uses_factory(monkeypatch):
-    """text 模式应委托 SDK 工厂并注入运行时依赖。"""
+    """text 模式应完成量表校验并保存预热标记。"""
     order, loader = patch_common(monkeypatch)
-    deps, agent, factory = patch_factory(monkeypatch)
+    patch_factory(monkeypatch)
 
     result = dialog_agent_preheat.run(
         "session",
@@ -94,23 +99,14 @@ def test_dialog_preheat_text_engine_uses_factory(monkeypatch):
         "question_count": 1,
     }
     assert order == ["runtime", "loader"]
-    factory.assert_called_once()
-    kwargs = factory.call_args.kwargs
-    assert kwargs["engine_type"] == "text"
-    assert kwargs["agent_name"] == "dialog_agent"
-    assert kwargs["session_id"] == "session"
-    assert kwargs["patient_info"] == {"name": "患者"}
-    assert kwargs["middlewares"] is deps["middlewares"]
-    assert kwargs["state_store"] is deps["state_store"]
-    assert kwargs["history_store"] is deps["history_store"]
-    agent.initialize.assert_awaited_once_with()
+    loader.load_questions_by_scale_codes.assert_awaited_once_with(["scale"])
     loader.load_questions_by_scale_codes.assert_awaited_once_with(["scale"])
 
 
-def test_dialog_preheat_voice_engine_uses_factory(monkeypatch):
-    """doubao 模式应委托 SDK 工厂并传递 engine_type=doubao。"""
+def test_dialog_preheat_rejects_voice_engine(monkeypatch):
+    """第一期文本闭环应拒绝语音引擎。"""
     patch_common(monkeypatch)
-    _deps, agent, factory = patch_factory(monkeypatch)
+    _deps, _agent, factory = patch_factory(monkeypatch)
 
     result = dialog_agent_preheat.run(
         "session",
@@ -118,12 +114,8 @@ def test_dialog_preheat_voice_engine_uses_factory(monkeypatch):
         {"scale_codes": ["scale"], "engine_type": "doubao"},
     )
 
-    assert result["status"] == "preheated"
-    assert result["engine_type"] == "doubao"
-    kwargs = factory.call_args.kwargs
-    assert kwargs["engine_type"] == "doubao"
-    assert kwargs["agent_name"] == "dialog_agent"
-    agent.initialize.assert_awaited_once_with()
+    assert result == {"status": "failed", "reason": "unknown_engine_type"}
+    factory.assert_not_called()
 
 
 def test_dialog_preheat_rejects_unknown_engine_type(monkeypatch):

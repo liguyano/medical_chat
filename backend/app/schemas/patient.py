@@ -8,6 +8,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.task import BackendTaskDto
+
 
 class PatientDto(BaseModel):
     """患者基本信息 DTO
@@ -47,3 +49,22 @@ class InHospitalPatientDto(BaseModel):
 
     patient: PatientDto
     encounter: PatientEncounterDto
+
+
+class PatientLoginRequest(BaseModel):
+    """患者登录请求
+    作用：使用身份证号和手机号核验患者身份。
+    """
+
+    id_card_no: str = Field(..., min_length=6, max_length=32, description="身份证号")
+    phone: str = Field(..., min_length=6, max_length=32, description="手机号")
+
+
+class PatientLoginResponse(BaseModel):
+    """患者登录响应
+    作用：返回已核验患者的当前住院记录和本人护理任务。
+    """
+
+    patient: PatientDto
+    encounter: PatientEncounterDto
+    tasks: list[BackendTaskDto] = Field(default_factory=list)

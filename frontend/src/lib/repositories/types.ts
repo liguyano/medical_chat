@@ -17,6 +17,17 @@ export interface PatientWithEncounter {
   encounter: PatientEncounter;
 }
 
+export interface PatientLoginInput {
+  idCardNo: string;
+  phone: string;
+}
+
+export interface PatientPortal {
+  patient: Patient;
+  encounter: PatientEncounter;
+  tasks: CareTask[];
+}
+
 export interface CreateTaskInput {
   patient: Patient;
   encounter: PatientEncounter;
@@ -51,6 +62,11 @@ export interface SendMessageInput {
 export interface CareRepository {
   listInHospitalPatients(signal?: AbortSignal): Promise<PatientWithEncounter[]>;
   listScales(signal?: AbortSignal): Promise<AssessmentScale[]>;
+  loginPatient(
+    input: PatientLoginInput,
+    signal?: AbortSignal
+  ): Promise<PatientPortal>;
+  listMyTasks(signal?: AbortSignal): Promise<CareTask[]>;
   createTask(input: CreateTaskInput, signal?: AbortSignal): Promise<CareTask>;
   getTask(taskId: string, signal?: AbortSignal): Promise<CareTask>;
   getDialogueSnapshot(

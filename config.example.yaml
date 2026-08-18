@@ -46,6 +46,13 @@ celery:
   task_time_limit: 1800
   task_soft_time_limit: 1500
 
+# 患者端身份登录
+security:
+  patient_identity_secret: change-this-in-production
+  patient_session_ttl_seconds: 28800
+  patient_session_cookie: medical_patient_session
+  patient_session_secure: false
+
 # 日志系统
 logging:
   level: INFO          # DEBUG | INFO | WARNING | ERROR
@@ -66,6 +73,7 @@ models:
     max_retries: 2
     temperature: 0.7
     max_tokens: 2000
+    enable_thinking: false
     enable_prompt_caching: true
     prompt_cache_ttl: "5m"
     supports_thinking: false

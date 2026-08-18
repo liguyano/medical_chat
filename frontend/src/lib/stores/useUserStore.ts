@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { User } from '@/lib/types';
 
 interface UserStore {
@@ -19,6 +19,7 @@ export const useUserStore = create<UserStore>()(
     }),
     {
       name: 'user-storage',
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 );

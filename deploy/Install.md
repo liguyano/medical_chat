@@ -35,9 +35,102 @@ postgresql://medical:medical_dev_password@localhost:15432/medical_evaluate
 
 # 2. 后端启动指南
 
-## Step1
+## Step1：启动依赖服务
 
-## ...
+在项目根目录执行：
+
+```powershell
+docker compose up -d postgres redis
+```
+
+## Step2：创建配置
+
+```powershell
+Copy-Item config.example.yaml config.yaml
+$env:DASHSCOPE_API_KEY="你的模型 API Key"
+```
+
+## Step3：安装后端依赖
+
+```powershell
+Set-Location backend
+uv sync
+```
+
+## Step4：初始化数据库
+
+```powershell
+uv run alembic upgrade head
+uv run python -m app.commands.seed_demo
+```
+
+## Step5：启动 API 服务
+
+```powershell
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+API 地址：`http://127.0.0.1:8000`
+
+健康检查：
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8000/health
+```
+
+## Step6：启动 Agent Worker
+
+分别打开三个 PowerShell 窗口，进入 `backend` 目录后执行：
+
+```powershell
+uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat -Q dialog_queue -n dialog-real@%h --loglevel=info
+```
+
+```powershell
+uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat -Q schedule_queue -n schedule-real@%h --loglevel=info
+```
+
+```powershell
+uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat -Q extraction_queue -n extraction-real@%h --loglevel=info
+```
+
+每个队列只启动一个 Worker。Worker 进程常驻，Agent 按首问或患者答案按需创建，
+单轮完成后释放。修改代码或 `config.yaml` 后必须重启 Worker。
+
+另开一个 PowerShell 窗口启动补偿扫描：
+
+```powershell
+uv run celery -A app.celery_app.celery_config:celery_app beat --loglevel=info
+```
+
+Beat 每 30 秒补派因 Worker 重启或任务丢失而未生成下一问的患者答案。
+
+## Step7：真实模型检查
+
+`config.yaml` 中三个 Agent 必须绑定测试语言模型：
+
+```yaml
+agent_models:
+  dialog_agent:
+    language: qwen3.5-flash
+  schedule_agent:
+    language: qwen3.5-flash
+  extraction_agent:
+    language: qwen3.5-flash
+```
+
+启动后日志应出现：
+
+```text
+[LLM] 创建真实语言模型客户端
+HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+```
+
+Extraction 成功日志：
+
+```text
+[Extraction Agent] 真实模型结构化响应成功
+```
 
 
 # 3. 前端启动指南
@@ -102,3 +195,41 @@ pnpm start
 
 - 医护端：`http://localhost:3000/nurse`
 - 患者端：`http://localhost:3000/patient`
+
+# 4. 前后端联调指南
+
+## Step1：演示账号
+
+医护端：
+
+| 账号 | 密码 |
+| --- | --- |
+| `N001` | `123456` |
+
+患者端不使用固定工号，使用住院登记信息登录：
+
+| 患者 | 身份证号 | 手机号 |
+| --- | --- | --- |
+| 张桂芳 | `110101194803120010` | `13800000001` |
+| 李国强 | `110101195507250026` | `13800000002` |
+| 王秀兰 | `110101194011020038` | `13800000003` |
+| 陈建军 | `110101196801180043` | `13800000004` |
+| 赵敏 | `110101198509300051` | `13800000005` |
+
+## Step2：联调流程
+
+1. 医护端登录，选择患者并发布 AI 对话任务。
+2. 患者端打开 `http://localhost:3000/patient`。
+3. 输入身份证号和手机号登录。
+4. 在“任务中心”选择本人任务并开始评估。
+5. 医护端进入任务详情或实时监控查看对话与抽取结果。
+
+患者端不输入任务编号。任务编号只用于医护端查看、后台关联和审计。
+
+未办理入院的患者登录时提示：
+
+```text
+您还未办理入院，暂不能进入患者端
+```
+
+医护端和患者端可在同一浏览器的不同标签页打开，登录状态互不覆盖。

@@ -103,16 +103,17 @@ async def test_runner_consumes_bytes_event_and_publishes_constraint(redis_client
         redis_client=client,
         publisher_factory=DialogEventPublisher,
         model=fake_llm(),
-        block_ms=1,
-        max_idle_reads=1,
     )
+    runner._load_task_id = lambda _session_id: None
     result = await runner.run(
         session_id,
         scale_codes=["test"],
+        source_message_id="patient-msg-1",
+        source_event_id="2-0",
         check_interval=1,
     )
 
-    assert result["status"] == "idle_timeout"
+    assert result["status"] == "turn_completed"
     all_messages = client.xread({stream_key: "0"})
     events = [
         decode_stream_fields(fields)
@@ -127,6 +128,7 @@ async def test_runner_consumes_bytes_event_and_publishes_constraint(redis_client
     state = client.get(state_key)
     assert state["turn_counter"] == 1
     assert state["last_event_id"]
+    assert state["processed_message_ids"] == ["patient-msg-1"]
 
 
 def test_constraint_event_round_trip_preserves_remaining_tasks(redis_client):

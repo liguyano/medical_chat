@@ -348,15 +348,20 @@ class TextChatEngine(DialogEngine):
         api_base: str,
         timeout: float = 30.0,
         *,
+        max_retries: int = 2,
+        request_options: dict[str, Any] | None = None,
         client: Any | None = None,
     ) -> None:
         self.client: Any = client or AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
             timeout=timeout,
+            max_retries=max_retries,
         )
         self.model = model
+        self.api_base = api_base
         self.timeout = timeout
+        self.request_options = dict(request_options or {})
         self.system_prompt: str | None = None
         self.tools: list[dict[str, Any]] = []
         self.messages: list[dict[str, Any]] = []
@@ -377,18 +382,50 @@ class TextChatEngine(DialogEngine):
         self.messages.append({"role": "user", "content": input_data})
 
     async def stream_response(self) -> AsyncGenerator[dict[str, Any], None]:
+        logger.info(
+            "[TextChatEngine] 调用真实模型: model=%s, api_base=%s, messages=%s, tools=%s, "
+            "request_options=%s",
+            self.model,
+            self.api_base,
+            len(self.messages),
+            len(self.tools),
+            {
+                key: value
+                for key, value in self.request_options.items()
+                if key != "extra_body"
+            }
+            | (
+                {
+                    "extra_body": {
+                        key: value
+                        for key, value in (self.request_options.get("extra_body") or {}).items()
+                        if key != "api_key"
+                    }
+                }
+                if self.request_options.get("extra_body") is not None
+                else {}
+            ),
+        )
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=self.messages,
-                tools=self.tools or None,
-                stream=True,
-                temperature=0.7,
-            )
+            request = {
+                "model": self.model,
+                "messages": self.messages,
+                "tools": self.tools or None,
+                "stream": True,
+            }
+            request.update(self.request_options)
+            response = await self.client.chat.completions.create(**request)
             full_text = ""
             pending_calls: dict[int, dict[str, Any]] = {}
+            chunk_count = 0
             async for chunk in response:
-                delta = chunk.choices[0].delta
+                chunk_count += 1
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0], "delta", None)
+                if delta is None:
+                    continue
                 if delta.content:
                     full_text += delta.content
                     yield {"type": "text", "content": delta.content}
@@ -442,9 +479,22 @@ class TextChatEngine(DialogEngine):
                 assistant_message["tool_calls"] = assistant_calls
             if full_text or pending_calls:
                 self.messages.append(assistant_message)
+            logger.info(
+                "[TextChatEngine] 真实模型响应成功: model=%s, chunks=%s, text_length=%s, "
+                "tool_calls=%s",
+                self.model,
+                chunk_count,
+                len(full_text),
+                len(pending_calls),
+            )
             yield {"type": "response_done"}
-        except Exception:
-            logger.exception("[TextChatEngine] 流式响应失败")
+        except Exception as exc:
+            logger.exception(
+                "[TextChatEngine] 真实模型调用失败: model=%s, api_base=%s, error=%s",
+                self.model,
+                self.api_base,
+                type(exc).__name__,
+            )
             yield {"type": "error", "message": "文本模型调用失败"}
 
     async def send_tool_result(self, call_id: str, result: Any) -> bool:

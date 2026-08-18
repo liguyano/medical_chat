@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { mockTasks } from '@/lib/mock/data';
 import type {
   AssessmentReview,
@@ -174,6 +174,7 @@ export const useTaskStore = create<TaskStore>()(
     }),
     {
       name: 'medical-evaluate-task-storage',
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 );

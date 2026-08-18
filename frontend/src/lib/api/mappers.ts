@@ -7,6 +7,7 @@ import type {
   DialogMessageDto,
   ExtractedFieldDto,
   InHospitalPatientDto,
+  PatientLoginResponse,
 } from '@/lib/api/contracts';
 import type {
   AssessmentScale,
@@ -92,7 +93,10 @@ export function mapTaskDto(dto: BackendTaskDto): CareTask {
     bedNo: dto.bed_no ?? '待分配',
     department: dto.department,
     wardName: dto.ward_name,
-    taskType: dto.task_type ?? '入院评估任务包',
+    taskType:
+      dto.task_type === 'assessment'
+        ? '入院评估任务包'
+        : dto.task_type ?? '入院评估任务包',
     collectionMode: toCollectionMode(dto.collection_mode),
     taskStatus: dto.task_status,
     assignedNurseId: id(dto.assigned_nurse_id ?? dto.nurse_id),
@@ -236,6 +240,21 @@ export function mapInHospitalPatient(dto: InHospitalPatientDto): {
           ? 'in_hospital'
           : 'discharged',
     },
+  };
+}
+
+export function mapPatientPortal(response: PatientLoginResponse): {
+  patient: Patient;
+  encounter: PatientEncounter;
+  tasks: CareTask[];
+} {
+  const record = mapInHospitalPatient({
+    patient: response.patient,
+    encounter: response.encounter,
+  });
+  return {
+    ...record,
+    tasks: response.tasks.map(mapTaskDto),
   };
 }
 

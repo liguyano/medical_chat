@@ -27,6 +27,12 @@ class ErrorCode(str, Enum):
     ERR_TASK_004 = "ERR_TASK_004"  # 量表不存在或不可用
     ERR_TASK_005 = "ERR_TASK_005"  # 后台任务派发失败
 
+    # 患者身份域
+    ERR_PATIENT_001 = "ERR_PATIENT_001"  # 身份信息不匹配
+    ERR_PATIENT_002 = "ERR_PATIENT_002"  # 未办理入院
+    ERR_PATIENT_003 = "ERR_PATIENT_003"  # 患者登录会话无效
+    ERR_PATIENT_004 = "ERR_PATIENT_004"  # 患者登录会话保存失败
+
     # 对话域
     ERR_DIALOG_001 = "ERR_DIALOG_001"  # 会话不存在
     ERR_DIALOG_002 = "ERR_DIALOG_002"  # 会话状态不允许当前操作
@@ -52,6 +58,10 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ERR_TASK_003: "评估任务不存在",
     ErrorCode.ERR_TASK_004: "量表不存在、未发布或已失效",
     ErrorCode.ERR_TASK_005: "后台任务派发失败",
+    ErrorCode.ERR_PATIENT_001: "身份证号或手机号不匹配",
+    ErrorCode.ERR_PATIENT_002: "您还未办理入院，暂不能进入患者端",
+    ErrorCode.ERR_PATIENT_003: "患者登录已失效，请重新登录",
+    ErrorCode.ERR_PATIENT_004: "患者登录服务暂不可用",
     ErrorCode.ERR_DIALOG_001: "交互会话不存在",
     ErrorCode.ERR_DIALOG_002: "会话当前状态不允许该操作",
     ErrorCode.ERR_DIALOG_003: "会话正在处理其他消息，请稍后重试",
@@ -72,6 +82,10 @@ ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ERR_TASK_003: 404,
     ErrorCode.ERR_TASK_004: 422,
     ErrorCode.ERR_TASK_005: 503,
+    ErrorCode.ERR_PATIENT_001: 401,
+    ErrorCode.ERR_PATIENT_002: 403,
+    ErrorCode.ERR_PATIENT_003: 401,
+    ErrorCode.ERR_PATIENT_004: 503,
     ErrorCode.ERR_DIALOG_001: 404,
     ErrorCode.ERR_DIALOG_002: 409,
     ErrorCode.ERR_DIALOG_003: 409,

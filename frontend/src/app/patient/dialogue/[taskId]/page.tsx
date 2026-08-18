@@ -11,6 +11,7 @@ import { Card } from '@/components/shared/Card';
 import { Progress } from '@/components/shared/Progress';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
+import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
@@ -279,14 +280,14 @@ export default function PatientDialoguePage() {
         });
       })
       .catch((loadError) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || isRequestCancelled(loadError)) return;
         setConnectionError(
           loadError instanceof Error
             ? `会话加载失败：${loadError.message}`
             : '会话加载失败'
         );
       });
-    return () => controller.abort();
+    return () => abortRequest(controller);
   }, [session, setSession, task, taskId, updateTask]);
 
   const streamPath = session?.id

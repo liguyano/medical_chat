@@ -5,6 +5,7 @@ import type {
   DialogHistoryResponse,
   ExtractedFieldsResponse,
   InHospitalPatientDto,
+  PatientLoginResponse,
 } from '@/lib/api/contracts';
 import { apiRequest } from '@/lib/api/httpClient';
 import {
@@ -13,12 +14,14 @@ import {
   mapDialogHistory,
   mapExtractedField,
   mapInHospitalPatient,
+  mapPatientPortal,
   mapTaskDto,
 } from '@/lib/api/mappers';
 import type { AssessmentScale, CareTask } from '@/lib/types';
 import type {
   CareRepository,
   CreateTaskInput,
+  PatientLoginInput,
   PatientWithEncounter,
 } from '@/lib/repositories/types';
 
@@ -78,6 +81,29 @@ export class ApiCareRepository implements CareRepository {
       signal,
     });
     return response.map(mapAssessmentScale);
+  }
+
+  async loginPatient(input: PatientLoginInput, signal?: AbortSignal) {
+    const response = await apiRequest<PatientLoginResponse>(
+      '/api/patients/login',
+      {
+        method: 'POST',
+        body: {
+          id_card_no: input.idCardNo,
+          phone: input.phone,
+        },
+        signal,
+      }
+    );
+    return mapPatientPortal(response);
+  }
+
+  async listMyTasks(signal?: AbortSignal) {
+    const response = await apiRequest<BackendTaskDto[]>(
+      '/api/patients/me/tasks',
+      { signal }
+    );
+    return response.map(mapTaskDto);
   }
 
   async createTask(input: CreateTaskInput, signal?: AbortSignal) {

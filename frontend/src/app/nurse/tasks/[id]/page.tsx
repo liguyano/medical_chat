@@ -10,6 +10,7 @@ import { Progress } from '@/components/shared/Progress';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { getTaskById } from '@/lib/mock/data';
+import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import type { CareTask } from '@/lib/types';
@@ -52,12 +53,12 @@ export default function TaskDetailPage() {
         setTaskLoadError('');
       })
       .catch((loadError) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || isRequestCancelled(loadError)) return;
         setTaskLoadError(
           loadError instanceof Error ? loadError.message : '任务加载失败'
         );
       });
-    return () => controller.abort();
+    return () => abortRequest(controller);
   }, [addTask, id, storedTask]);
 
   if (!task) {

@@ -3,7 +3,7 @@
       供 SDK 工厂使用；封装 Redis 约束源和事件接收器。
 说明：
   - get_runtime_dependencies() 返回依赖字典，传递给 create_dialog_agent()；
-  - build_dialog_agent() 保留向后兼容（已弃用，直接使用 create_dialog_agent + get_runtime_dependencies）。
+  - Dialog Agent 实例统一由 medagent 工厂创建。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from medagent.agents.middlewares import (
+    EventPublishMiddleware,
     KeywordInterceptMiddleware,
     ScheduleConstraintMiddleware,
     TimeoutMiddleware,
@@ -20,8 +21,9 @@ from medagent.agents.service_agent.dialog_agent.tools import execute_tool
 from app.managers.agent_state_manager import AsyncAgentStateManager
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.managers.session_timeout_manager import SessionTimeoutManager
-from app.schemas.events import EventType
+from app.schemas.events import DialogTurnEvent, EventType, ToolCallEvent
 from app.utils.redis_client import RedisClient
+from app.workers.event_publisher import DialogEventPublisher
 
 
 def _decode(value: Any) -> Any:
@@ -66,6 +68,47 @@ class RedisConstraintSource:
         return constraints
 
 
+class AppDialogEventSink:
+    """将 SDK 轮次事件转换为 App 事件并写入统一 Stream。"""
+
+    def __init__(
+        self,
+        session_id: str,
+        publisher: DialogEventPublisher | None = None,
+    ) -> None:
+        self.publisher = publisher or DialogEventPublisher(session_id)
+
+    def __call__(self, event: dict[str, Any]) -> None:
+        """接收 SDK 事件并发布结构化事件。"""
+        event_type = str(event.get("event_type") or "")
+        session_id = str(event.get("session_id") or self.publisher.session_id or "")
+        if event_type == EventType.DIALOG_TURN.value:
+            self.publisher.publish(
+                DialogTurnEvent(
+                    session_id=session_id,
+                    task_id=event.get("task_id"),
+                    message_id=event.get("message_id"),
+                    turn_number=int(event.get("turn_number") or 0),
+                    question=str(event.get("question") or ""),
+                    answer=str(event.get("answer") or ""),
+                    tool_calls=event.get("tool_calls"),
+                    metadata=event.get("metadata"),
+                )
+            )
+        elif event_type == EventType.TOOL_CALL.value:
+            self.publisher.publish(
+                ToolCallEvent(
+                    session_id=session_id,
+                    task_id=event.get("task_id"),
+                    message_id=event.get("message_id"),
+                    turn_number=int(event.get("turn_number") or 0),
+                    tool_name=str(event.get("tool_name") or ""),
+                    tool_args=dict(event.get("tool_args") or {}),
+                    tool_result=event.get("tool_result"),
+                )
+            )
+
+
 def get_runtime_dependencies(session_id: str) -> dict[str, Any]:
     """组装 Dialog Agent 运行时依赖（App 层注入）
     作用：返回 middlewares / state_store / history_store / tool_executor，
@@ -79,11 +122,16 @@ def get_runtime_dependencies(session_id: str) -> dict[str, Any]:
 
     redis_client = get_redis()
     timeout_manager = SessionTimeoutManager()
+    event_sink = AppDialogEventSink(
+        session_id,
+        DialogEventPublisher(session_id, redis_client),
+    )
 
     return {
         "middlewares": [
             KeywordInterceptMiddleware(),
             ScheduleConstraintMiddleware(RedisConstraintSource(redis_client)),
+            EventPublishMiddleware(session_id, event_sink),
             TimeoutMiddleware(timeout_manager.update_activity),
         ],
         "state_store": AsyncAgentStateManager(),
