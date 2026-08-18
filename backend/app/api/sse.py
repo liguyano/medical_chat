@@ -13,10 +13,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.dependencies import require_patient, require_staff
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.models.base import get_db
 from app.models.interaction import InteractionSession
+from app.models.patient_task import Patient, PatientEncounter
+from app.models.staff_account import StaffAccount
 from app.services.sse_service import HEARTBEAT_INTERVAL, stream_dialog_events
 
 logger = logging.getLogger(__name__)
@@ -40,11 +43,31 @@ def _ensure_session_exists(db: Session, session_no: str) -> None:
         raise AppError(ErrorCode.ERR_SSE_001)
 
 
+def _ensure_session_patient(
+    db: Session,
+    session_no: str,
+    patient_id: int,
+) -> None:
+    """校验患者只能订阅本人会话。"""
+    session_patient_id = db.scalar(
+        select(InteractionSession.patient_id).where(
+            InteractionSession.session_no == session_no,
+            InteractionSession.deleted == 0,
+        )
+    )
+    if session_patient_id != patient_id:
+        raise AppError(ErrorCode.ERR_SSE_001)
+
+
 @router.get("/dialog/{session_no}", summary="患者端订阅对话事件流")
 async def subscribe_dialog(
     session_no: str,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    patient_context: Annotated[
+        tuple[Patient, PatientEncounter],
+        Depends(require_patient),
+    ],
     last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
     last_event_id: str | None = Query(default=None),
 ) -> EventSourceResponse:
@@ -59,6 +82,8 @@ async def subscribe_dialog(
         - EventSourceResponse: SSE 事件流
     """
     _ensure_session_exists(db, session_no)
+    patient, _ = patient_context
+    _ensure_session_patient(db, session_no, patient.id)
     resume_from = last_event_id_header or last_event_id
     logger.info(f"患者端订阅 SSE: session_no={session_no} last_event_id={resume_from}")
     return EventSourceResponse(
@@ -72,6 +97,7 @@ async def monitor_dialog(
     session_no: str,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[StaffAccount, Depends(require_staff)],
     last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
     last_event_id: str | None = Query(default=None),
 ) -> EventSourceResponse:

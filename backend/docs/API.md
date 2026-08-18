@@ -4,7 +4,7 @@
 
 更新日期：`2026-08-18`
 
-范围：在院患者、已发布量表、AI 对话任务、患者文本回答、字段抽取、患者/护士 SSE。
+范围：医护账号、在院患者、已发布量表、AI 对话任务、患者文本回答、字段抽取、患者/护士 SSE。
 
 ## 1. 通用约定
 
@@ -37,7 +37,56 @@ GET /health
 {"status":"ok"}
 ```
 
-## 2. 在院患者
+## 2. 医护端身份登录
+
+医护端使用工号和密码登录。演示数据由 `uv run python -m app.commands.seed_demo`
+写入 5 个账号，密码均为 `123456`：
+
+| 工号 | 姓名 | 科室 |
+| --- | --- | --- |
+| `N001` | 李护士 | 心内科 |
+| `N002` | 王护士 | 老年医学科 |
+| `N003` | 赵护士 | 消化内科 |
+| `N004` | 陈护士 | 呼吸与危重症医学科 |
+| `N005` | 刘护士 | 骨科 |
+
+### 2.1 医护登录
+
+```http
+POST /api/auth/staff/login
+Content-Type: application/json
+```
+
+```json
+{
+  "staff_no": "N001",
+  "password": "123456"
+}
+```
+
+成功后服务端写入 HttpOnly Cookie：`medical_staff_session`。账号响应只返回
+工号、姓名、角色和科室，不返回密码哈希。
+
+### 2.2 获取当前医护账号
+
+```http
+GET /api/auth/staff/me
+```
+
+### 2.3 医护退出登录
+
+```http
+POST /api/auth/staff/logout
+```
+
+错误：
+
+- `ERR_STAFF_001`：工号或密码错误；
+- `ERR_STAFF_002`：医护登录已失效，请重新登录；
+- `ERR_STAFF_003`：医护账号不存在或已停用；
+- `ERR_STAFF_004`：医护登录服务暂不可用。
+
+## 3. 在院患者
 
 ```http
 GET /api/patients/in-hospital
@@ -73,7 +122,7 @@ GET /api/patients/in-hospital
 ]
 ```
 
-## 3. 已发布量表
+## 4. 已发布量表
 
 ```http
 GET /api/scales
@@ -97,12 +146,12 @@ GET /api/scales
 
 只返回当前生效、`publish_status=已发布` 的版本；`question_count` 排除衍生题。
 
-## 4. 患者端身份登录
+## 5. 患者端身份登录
 
 患者端不使用任务编号登录。患者使用身份证号和手机号核验身份；只有存在
 `encounter_status=在院` 住院记录时，登录才会成功。
 
-### 4.1 患者登录
+### 5.1 患者登录
 
 ```http
 POST /api/patients/login
@@ -145,7 +194,7 @@ Content-Type: application/json
 }
 ```
 
-### 4.2 获取当前患者任务
+### 5.2 获取当前患者任务
 
 ```http
 GET /api/patients/me/tasks
@@ -153,7 +202,7 @@ GET /api/patients/me/tasks
 
 返回当前登录患者当前住院记录下的任务列表。
 
-### 4.3 获取当前患者信息
+### 5.3 获取当前患者信息
 
 ```http
 GET /api/patients/me
@@ -161,7 +210,7 @@ GET /api/patients/me
 
 返回当前患者、当前住院记录和任务列表。
 
-### 4.4 患者退出登录
+### 5.4 患者退出登录
 
 ```http
 POST /api/patients/logout
@@ -173,9 +222,9 @@ POST /api/patients/logout
 - `ERR_PATIENT_002`：您还未办理入院，暂不能进入患者端；
 - `ERR_PATIENT_003`：患者登录已失效，请重新登录。
 
-## 5. 任务
+## 6. 任务
 
-### 5.1 创建并启动 AI 对话任务
+### 6.1 创建并启动 AI 对话任务
 
 ```http
 POST /api/tasks
@@ -265,7 +314,7 @@ Celery Worker 进程常驻，但 Agent 实例按轮创建，单轮完成后释�
 
 AI 首问可能在 REST 响应前后立即产生。SSE 首次连接默认从 Stream 起点回放，不会漏掉首问。
 
-### 5.2 获取任务详情
+### 6.2 获取任务详情
 
 ```http
 GET /api/tasks/{task_ref}
@@ -273,9 +322,9 @@ GET /api/tasks/{task_ref}
 
 `task_ref` 可传数据库主键或 `TASK-*` 业务编号。响应 `data` 为上面的 `task` 对象。
 
-## 6. 对话
+## 7. 对话
 
-### 6.1 发送患者答案
+### 7.1 发送患者答案
 
 ```http
 POST /api/dialog/message
@@ -308,7 +357,7 @@ Content-Type: application/json
 }
 ```
 
-### 6.2 对话历史
+### 7.2 对话历史
 
 ```http
 GET /api/dialog/{session_no}/history?limit=100&offset=0
@@ -339,7 +388,7 @@ GET /api/dialog/{session_no}/history?limit=100&offset=0
 }
 ```
 
-## 7. 字段抽取
+## 8. 字段抽取
 
 ```http
 GET /api/extraction/{session_no}/fields
@@ -370,7 +419,7 @@ GET /api/extraction/{session_no}/fields
 
 多量表任务会分别写入各自 `assessment_instance / assessment_submission`。
 
-## 8. SSE
+## 9. SSE
 
 患者端：
 
@@ -422,7 +471,7 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 
 `dialog_turn` 是 Agent 内部协作事件，不向前端推送。
 
-## 9. 错误码
+## 10. 错误码
 
 | code | HTTP | 说明 |
 | --- | ---: | --- |
@@ -439,6 +488,10 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 | `ERR_PATIENT_002` | 403 | 患者未办理入院 |
 | `ERR_PATIENT_003` | 401 | 患者登录会话无效或已过期 |
 | `ERR_PATIENT_004` | 503 | 患者登录会话保存失败 |
+| `ERR_STAFF_001` | 401 | 工号或密码错误 |
+| `ERR_STAFF_002` | 401 | 医护登录会话无效或已过期 |
+| `ERR_STAFF_003` | 422 | 医护账号不存在或已停用 |
+| `ERR_STAFF_004` | 503 | 医护登录会话保存失败 |
 | `ERR_DIALOG_001` | 404 | 会话不存在 |
 | `ERR_DIALOG_002` | 409 | 会话状态不允许或首问未就绪 |
 | `ERR_DIALOG_003` | 409 | 并发冲突或当前问题已回答 |
@@ -446,11 +499,12 @@ data: {"event_id":"1786980944065-0","event_type":"assistant_text_delta","task_id
 | `ERR_SSE_001` | 404 | 会话事件流不存在 |
 | `ERR_KEYWORD_001` | 500 | 关键词规则加载失败 |
 
-## 10. 前端时序
+## 11. 前端时序
 
 医护端：
 
 ```text
+POST /api/auth/staff/login
 GET  /api/patients/in-hospital
 GET  /api/scales
 POST /api/tasks
@@ -475,7 +529,7 @@ GET  /api/dialog/{session_id}/history
 GET  /api/extraction/{session_id}/fields
 ```
 
-## 11. Worker 启动
+## 12. Worker 启动
 
 Celery Worker 进程常驻，Agent 不常驻。Windows `solo` 模式仍需按队列分别启动：
 
@@ -493,7 +547,7 @@ uv run celery -A app.celery_app.celery_config:celery_app beat --loglevel=info
 
 本机配置使用 `localhost` 时，应用会规范化为 `127.0.0.1`，避免 Windows IPv6 解析超时。
 
-## 12. 第一期不支持
+## 13. 第一期不支持
 
 以下原型能力没有真实后端接口，API 模式不得调用：
 

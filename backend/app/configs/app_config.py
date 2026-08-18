@@ -101,13 +101,16 @@ class CeleryConfig(BaseModel):
 
 class SecurityConfig(BaseModel):
     """安全配置
-    作用：保存患者身份校验与患者端登录会话的开发期配置。
+    作用：保存患者身份校验、患者端和医护端登录会话的开发期配置。
     """
 
     patient_identity_secret: str = "medical-evaluate-development-identity-secret"
     patient_session_ttl_seconds: int = 28800
     patient_session_cookie: str = "medical_patient_session"
     patient_session_secure: bool = False
+    staff_session_ttl_seconds: int = 28800
+    staff_session_cookie: str = "medical_staff_session"
+    staff_session_secure: bool = False
 
 
 class LoggingConfig(BaseModel):

@@ -87,11 +87,18 @@ def _publish_constraint(
     )
 
 
-async def send_message(db: Session, req: SendMessageRequest) -> SendMessageResponse:
+async def send_message(
+    db: Session,
+    req: SendMessageRequest,
+    *,
+    patient_id: int | None = None,
+) -> SendMessageResponse:
     """保存并发布患者答案。"""
     from app.utils.redis_client import get_redis
 
     session = _load_active_session(db, req.session_id)
+    if patient_id is not None and session.patient_id != patient_id:
+        raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权访问该会话")
     task = db.get(CareTask, session.task_id)
     if task is None or not _task_matches(task, req.task_id):
         raise AppError(ErrorCode.ERR_DIALOG_004, "task_id 与会话不匹配")
@@ -191,6 +198,8 @@ async def get_history(
     session_no: str,
     limit: int = 100,
     offset: int = 0,
+    *,
+    patient_id: int | None = None,
 ) -> DialogHistoryResponse:
     """分页查询会话历史与评估进度。"""
     session = db.scalar(
@@ -201,6 +210,8 @@ async def get_history(
     )
     if session is None:
         raise AppError(ErrorCode.ERR_DIALOG_001)
+    if patient_id is not None and session.patient_id != patient_id:
+        raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权访问该会话")
     task = db.get(CareTask, session.task_id)
     if task is None:
         raise AppError(ErrorCode.ERR_DIALOG_004)

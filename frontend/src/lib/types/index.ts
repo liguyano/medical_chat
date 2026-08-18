@@ -12,6 +12,7 @@ export interface User {
   name: string;
   department?: string;
   avatar?: string;
+  username?: string;
 }
 
 // 患者信息

@@ -38,12 +38,15 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `docs/后端详细设计方案.md` 的表结构章节仅保留指针，不再作为数据库依据。
 - 智能体运行态存 Redis（TTL），不映射为独立 `agent_states` 表。
 
-当前需求1批次 A ORM 已落地 22 张表，按领域分组：
+当前 ORM 已落地 27 张表，按领域分组：
+- `app/models/staff_account.py` — 医护端登录账号 `staff_account`
 - `app/models/patient_task.py` — `patient` / `patient_encounter` / `care_task`
 - `app/models/assessment_template.py` — 量表配置 7 表
 - `app/models/interaction.py` — AI 对话 6 表
 - `app/models/assessment_execution.py` — 评估执行 6 表
+- `app/models/quality_review.py` — AI 整体质量评价 4 表
 - Alembic 初始迁移：`26533d4669bd_initial_domain_model_batch_a.py`
+- 当前迁移头：`20260818_staff_accounts.py`
 
 
 ## 项目架构
@@ -196,6 +199,13 @@ from medagent.configs.agent_config import get_agent_config
 - 身份证号以加密形式保存，API 不返回身份证号或密文。
 - 患者登录会话保存在 Redis，并通过 HttpOnly Cookie 识别当前患者。
 - 任务编号只用于任务审计与定位，不作为患者登录凭据。
+
+## 医护端身份边界
+
+- 医护账号保存在 `staff_account`，密码只保存 bcrypt 哈希，不保存明文。
+- 医护登录会话保存在 Redis，并通过独立 HttpOnly Cookie `medical_staff_session` 识别。
+- 医护端 API 模式必须先调用 `/api/auth/staff/login`；患者 Cookie 不得替代医护会话。
+- `seed_demo` 幂等写入多组开发演示医护账号，生产环境不得沿用演示密码。
 
 ## 护士 AI 质量评价边界
 

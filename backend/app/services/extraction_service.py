@@ -23,7 +23,12 @@ from app.schemas.extraction import ExtractedFieldDto, ExtractedFieldsResponse
 logger = logging.getLogger(__name__)
 
 
-def get_extracted_fields(db: Session, session_no: str) -> ExtractedFieldsResponse:
+def get_extracted_fields(
+    db: Session,
+    session_no: str,
+    *,
+    patient_id: int | None = None,
+) -> ExtractedFieldsResponse:
     """获取会话抽取字段
     作用：查询指定会话的 AI 抽取结果（submission_type="ai_extraction"），
           返回字段列表供前端展示。
@@ -42,6 +47,8 @@ def get_extracted_fields(db: Session, session_no: str) -> ExtractedFieldsRespons
     ).scalar_one_or_none()
     if session is None:
         raise AppError(ErrorCode.ERR_DIALOG_001)
+    if patient_id is not None and session.patient_id != patient_id:
+        raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权访问该会话")
 
     # 2) 查询该会话的 AI 抽取提交记录
     submissions = list(

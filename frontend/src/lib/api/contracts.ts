@@ -53,6 +53,18 @@ export interface PatientLoginResponse {
   tasks: BackendTaskDto[];
 }
 
+export interface StaffDto {
+  id: ApiId;
+  staff_no: string;
+  staff_name: string;
+  role_code: string;
+  department_name?: string;
+}
+
+export interface StaffLoginResponse {
+  staff: StaffDto;
+}
+
 export interface AssessmentScaleDto {
   id: ApiId;
   scale_code: string;

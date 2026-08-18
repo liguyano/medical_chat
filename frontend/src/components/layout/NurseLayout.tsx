@@ -1,10 +1,13 @@
 'use client';
 
-import { ReactNode, useEffect, useSyncExternalStore } from 'react';
+import { ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUserStore } from '@/lib/stores/useUserStore';
+import { careRepository } from '@/lib/repositories';
+import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
+import { runtimeConfig } from '@/lib/runtime/config';
 import {
   HomeIcon,
   ClipboardDocumentListIcon,
@@ -33,7 +36,10 @@ const subscribeToHydration = () => () => undefined;
 export default function NurseLayout({ children }: NurseLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, logout, isAuthenticated } = useUserStore();
+  const { user, login, logout, isAuthenticated } = useUserStore();
+  const [sessionChecked, setSessionChecked] = useState(
+    runtimeConfig.dataMode !== 'api'
+  );
   const hydrated = useSyncExternalStore(
     subscribeToHydration,
     () => true,
@@ -41,17 +47,33 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
   );
 
   useEffect(() => {
-    if (hydrated && !isAuthenticated) {
+    if (!hydrated || runtimeConfig.dataMode !== 'api') return;
+    const controller = new AbortController();
+    void careRepository
+      .getCurrentStaff(controller.signal)
+      .then((currentUser) => login(currentUser))
+      .catch((error) => {
+        if (!isRequestCancelled(error)) logout();
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSessionChecked(true);
+      });
+    return () => abortRequest(controller);
+  }, [hydrated, login, logout]);
+
+  useEffect(() => {
+    if (hydrated && sessionChecked && !isAuthenticated) {
       router.replace('/nurse/login');
     }
-  }, [hydrated, isAuthenticated, router]);
+  }, [hydrated, isAuthenticated, router, sessionChecked]);
 
   const handleLogout = () => {
+    void careRepository.logoutStaff().catch(() => undefined);
     logout();
     router.push('/nurse/login');
   };
 
-  if (!hydrated || !isAuthenticated) {
+  if (!hydrated || !sessionChecked || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-sm text-foreground-muted">正在验证医护身份...</p>

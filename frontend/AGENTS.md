@@ -24,6 +24,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - `src/lib/runtime/config.ts` 统一读取 `NEXT_PUBLIC_DATA_MODE`、API 地址和请求超时；默认必须保持 `mock`，确保后端未启动时原型仍可演示。
 - 页面不得直接调用后端传输 API。普通命令统一通过 `src/lib/repositories`，其中 `MockCareRepository` 与 `ApiCareRepository` 实现相同接口。
+- 医护登录同样通过 `CareRepository`：Mock 模式校验本地演示账号，API 模式调用
+  `/api/auth/staff/login` 并使用独立 HttpOnly Cookie；退出时同步调用后端清理会话。
 - `src/lib/api` 保存后端 DTO、HTTP Client 和领域模型映射。后端数字 ID 必须在映射边界转换为字符串。
 - 患者和护士的文本、任务状态、字段抽取、宣教与人工介入事件通过 `src/lib/transports/sseClient.ts` 接收，并由 `applyRealtimeEvent.ts` 幂等写入 Zustand Store。
 - 患者实时语音仅通过 `src/lib/transports/voiceSocket.ts` 连接后端 WebSocket；浏览器音频必须量化为 16kHz 单声道 PCM16，不得直接发送 Float32 底层字节。

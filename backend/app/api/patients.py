@@ -9,8 +9,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_staff
 from app.configs.app_config import get_app_config
 from app.models.base import get_db
+from app.models.staff_account import StaffAccount
 from app.schemas.patient import (
     InHospitalPatientDto,
     PatientLoginRequest,
@@ -30,6 +32,7 @@ router = APIRouter(prefix="/api/patients", tags=["patients"])
 )
 def list_in_hospital_patients(
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[StaffAccount, Depends(require_staff)],
 ) -> dict:
     """查询在院患者列表
     作用：返回 encounter_status="在院" 的患者及其住院记录。

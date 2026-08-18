@@ -12,8 +12,8 @@ from alembic import command
 DEFAULT_DATABASE_URL = (
     "postgresql://medical:medical_dev_password@localhost:15432/medical_evaluate"
 )
-EXPECTED_REVISION = "20260818_quality_review"
-EXPECTED_TABLE_COUNT = 26
+EXPECTED_REVISION = "20260818_staff_accounts"
+EXPECTED_TABLE_COUNT = 27
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 

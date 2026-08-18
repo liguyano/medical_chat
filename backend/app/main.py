@@ -75,7 +75,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # 配置 CORS：批次 A 不做鉴权，开发期放开跨域
+    # 配置 CORS：患者与医护使用独立 HttpOnly Cookie，开发期允许本地前端携带凭据
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -91,8 +91,9 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # 注册业务路由
-    from app.api import dialog, extraction, patients, quality, scales, sse, tasks
+    from app.api import auth, dialog, extraction, patients, quality, scales, sse, tasks
 
+    app.include_router(auth.router)
     app.include_router(tasks.router)
     app.include_router(dialog.router)
     app.include_router(sse.router)

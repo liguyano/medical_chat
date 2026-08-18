@@ -25,6 +25,7 @@ from app.models.assessment_template import (
 )
 from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
+from app.models.staff_account import StaffAccount
 from app.schemas.task import BackendTaskDto, CreateTaskRequest, CreateTaskResponse
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,17 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
     )
     if encounter is None or encounter.patient_id != patient.id:
         raise AppError(ErrorCode.ERR_TASK_002)
+
+    if req.assigned_nurse_id is not None:
+        assigned_staff = db.scalar(
+            select(StaffAccount.id).where(
+                StaffAccount.id == req.assigned_nurse_id,
+                StaffAccount.deleted == 0,
+                StaffAccount.account_status == "启用",
+            )
+        )
+        if assigned_staff is None:
+            raise AppError(ErrorCode.ERR_STAFF_003)
 
     selected_versions = _load_selected_versions(db, req.scale_ids)
     now = datetime.now(UTC)

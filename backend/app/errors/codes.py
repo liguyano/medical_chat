@@ -33,6 +33,12 @@ class ErrorCode(str, Enum):
     ERR_PATIENT_003 = "ERR_PATIENT_003"  # 患者登录会话无效
     ERR_PATIENT_004 = "ERR_PATIENT_004"  # 患者登录会话保存失败
 
+    # 医护身份域
+    ERR_STAFF_001 = "ERR_STAFF_001"  # 工号或密码错误
+    ERR_STAFF_002 = "ERR_STAFF_002"  # 医护登录会话无效
+    ERR_STAFF_003 = "ERR_STAFF_003"  # 医护账号不存在或已停用
+    ERR_STAFF_004 = "ERR_STAFF_004"  # 医护登录会话保存失败
+
     # 对话域
     ERR_DIALOG_001 = "ERR_DIALOG_001"  # 会话不存在
     ERR_DIALOG_002 = "ERR_DIALOG_002"  # 会话状态不允许当前操作
@@ -69,6 +75,10 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ERR_PATIENT_002: "您还未办理入院，暂不能进入患者端",
     ErrorCode.ERR_PATIENT_003: "患者登录已失效，请重新登录",
     ErrorCode.ERR_PATIENT_004: "患者登录服务暂不可用",
+    ErrorCode.ERR_STAFF_001: "工号或密码错误",
+    ErrorCode.ERR_STAFF_002: "医护登录已失效，请重新登录",
+    ErrorCode.ERR_STAFF_003: "医护账号不存在或已停用",
+    ErrorCode.ERR_STAFF_004: "医护登录服务暂不可用",
     ErrorCode.ERR_DIALOG_001: "交互会话不存在",
     ErrorCode.ERR_DIALOG_002: "会话当前状态不允许该操作",
     ErrorCode.ERR_DIALOG_003: "会话正在处理其他消息，请稍后重试",
@@ -98,6 +108,10 @@ ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ERR_PATIENT_002: 403,
     ErrorCode.ERR_PATIENT_003: 401,
     ErrorCode.ERR_PATIENT_004: 503,
+    ErrorCode.ERR_STAFF_001: 401,
+    ErrorCode.ERR_STAFF_002: 401,
+    ErrorCode.ERR_STAFF_003: 422,
+    ErrorCode.ERR_STAFF_004: 503,
     ErrorCode.ERR_DIALOG_001: 404,
     ErrorCode.ERR_DIALOG_002: 409,
     ErrorCode.ERR_DIALOG_003: 409,

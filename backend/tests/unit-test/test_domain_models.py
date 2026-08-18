@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "quality_review_dimension",
     "quality_review",
     "quality_review_score",
+    "staff_account",
 }
 
 OBSOLETE_TABLES = {
@@ -47,7 +48,7 @@ OBSOLETE_TABLES = {
 
 
 def test_quality_review_registers_all_domain_tables():
-    """批次 A 加质量评价域应准确注册 26 张领域表。"""
+    """批次 A 加质量评价与医护账号域应准确注册 27 张领域表。"""
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert OBSOLETE_TABLES.isdisjoint(Base.metadata.tables)
 

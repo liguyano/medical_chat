@@ -10,6 +10,7 @@ import type {
   PrototypeAnswerValue,
   StructuredAnswer,
   AssessmentReview,
+  User,
 } from '@/lib/types';
 
 export interface PatientWithEncounter {
@@ -20,6 +21,11 @@ export interface PatientWithEncounter {
 export interface PatientLoginInput {
   idCardNo: string;
   phone: string;
+}
+
+export interface StaffLoginInput {
+  staffNo: string;
+  password: string;
 }
 
 export interface PatientPortal {
@@ -66,6 +72,9 @@ export interface CareRepository {
     input: PatientLoginInput,
     signal?: AbortSignal
   ): Promise<PatientPortal>;
+  loginStaff(input: StaffLoginInput, signal?: AbortSignal): Promise<User>;
+  getCurrentStaff(signal?: AbortSignal): Promise<User>;
+  logoutStaff(signal?: AbortSignal): Promise<void>;
   listMyTasks(signal?: AbortSignal): Promise<CareTask[]>;
   createTask(input: CreateTaskInput, signal?: AbortSignal): Promise<CareTask>;
   getTask(taskId: string, signal?: AbortSignal): Promise<CareTask>;

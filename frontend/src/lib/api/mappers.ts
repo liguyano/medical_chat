@@ -10,6 +10,7 @@ import type {
   MessageRatingDto,
   PatientLoginResponse,
   QualityReviewDto,
+  StaffLoginResponse,
 } from '@/lib/api/contracts';
 import type {
   AssessmentScale,
@@ -22,6 +23,7 @@ import type {
   PatientEncounter,
   QualityReview,
   StructuredAnswer,
+  User,
 } from '@/lib/types';
 
 function id(value: string | number | undefined, fallback = ''): string {
@@ -268,6 +270,17 @@ export function mapPatientPortal(response: PatientLoginResponse): {
   return {
     ...record,
     tasks: response.tasks.map(mapTaskDto),
+  };
+}
+
+export function mapStaffUser(response: StaffLoginResponse): User {
+  return {
+    id: id(response.staff.id),
+    username: response.staff.staff_no,
+    role: response.staff.role_code === 'patient' ? 'patient' : 'nurse',
+    name: response.staff.staff_name,
+    department: response.staff.department_name,
+    avatar: '',
   };
 }
 

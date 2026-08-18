@@ -46,12 +46,15 @@ celery:
   task_time_limit: 1800
   task_soft_time_limit: 1500
 
-# 患者端身份登录
+# 患者端与医护端身份登录
 security:
   patient_identity_secret: change-this-in-production
   patient_session_ttl_seconds: 28800
   patient_session_cookie: medical_patient_session
   patient_session_secure: false
+  staff_session_ttl_seconds: 28800
+  staff_session_cookie: medical_staff_session
+  staff_session_secure: false
 
 # 日志系统
 logging:

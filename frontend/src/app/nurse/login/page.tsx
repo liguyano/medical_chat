@@ -6,6 +6,7 @@ import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/shared/Card';
 import { useUserStore } from '@/lib/stores/useUserStore';
+import { careRepository } from '@/lib/repositories';
 import { FaceSmileIcon } from '@heroicons/react/24/outline';
 
 export default function NurseLoginPage() {
@@ -14,24 +15,24 @@ export default function NurseLoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
-    // Mock 登录延迟
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    // Mock 用户数据
-    login({
-      id: 'N001',
-      role: 'nurse',
-      name: '李护士',
-      department: '心内科',
-      avatar: '',
-    });
-
-    router.push('/nurse/dashboard');
+    setError('');
+    try {
+      const user = await careRepository.loginStaff({
+        staffNo: username,
+        password,
+      });
+      login(user);
+      router.push('/nurse/dashboard');
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : '登录失败，请重试');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -74,6 +75,11 @@ export default function NurseLoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+              {error && (
+                <p className="text-sm text-danger" role="alert">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" loading={loading}>
                 登录
               </Button>
@@ -99,7 +105,7 @@ export default function NurseLoginPage() {
             </div>
             <div className="mt-4 p-3 bg-primary-tint rounded-xl">
               <p className="text-xs text-foreground-muted text-center">
-                演示账号 N001 / 123456；原型不执行真实身份认证
+                演示账号 N001～N005，密码均为 123456；API 模式由后端校验
               </p>
             </div>
           </CardContent>

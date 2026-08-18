@@ -4,7 +4,7 @@ import {
   mockScales,
   mockTasks,
 } from '@/lib/mock/data';
-import type { CareTask, InteractionSession } from '@/lib/types';
+import type { CareTask, InteractionSession, User } from '@/lib/types';
 import type {
   CareRepository,
   CreateTaskInput,
@@ -12,9 +12,71 @@ import type {
   PatientLoginInput,
   PatientWithEncounter,
   SendMessageInput,
+  StaffLoginInput,
 } from '@/lib/repositories/types';
 
 const MOCK_DELAY_MS = 180;
+
+const MOCK_STAFF_USERS: Record<
+  string,
+  { password: string; user: User }
+> = {
+  N001: {
+    password: '123456',
+    user: {
+      id: 'N001',
+      username: 'N001',
+      role: 'nurse',
+      name: '李护士',
+      department: '心内科',
+      avatar: '',
+    },
+  },
+  N002: {
+    password: '123456',
+    user: {
+      id: 'N002',
+      username: 'N002',
+      role: 'nurse',
+      name: '王护士',
+      department: '老年医学科',
+      avatar: '',
+    },
+  },
+  N003: {
+    password: '123456',
+    user: {
+      id: 'N003',
+      username: 'N003',
+      role: 'nurse',
+      name: '赵护士',
+      department: '消化内科',
+      avatar: '',
+    },
+  },
+  N004: {
+    password: '123456',
+    user: {
+      id: 'N004',
+      username: 'N004',
+      role: 'nurse',
+      name: '陈护士',
+      department: '呼吸与危重症医学科',
+      avatar: '',
+    },
+  },
+  N005: {
+    password: '123456',
+    user: {
+      id: 'N005',
+      username: 'N005',
+      role: 'nurse',
+      name: '刘护士',
+      department: '骨科',
+      avatar: '',
+    },
+  },
+};
 
 function wait(signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -111,6 +173,24 @@ export class MockCareRepository implements CareRepository {
       encounter: mockEncounters[0],
       tasks: mockTasks.filter((task) => task.patientId === mockPatients[0].id),
     };
+  }
+
+  async loginStaff(input: StaffLoginInput, signal?: AbortSignal) {
+    await wait(signal);
+    const account = MOCK_STAFF_USERS[input.staffNo.trim().toUpperCase()];
+    if (!account || account.password !== input.password) {
+      throw new Error('工号或密码错误');
+    }
+    return account.user;
+  }
+
+  async getCurrentStaff(signal?: AbortSignal) {
+    await wait(signal);
+    return MOCK_STAFF_USERS.N001.user;
+  }
+
+  async logoutStaff(signal?: AbortSignal) {
+    await wait(signal);
   }
 
   async listMyTasks(signal?: AbortSignal) {

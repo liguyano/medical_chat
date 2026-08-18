@@ -9,7 +9,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_staff
 from app.models.base import get_db
+from app.models.staff_account import StaffAccount
 from app.schemas.quality import (
     MessageRatingListResponse,
     MessageRatingRequest,
@@ -32,9 +34,13 @@ DbSession = Annotated[Session, Depends(get_db)]
 def submit_message_rating(
     req: MessageRatingRequest,
     db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
 ) -> dict:
     """保存或更新护士对单条 AI 消息的 1～5 分、点赞/点踩和备注。"""
-    return ok(quality_review_service.submit_message_rating(db, req))
+    authenticated_request = req.model_copy(update={"reviewer_id": staff.id})
+    return ok(
+        quality_review_service.submit_message_rating(db, authenticated_request)
+    )
 
 
 @router.get(
@@ -45,10 +51,14 @@ def submit_message_rating(
 def list_message_ratings(
     task_id: str,
     db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
     reviewer_id: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
     """读取指定护士在任务下的全部逐条质评。"""
-    return ok(quality_review_service.list_message_ratings(db, task_id, reviewer_id))
+    del reviewer_id
+    return ok(
+        quality_review_service.list_message_ratings(db, task_id, staff.id)
+    )
 
 
 @router.post(
@@ -59,9 +69,13 @@ def list_message_ratings(
 def submit_quality_review(
     req: QualityReviewRequest,
     db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
 ) -> dict:
     """保存或更新 AI 对话质量与 AI 评估质量两组维度评分。"""
-    return ok(quality_review_service.submit_quality_review(db, req))
+    authenticated_request = req.model_copy(update={"reviewer_id": staff.id})
+    return ok(
+        quality_review_service.submit_quality_review(db, authenticated_request)
+    )
 
 
 @router.get(
@@ -72,7 +86,9 @@ def submit_quality_review(
 def get_quality_review(
     task_id: str,
     db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
     reviewer_id: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
     """读取指定护士对任务的整体质量评价。"""
-    return ok(quality_review_service.get_quality_review(db, task_id, reviewer_id))
+    del reviewer_id
+    return ok(quality_review_service.get_quality_review(db, task_id, staff.id))

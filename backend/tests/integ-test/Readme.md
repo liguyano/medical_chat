@@ -4,6 +4,7 @@
 
 - Docker 容器 `medical-evaluate-postgres` 正常运行。
 - 数据库已执行 `uv run alembic upgrade head`。
+- 演示账号登录测试还需 Redis，并先执行 `uv run python -m app.commands.seed_demo`。
 
 默认连接：
 
@@ -35,6 +36,7 @@ uv run pytest tests/integ-test/test_assessment_catalog_import.py -v
 uv run pytest tests/integ-test/test_schedule_agent_redis.py -v
 uv run pytest tests/integ-test/test_dialog_agent_redis.py -v
 uv run pytest tests/integ-test/test_dialog_agent_postgres.py -v
+uv run pytest tests/integ-test/test_demo_account_login.py -v
 ```
 
 量表导入测试使用 PostgreSQL 外层事务回滚；Redis 测试使用 UUID 临时键并在测试结束时清理。

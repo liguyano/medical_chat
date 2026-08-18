@@ -8,6 +8,7 @@ import type {
   MessageRatingListResponse,
   PatientLoginResponse,
   QualityReviewDto,
+  StaffLoginResponse,
 } from '@/lib/api/contracts';
 import { apiRequest } from '@/lib/api/httpClient';
 import {
@@ -19,6 +20,7 @@ import {
   mapMessageRating,
   mapPatientPortal,
   mapQualityReview,
+  mapStaffUser,
   mapTaskDto,
   toReviewerId,
 } from '@/lib/api/mappers';
@@ -28,6 +30,7 @@ import type {
   CreateTaskInput,
   PatientLoginInput,
   PatientWithEncounter,
+  StaffLoginInput,
 } from '@/lib/repositories/types';
 
 function buildTaskFallback(
@@ -101,6 +104,36 @@ export class ApiCareRepository implements CareRepository {
       }
     );
     return mapPatientPortal(response);
+  }
+
+  async loginStaff(input: StaffLoginInput, signal?: AbortSignal) {
+    const response = await apiRequest<StaffLoginResponse>(
+      '/api/auth/staff/login',
+      {
+        method: 'POST',
+        body: {
+          staff_no: input.staffNo,
+          password: input.password,
+        },
+        signal,
+      }
+    );
+    return mapStaffUser(response);
+  }
+
+  async getCurrentStaff(signal?: AbortSignal) {
+    const response = await apiRequest<StaffLoginResponse>(
+      '/api/auth/staff/me',
+      { signal }
+    );
+    return mapStaffUser(response);
+  }
+
+  async logoutStaff(signal?: AbortSignal) {
+    await apiRequest<void>('/api/auth/staff/logout', {
+      method: 'POST',
+      signal,
+    });
   }
 
   async listMyTasks(signal?: AbortSignal) {

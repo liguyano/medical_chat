@@ -32,6 +32,7 @@ from app.models.quality_review import (
     QualityReviewScore,
     QualityReviewTemplate,
 )
+from app.models.staff_account import StaffAccount
 
 __all__ = [
     "AssessmentActionDefinition",
@@ -62,6 +63,7 @@ __all__ = [
     "QualityReviewDimension",
     "QualityReviewScore",
     "QualityReviewTemplate",
+    "StaffAccount",
     "get_db",
     "init_db",
 ]
