@@ -21,6 +21,7 @@ from app.models.interaction import InteractionSession
 from app.schemas.events import ConstraintEvent
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
+from app.workers.schedule_task_store import ScheduleTaskStore
 from app.workers.worker_lease import WorkerLease
 
 logger = logging.getLogger(__name__)
@@ -71,20 +72,35 @@ class ScheduleAgentRunner:
         source_message_id: str | None = None,
         source_event_id: str | None = None,
         check_interval: int = 1,
+        patient_info: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """检查一条患者答案并发布约束。"""
+        """准备 Task-todo，或检查一条患者答案并发布非阻塞引导。"""
         if not scale_codes:
             return {"status": "failed", "reason": "missing_scale_codes"}
-        if not source_message_id:
-            return {
-                "status": "skipped",
-                "reason": "opening_does_not_require_schedule",
-                "session_id": session_id,
-            }
 
         questions = await self.loader.load_questions_by_scale_codes(scale_codes)
         if not questions:
             return {"status": "failed", "reason": "no_questions_loaded"}
+        task_store = ScheduleTaskStore(self.redis, ttl=self.state_ttl)
+
+        if not source_message_id:
+            agent = create_schedule_agent(
+                session_id=session_id,
+                task_list=questions,
+                model=self.model,
+                check_interval=max(check_interval, 1),
+            )
+            plan = await agent.prepare_task_todo(patient_info or {})
+            task_store.save_plan(plan)
+            return {
+                "status": "prepared",
+                "session_id": session_id,
+                "question_count": len(plan.tasks),
+                "opening_guidance": plan.opening_guidance,
+            }
+
+        plan = task_store.get_plan(session_id)
+        planned_questions = plan.tasks if plan is not None and plan.tasks else questions
 
         lease = WorkerLease(
             self.redis,
@@ -113,7 +129,7 @@ class ScheduleAgentRunner:
 
             agent = create_schedule_agent(
                 session_id=session_id,
-                task_list=questions,
+                task_list=planned_questions,
                 model=self.model,
                 check_interval=max(check_interval, 1),
             )
@@ -137,6 +153,14 @@ class ScheduleAgentRunner:
             )
             if not self.redis.set(state_key, saved_state, ex=self.state_ttl):
                 raise RuntimeError(f"Schedule Agent 状态保存失败: {state_key}")
+            task_store.save_guidance(
+                session_id,
+                (
+                    result.model_dump(mode="json")
+                    if hasattr(result, "model_dump")
+                    else dict(vars(result))
+                ),
+            )
 
             if result.is_deviation or result.missing_tool_calls:
                 task_id = self._load_task_id(session_id)

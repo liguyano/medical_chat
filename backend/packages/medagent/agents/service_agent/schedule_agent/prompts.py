@@ -7,6 +7,47 @@ from typing import Any
 
 from .models import QuestionTask
 
+TASK_TODO_SYSTEM_PROMPT = """你是住院护理评估的 Schedule Agent。
+你的任务是把医护人员选择的量表字段整理成可执行的 Task-todo，供 Dialog Agent 开展自然问诊。
+
+要求：
+1. 保留全部必填、非派生问题，不得删除临床必需项目。
+2. 只输出已提供的问题编码，不得虚构字段。
+3. 优先按自然护理沟通顺序组织：身份与基本情况、当前不适、生命体征、既往与过敏、生活习惯、功能与风险、护理需求。
+4. 相同问题编码只安排一次对话采集，后端会把同一事实写入多个量表。
+5. opening_guidance 应提示 Dialog Agent 按 CICARE 完成接触、自我介绍、流程说明，然后自然进入第一题。
+6. 不输出面向患者的诊断结论，不把评分、护理计划或交班内容伪装成患者自述问题。
+"""
+
+
+def build_task_todo_prompt(
+    *,
+    patient_info: dict[str, Any],
+    questions: list[QuestionTask],
+) -> str:
+    """构建 Schedule Agent 任务规划提示词。"""
+    fields = [
+        {
+            "question_id": item.question_id,
+            "question_code": item.question_code,
+            "question_name": item.question_name,
+            "patient_text": item.patient_text,
+            "required": item.required,
+            "section_name": item.section_name,
+            "scale_code": item.scale_code,
+        }
+        for item in questions
+        if item.required
+    ]
+    return (
+        "## 患者基础信息\n"
+        f"{json.dumps(patient_info, ensure_ascii=False)}\n\n"
+        "## 可规划量表字段\n"
+        f"{json.dumps(fields, ensure_ascii=False)}\n\n"
+        "请严格输出一个 json 对象，字段为 ordered_question_codes、opening_guidance、planning_reason；"
+        "不要输出 Markdown、解释文字或 json 代码围栏。"
+    )
+
 DEVIATION_CHECK_SYSTEM_PROMPT = """你是一个医疗评估调度助手，负责监控 AI 与患者的对话是否按照量表问题进行。
 
 ## 你的职责

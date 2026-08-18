@@ -20,7 +20,8 @@ from app.models import base as model_base
 from app.models.assessment_execution import AssessmentInstance, AssessmentSubmission
 from app.models.assessment_template import AssessmentScale, AssessmentScaleVersion
 from app.models.interaction import InteractionMessage, InteractionSession
-from app.schemas.events import AgentErrorEvent
+from app.schemas.events import AgentErrorEvent, ProgressUpdatedEvent
+from app.services.assessment_progress_service import refresh_assessment_progress
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
 from app.workers.worker_lease import WorkerLease
@@ -192,6 +193,7 @@ class ExtractionAgentRunner:
                     answer
                     for answer in result.extracted_answers
                     if answer.question_id in valid_ids
+                    and self._has_extracted_value(answer)
                 ]
                 for answer in result.extracted_answers:
                     if not answer.source_message_ids:
@@ -267,6 +269,22 @@ class ExtractionAgentRunner:
                     confidence_scores=confidence_scores,
                     message_id=source_message_id,
                 )
+            if model_base.SessionLocal is None:
+                raise RuntimeError("数据库未初始化")
+            with model_base.SessionLocal() as db:
+                progress = refresh_assessment_progress(db, session_id)
+            publisher = self.publisher_factory(session_id, self.redis)
+            publisher.publish(
+                ProgressUpdatedEvent(
+                    session_id=session_id,
+                    task_id=task_id,
+                    message_id=source_message_id,
+                    current=progress.current,
+                    total=progress.total,
+                    completed=progress.completed,
+                    remaining_question_ids=list(progress.remaining_question_ids),
+                )
+            )
             processed.append(source_message_id)
             if not self.redis.set(
                 state_key,
@@ -282,6 +300,9 @@ class ExtractionAgentRunner:
                 "session_id": session_id,
                 "source_message_id": source_message_id,
                 "field_count": len(changed_fields),
+                "progress_current": progress.current,
+                "progress_total": progress.total,
+                "assessment_completed": progress.completed,
             }
         except Exception:
             DialogEventPublisher(session_id, self.redis).publish(
@@ -348,6 +369,15 @@ class ExtractionAgentRunner:
             if len(contexts) != len(scale_codes):
                 raise RuntimeError("会话评估实例与所选量表不一致")
             return session.id, session.task_id, contexts
+
+    @staticmethod
+    def _has_extracted_value(answer: Any) -> bool:
+        """判断模型抽取项是否包含可持久化的实际答案。"""
+        if answer.selected_option_codes:
+            return True
+        if isinstance(answer.answer_value, str):
+            return bool(answer.answer_value.strip())
+        return answer.answer_value is not None
 
     @staticmethod
     def _find_submission(instance_id: int) -> int | None:

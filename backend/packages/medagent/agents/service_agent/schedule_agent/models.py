@@ -31,6 +31,26 @@ class QuestionTask(BaseModel):
     scale_code: str | None = None
     options: list[QuestionOption] = Field(default_factory=list)
     completed: bool = False
+    dialogue_goal: str = ""
+    source_question_ids: list[int] = Field(default_factory=list)
+
+
+class SchedulePlanDraft(BaseModel):
+    """Schedule Agent 生成的问诊计划草稿。"""
+
+    ordered_question_codes: list[str] = Field(default_factory=list)
+    opening_guidance: str = ""
+    planning_reason: str = ""
+
+
+class ScheduleTaskTodo(BaseModel):
+    """可恢复的会话级量表问诊计划。"""
+
+    session_id: str
+    tasks: list[QuestionTask] = Field(default_factory=list)
+    opening_guidance: str = ""
+    planning_reason: str = ""
+    plan_version: str = "1.0"
 
 
 class ToolCallRecord(BaseModel):

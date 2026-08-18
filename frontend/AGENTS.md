@@ -28,6 +28,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `/api/auth/staff/login` 并使用独立 HttpOnly Cookie；退出时同步调用后端清理会话。
 - `src/lib/api` 保存后端 DTO、HTTP Client 和领域模型映射。后端数字 ID 必须在映射边界转换为字符串。
 - 患者和护士的文本、任务状态、字段抽取、宣教与人工介入事件通过 `src/lib/transports/sseClient.ts` 接收，并由 `applyRealtimeEvent.ts` 幂等写入 Zustand Store。
+- 患者发言次数不是评估进度。`answeredQuestionCount` 与任务进度只能由后端快照或
+  `progress_updated`（必填、非派生结构化答案进度）更新。
+- AI 会话 `pending` 表示 Schedule Task-todo 与首问正在后台准备；该阶段患者输入保持禁用，
+  首问完成并转为 `active` 后才允许发送。
 - 患者实时语音仅通过 `src/lib/transports/voiceSocket.ts` 连接后端 WebSocket；浏览器音频必须量化为 16kHz 单声道 PCM16，不得直接发送 Float32 底层字节。
 - 语音或网络失败时保留文字输入，并在 UI 显示 Mock/API、SSE 和语音连接状态。
 - 前端单元测试位于 `frontend/tests/`，使用 Vitest；涉及适配器变更时至少覆盖 DTO 映射、事件解析和传输边界。

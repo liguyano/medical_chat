@@ -79,6 +79,7 @@ def test_worker_builds_runner_with_chat_model(monkeypatch):
         source_message_id=None,
         source_event_id=None,
         check_interval=5,
+        patient_info={},
     )
 
 

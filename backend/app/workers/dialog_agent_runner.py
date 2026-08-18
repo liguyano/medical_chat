@@ -8,7 +8,6 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -17,25 +16,30 @@ from medagent.agents.factory import create_dialog_agent
 from medagent.agents.service_agent.dialog_agent.agent import GENERIC_ERROR_MESSAGE
 from medagent.agents.service_agent.dialog_agent.engine import TextChatEngine
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.managers.assessment_loader import AssessmentQuestionLoader
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.models import base as model_base
-from app.models.assessment_execution import AssessmentInstance
+from app.models.assessment_execution import AssessmentAnswer, AssessmentSubmission
+from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionMessage, InteractionSession
-from app.models.patient_task import CareTask
 from app.schemas.events import (
     AgentErrorEvent,
     AssistantMessageStartedEvent,
     DialogMessageEvent,
     DialogTextEvent,
-    DialogTurnEvent,
     SessionEndEvent,
+)
+from app.services.assessment_progress_service import (
+    complete_assessment_session,
+    refresh_assessment_progress,
+    valid_assessment_answer_condition,
 )
 from app.utils.redis_client import RedisClient
 from app.workers.dialog_output_store import DialogOutputStore
 from app.workers.event_publisher import DialogEventPublisher
+from app.workers.schedule_task_store import ScheduleTaskStore
 from app.workers.worker_lease import WorkerLease
 
 logger = logging.getLogger(__name__)
@@ -96,6 +100,7 @@ class DialogAgentRunner:
         *,
         source_message_id: str | None = None,
         source_event_id: str | None = None,
+        finalize: bool = False,
     ) -> dict[str, Any]:
         """生成首问或处理一条患者答案
         作用：每次 Celery 调用只处理一个工作单元，不在任务内长驻等待 Redis Stream。
@@ -105,12 +110,18 @@ class DialogAgentRunner:
         Return:
             - 当前工作单元的执行状态。
         """
-        questions = await self.loader.load_questions_by_scale_codes(self.scale_codes)
+        task_store = ScheduleTaskStore(self.redis, ttl=self.state_ttl)
+        plan = task_store.get_plan(self.session_id)
+        questions = (
+            plan.tasks
+            if plan is not None and plan.tasks
+            else await self.loader.load_questions_by_scale_codes(self.scale_codes)
+        )
         if not questions:
             return {"status": "failed", "reason": "no_questions_loaded"}
         self._load_session_context()
 
-        work_id = source_message_id or "opening"
+        work_id = "completion" if finalize else source_message_id or "opening"
         lease = WorkerLease(
             self.redis,
             agent_name="dialog_agent",
@@ -125,6 +136,8 @@ class DialogAgentRunner:
             }
 
         try:
+            if finalize:
+                return await self._run_completion()
             state = self._restore_state() or self._rebuild_state_from_history(questions)
             if source_message_id is None:
                 return await self._run_opening(questions, state)
@@ -136,6 +149,159 @@ class DialogAgentRunner:
             )
         finally:
             lease.release()
+
+    async def _run_completion(self) -> dict[str, Any]:
+        """在结构化进度完整后生成 CICARE Exit 并提交任务。"""
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        with model_base.SessionLocal() as db:
+            progress = refresh_assessment_progress(db, self.session_id)
+            if not progress.completed:
+                return {
+                    "status": "not_ready",
+                    "session_id": self.session_id,
+                    "progress_current": progress.current,
+                    "progress_total": progress.total,
+                }
+            turn_no = int(
+                db.scalar(
+                    select(func.max(InteractionMessage.turn_no)).where(
+                        InteractionMessage.interaction_session_id
+                        == self.interaction_session_id,
+                        InteractionMessage.deleted == 0,
+                    )
+                )
+                or 0
+            ) + 1
+
+        generation_id, message_id = self._generation_ids("completion")
+        existing = self._find_message_by_no(message_id)
+        started_event_id: str | None = None
+        closing_text = str(existing.content_text or "") if existing is not None else ""
+
+        async def on_delta(text_chunk: str) -> None:
+            self._publish_text_delta(
+                generation_id=generation_id,
+                message_id=message_id,
+                turn_number=turn_no,
+                question_id=None,
+                text_chunk=text_chunk,
+            )
+
+        try:
+            if existing is None:
+                started_event_id = self._start_generation(
+                    generation_id=generation_id,
+                    message_id=message_id,
+                    turn_number=turn_no,
+                    question_id=None,
+                )
+                closing_text = await self._generate_completion_message(
+                    on_delta=on_delta
+                )
+                message = await self.history.save_message(
+                    self.session_id,
+                    message_no=message_id,
+                    turn_no=turn_no,
+                    role_type="AI",
+                    message_type="文本",
+                    content_text=closing_text,
+                    intent_type="确认",
+                    related_question_id=None,
+                    creator="dialog_agent",
+                )
+            else:
+                message = existing
+                turn_no = message.turn_no
+
+            with model_base.SessionLocal() as db:
+                completed_progress = complete_assessment_session(db, self.session_id)
+            if not completed_progress.completed:
+                raise RuntimeError("CICARE 结束语已生成，但结构化评估进度不再完整")
+
+            completed_event_id = self.publisher.publish(
+                DialogMessageEvent(
+                    session_id=self.session_id,
+                    task_id=self.task_id,
+                    message_id=message.message_no,
+                    turn_number=turn_no,
+                    role="assistant",
+                    content=closing_text,
+                    question_id=None,
+                    is_opening=False,
+                    generation_id=generation_id,
+                )
+            )
+            self.output_store.complete(
+                session_id=self.session_id,
+                message_id=message_id,
+                content=closing_text,
+                last_event_id=completed_event_id or started_event_id,
+            )
+            self.publisher.publish(
+                SessionEndEvent(
+                    session_id=self.session_id,
+                    task_id=self.task_id,
+                    message_id=message_id,
+                    end_reason="completed",
+                    total_turns=turn_no,
+                    duration_seconds=0,
+                )
+            )
+            return {
+                "status": (
+                    "already_completed" if existing is not None else "completed"
+                ),
+                "session_id": self.session_id,
+                "message_id": message_id,
+            }
+        except Exception as exc:
+            self._mark_generation_failed(
+                message_id=message_id,
+                generation_id=generation_id,
+                exc=exc,
+            )
+            raise
+
+    async def _generate_completion_message(
+        self,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> str:
+        """生成符合 CICARE Exit 的自然结束语。"""
+        messages = [
+            SystemMessage(
+                content=(
+                    "你是住院病区的 AI 护理助手。系统已经确认全部必填护理评估信息完整。"
+                    "请按 CICARE Exit 用两到三句自然中文结束：感谢患者配合，"
+                    "说明护士会复核记录并告知下一步护理安排，提醒仍有不适可及时呼叫医护人员。"
+                    "不要重复量表内容，不要夸大诊断，不要使用客服式套话。"
+                )
+            ),
+            HumanMessage(
+                content=f"患者称呼参考：{self.patient_info.get('name', '患者')}",
+            ),
+        ]
+        chunks: list[str] = []
+        stream = getattr(self.model, "astream", None)
+        if callable(stream):
+            async for chunk in stream(messages):
+                text = self._message_content(chunk)
+                if text:
+                    chunks.append(text)
+                    if on_delta:
+                        await on_delta(text)
+        else:
+            response = await self.model.ainvoke(messages)
+            text = self._message_content(response)
+            if text:
+                chunks.append(text)
+                if on_delta:
+                    await on_delta(text)
+        result = "".join(chunks).strip()
+        if not result:
+            raise RuntimeError("Dialog Agent 未返回 CICARE 结束语")
+        return result
 
     async def _run_opening(
         self,
@@ -267,46 +433,11 @@ class DialogAgentRunner:
         if not patient_answer:
             raise RuntimeError(f"患者答案为空: {source_message_id}")
 
-        if current_index + 1 >= len(questions):
-            self.publisher.publish(
-                DialogTurnEvent(
-                    session_id=self.session_id,
-                    task_id=self.task_id,
-                    message_id=source_message_id,
-                    turn_number=patient_message.turn_no,
-                    question=patient_answer,
-                    answer="",
-                    metadata={
-                        "asked_question_id": questions[current_index].question_id,
-                        "completed": True,
-                    },
-                )
-            )
-            self._complete_session(patient_message.turn_no)
-            end_event_id = self.publisher.publish(
-                SessionEndEvent(
-                    session_id=self.session_id,
-                    task_id=self.task_id,
-                    end_reason="completed",
-                    total_turns=patient_message.turn_no,
-                    duration_seconds=0,
-                )
-            )
-            processed.append(source_message_id)
-            self._save_state(
-                current_question_index=current_index,
-                turn_counter=patient_message.turn_no,
-                last_event_id=end_event_id or source_event_id or "0-0",
-                processed_message_ids=processed,
-            )
-            return {
-                "status": "completed",
-                "session_id": self.session_id,
-                "total_turns": patient_message.turn_no,
-            }
-
-        next_index = current_index + 1
-        next_question = questions[next_index]
+        next_question, plan_exhausted = self._select_next_question(
+            current_question=questions[current_index],
+            questions=questions,
+        )
+        next_index = self._question_index(next_question.question_id, questions)
         next_turn = patient_message.turn_no + 1
         generation_id, message_id = self._generation_ids(source_message_id)
         started_event_id = self._start_generation(
@@ -332,6 +463,7 @@ class DialogAgentRunner:
                 turn_no=patient_message.turn_no,
                 patient_answer=patient_answer,
                 next_question=next_question,
+                plan_exhausted=plan_exhausted,
                 text_delta_sink=text_delta_sink,
             )
             generated_text = await agent.handle_patient_input(
@@ -416,15 +548,19 @@ class DialogAgentRunner:
         messages = [
             SystemMessage(
                 content=(
-                    "你是住院病区的护理人员，正在开始一次护理评估问诊。"
-                    "请用自然、礼貌、简洁的中文开场，并且只询问一个问题。"
-                    "不要回答患者，不要解释量表，不要一次询问多项内容。"
+                    "你是住院病区的 AI 护理助手，正在按 CICARE 开始护理评估。"
+                    "开场需要自然完成：使用患者称呼、简短慰问、自我介绍、说明职责和评估配合方式。"
+                    "称呼可能不合适时请允许患者纠正，但不要连续抛出身份核实问题。"
+                    "随后自然过渡到一个护理评估问题。整段应像真人护士交流，"
+                    "不要念量表名称，不要使用“您的某某情况是怎样的”这类问卷句式，"
+                    "不要一次询问多个评估主题。"
                 )
             ),
             HumanMessage(
                 content=(
                     f"患者姓名：{self.patient_info.get('name', '患者')}。"
-                    f"本轮必须询问的目标题目：{target_text}"
+                    f"第一项需要了解的护理事实：{question.question_name}。"
+                    f"量表参考表达：{target_text}"
                 )
             ),
         ]
@@ -476,7 +612,7 @@ class DialogAgentRunner:
         generation_id: str,
         message_id: str,
         turn_number: int,
-        question_id: int,
+        question_id: int | None,
     ) -> str | None:
         """初始化快照并发布 AI 消息开始事件。"""
         self.output_store.start(
@@ -494,7 +630,7 @@ class DialogAgentRunner:
                 message_id=message_id,
                 turn_number=turn_number,
                 generation_id=generation_id,
-                question_id=str(question_id),
+                question_id=str(question_id) if question_id is not None else None,
             )
         )
         self.output_store.append(
@@ -511,7 +647,7 @@ class DialogAgentRunner:
         generation_id: str,
         message_id: str,
         turn_number: int,
-        question_id: int,
+        question_id: int | None,
         text_chunk: str,
     ) -> None:
         """写入完整快照并发布单个模型文本增量。"""
@@ -528,7 +664,7 @@ class DialogAgentRunner:
                 turn_number=turn_number,
                 text_chunk=text_chunk,
                 generation_id=generation_id,
-                question_id=str(question_id),
+                question_id=str(question_id) if question_id is not None else None,
                 is_final=False,
             )
         )
@@ -562,6 +698,8 @@ class DialogAgentRunner:
             related_question_id=question.question_id,
             creator="dialog_agent",
         )
+        if is_opening:
+            self._activate_session()
         event_id = self.publisher.publish(
             DialogMessageEvent(
                 session_id=self.session_id,
@@ -576,6 +714,17 @@ class DialogAgentRunner:
             )
         )
         return message, event_id
+
+    def _activate_session(self) -> None:
+        """首问持久化后允许患者开始输入。"""
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        with model_base.SessionLocal() as db:
+            session = db.get(InteractionSession, self.interaction_session_id)
+            if session is not None and session.session_status == "pending":
+                session.session_status = "active"
+                session.updator = "dialog_agent"
+                db.commit()
 
     def _mark_generation_failed(
         self,
@@ -665,6 +814,23 @@ class DialogAgentRunner:
                 db.expunge(message)
             return message
 
+    def _find_message_by_no(self, message_no: str) -> InteractionMessage | None:
+        """按稳定消息编号查询本会话消息。"""
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        with model_base.SessionLocal() as db:
+            message = db.scalar(
+                select(InteractionMessage).where(
+                    InteractionMessage.interaction_session_id
+                    == self.interaction_session_id,
+                    InteractionMessage.message_no == message_no,
+                    InteractionMessage.deleted == 0,
+                )
+            )
+            if message is not None:
+                db.expunge(message)
+            return message
+
     def _resolve_current_question_index(
         self,
         patient_message: InteractionMessage,
@@ -677,6 +843,60 @@ class DialogAgentRunner:
                 f"患者答案缺少对应 AI 问句: turn={patient_message.turn_no}"
             )
         return self._question_index(asked.related_question_id, questions)
+
+    def _select_next_question(
+        self,
+        *,
+        current_question: QuestionTask,
+        questions: list[QuestionTask],
+    ) -> tuple[QuestionTask, bool]:
+        """选择下一个尚未覆盖的 Task-todo 项。
+        作用：优先跳过已持久化答案和已问过的同编码问题；当计划已经问完但
+        Extraction 尚未确认完整时，返回当前问题作为核对上下文，不触发完成。
+        """
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        with model_base.SessionLocal() as db:
+            answered_codes = set(
+                db.scalars(
+                    select(AssessmentQuestion.question_code)
+                    .join(
+                        AssessmentAnswer,
+                        AssessmentAnswer.question_id == AssessmentQuestion.id,
+                    )
+                    .join(
+                        AssessmentSubmission,
+                        AssessmentSubmission.id == AssessmentAnswer.submission_id,
+                    )
+                    .where(
+                        AssessmentSubmission.interaction_session_id
+                        == self.interaction_session_id,
+                        AssessmentSubmission.deleted == 0,
+                        AssessmentAnswer.deleted == 0,
+                        valid_assessment_answer_condition(),
+                    )
+                ).all()
+            )
+            asked_codes = set(
+                db.scalars(
+                    select(AssessmentQuestion.question_code)
+                    .join(
+                        InteractionMessage,
+                        InteractionMessage.related_question_id == AssessmentQuestion.id,
+                    )
+                    .where(
+                        InteractionMessage.interaction_session_id
+                        == self.interaction_session_id,
+                        InteractionMessage.role_type.in_(["AI", "assistant"]),
+                        InteractionMessage.deleted == 0,
+                    )
+                ).all()
+            )
+        covered_codes = answered_codes | asked_codes | {current_question.question_code}
+        for question in questions:
+            if question.question_code not in covered_codes:
+                return question, False
+        return current_question, True
 
     @staticmethod
     def _question_index(
@@ -696,6 +916,7 @@ class DialogAgentRunner:
         turn_no: int,
         patient_answer: str,
         next_question: QuestionTask,
+        plan_exhausted: bool,
         text_delta_sink: Callable[[str, dict[str, Any]], Awaitable[None]],
     ):
         """按 PostgreSQL 历史重建单轮文本 Agent。"""
@@ -726,46 +947,33 @@ class DialogAgentRunner:
             formatted = formatted[:-1]
         if isinstance(agent.engine, TextChatEngine):
             agent.engine.messages.extend(formatted)
+        guidance = ScheduleTaskStore(self.redis, ttl=self.state_ttl).get_guidance(
+            self.session_id
+        )
+        if plan_exhausted:
+            turn_instruction = (
+                "Task-todo 中的主题都已经问过，但后台结构化抽取尚未确认全部完成。"
+                "先自然回应患者刚才的内容；不要宣布评估完成，不要重复照抄刚才的问题。"
+                "请邀请患者补充仍有的不适、担心、需要解决的问题或需要的帮助。"
+            )
+        else:
+            turn_instruction = (
+                "先用一小句自然回应患者刚才的内容，再顺畅过渡到一个下一问。"
+                "不得生硬复述字段名，不得一次询问多个主题。"
+                f"本轮要收集的护理事实是：{next_question.question_name}；"
+                f"量表参考表达：{next_question.patient_text or next_question.question_name}。"
+            )
+        schedule_prompt = str(guidance.get("constraint_prompt") or "").strip()
         await agent.engine.update_session(
             instructions=(
-                "你正在执行护理量表问诊。患者回答后，只输出一个简洁的下一问。"
-                "如果 Schedule 约束要求追问，先完成追问；否则必须询问以下目标题目，"
-                "不得回答患者，不得一次询问多题："
-                f"{next_question.patient_text or next_question.question_name}"
+                f"{turn_instruction}"
+                "患者提出问题时先简短回答；不知道具体病区设施位置时，应说明需向本病区护士确认，"
+                "不得编造开水房、茶水室或微波炉的位置。"
+                "药物过敏、吸烟饮酒、手术等特征应按工具规则追问或宣教。"
+                + (f" Schedule Agent 最新引导：{schedule_prompt}" if schedule_prompt else "")
             )
         )
         return agent
-
-    def _complete_session(self, turn_counter: int) -> None:
-        """完成会话、任务和评估实例状态。"""
-        if model_base.SessionLocal is None:
-            raise RuntimeError("数据库未初始化")
-        now = datetime.now(UTC)
-        with model_base.SessionLocal() as db:
-            session = db.get(InteractionSession, self.interaction_session_id)
-            task = db.get(CareTask, self.task_id)
-            if session is not None:
-                session.session_status = "completed"
-                session.ended_at = now
-                session.updator = "dialog_agent"
-            if task is not None:
-                task.task_status = "pending_review"
-                task.completed_at = now
-                task.updator = "dialog_agent"
-            instances = list(
-                db.scalars(
-                    select(AssessmentInstance).where(
-                        AssessmentInstance.task_id == self.task_id,
-                        AssessmentInstance.deleted == 0,
-                    )
-                ).all()
-            )
-            for instance in instances:
-                instance.instance_status = "ai_completed"
-                instance.assessed_at = now
-                instance.updator = "dialog_agent"
-            db.commit()
-        logger.info("AI 问诊完成: session=%s turns=%s", self.session_id, turn_counter)
 
     def _restore_state(self) -> dict[str, Any] | None:
         """恢复 Redis 运行状态。"""

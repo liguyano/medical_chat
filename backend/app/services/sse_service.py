@@ -28,8 +28,7 @@ _EVENT_NAME_MAP: dict[str, str] = {
     EventType.ASSISTANT_MESSAGE_STARTED.value: "assistant_message_started",
     EventType.PATIENT_ANSWER.value: "user_transcript_completed",
     EventType.EXTRACTION_RESULT.value: "extraction_updated",
-    EventType.TOOL_CALL.value: "progress_updated",
-    EventType.CONSTRAINT.value: "progress_updated",
+    EventType.PROGRESS_UPDATED.value: "progress_updated",
     EventType.SESSION_END.value: "task_status_updated",
     EventType.AGENT_ERROR.value: "error",
     # 兼容旧事件（后补）
@@ -163,8 +162,14 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             ),
             "confidence_scores": data.get("confidence_scores", {}),
         }
+    elif event_type == EventType.PROGRESS_UPDATED.value:
+        return {
+            "current": int(data.get("current", 0)),
+            "total": int(data.get("total", 0)),
+            "completed": bool(data.get("completed", False)),
+            "remaining_question_ids": data.get("remaining_question_ids", []),
+        }
     elif event_type in (EventType.TOOL_CALL.value, EventType.CONSTRAINT.value):
-        # 工具调用/约束事件 -> progress_updated
         return {
             "message": data.get("constraint_prompt") or data.get("tool_name", ""),
             "detail": data,

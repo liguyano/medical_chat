@@ -99,6 +99,45 @@ def test_check_interval_must_be_positive():
 
 
 @pytest.mark.asyncio
+async def test_prepare_task_todo_uses_model_order_and_deduplicates_shared_fields():
+    """Schedule prepare 应生成顺序计划，并合并跨量表同编码问题。"""
+    questions = [
+        make_question("height_cm", "身高", 1),
+        make_question("weight_kg", "体重", 2),
+        make_question("height_cm", "另一量表身高", 3),
+    ]
+    llm = make_llm(
+        {
+            "ordered_question_codes": ["weight_kg", "height_cm"],
+            "opening_guidance": "先完成 CICARE 开场",
+            "planning_reason": "先了解体重",
+        }
+    )
+    agent = ScheduleAgent("session-1", questions, llm, check_interval=1)
+
+    plan = await agent.prepare_task_todo({"name": "张三"})
+
+    assert [item.question_code for item in plan.tasks] == [
+        "weight_kg",
+        "height_cm",
+    ]
+    assert plan.tasks[1].source_question_ids == [1, 3]
+    assert plan.opening_guidance == "先完成 CICARE 开场"
+
+
+@pytest.mark.asyncio
+async def test_task_todo_prompt_explicitly_requests_json():
+    """结构化输出提示必须显式包含 JSON，兼容 DashScope response_format 约束。"""
+    from medagent.agents.service_agent.schedule_agent.prompts import (
+        build_task_todo_prompt,
+    )
+
+    prompt = build_task_todo_prompt(patient_info={}, questions=[])
+
+    assert "json" in prompt
+
+
+@pytest.mark.asyncio
 async def test_only_fifth_turn_calls_llm():
     """默认每5轮只调用一次模型。"""
     agent, llm = make_agent()
@@ -193,9 +232,11 @@ async def test_missing_tobacco_education_tool_creates_constraint():
     )
     assert result.is_deviation is True
     assert result.missing_tool_calls == [
-        "get_education_material(category='tobacco')"
+        "get_education_material(category='tobacco')",
+        "trigger_consent_form(form_type='tobacco')",
     ]
     assert "戒烟宣教工具" in result.constraint_prompt
+    assert "戒烟知情宣教书" in result.constraint_prompt
 
 
 @pytest.mark.asyncio
@@ -208,7 +249,11 @@ async def test_matching_tobacco_tool_satisfies_requirement():
             {
                 "name": "get_education_material",
                 "arguments": {"category": "tobacco"},
-            }
+            },
+            {
+                "name": "trigger_consent_form",
+                "arguments": {"form_type": "tobacco"},
+            },
         ],
         force=True,
     )
@@ -230,7 +275,7 @@ async def test_wrong_tool_arguments_do_not_satisfy_requirement():
         ],
         force=True,
     )
-    assert len(result.missing_tool_calls) == 1
+    assert len(result.missing_tool_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -257,6 +302,22 @@ async def test_alias_keywords_do_not_duplicate_missing_tool():
     assert result.missing_tool_calls.count(
         "get_education_material(category='tobacco')"
     ) == 1
+    assert result.missing_tool_calls.count(
+        "trigger_consent_form(form_type='tobacco')"
+    ) == 1
+
+
+@pytest.mark.asyncio
+async def test_drug_allergy_requires_safety_education():
+    """药物过敏应触发过敏安全宣教约束。"""
+    agent, _ = make_agent()
+    result = await agent.evaluate(
+        [{"role": "user", "content": "我有青霉素过敏"}],
+        force=True,
+    )
+
+    assert "get_education_material(category='allergy')" in result.missing_tool_calls
+    assert "主动告知医护人员" in result.constraint_prompt
 
 
 @pytest.mark.asyncio

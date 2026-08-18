@@ -27,6 +27,9 @@ from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
 from app.schemas.task import BackendTaskDto, CreateTaskRequest, CreateTaskResponse
+from app.services.assessment_progress_service import (
+    valid_assessment_answer_condition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +197,7 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
                 participant_type=req.participant_type,
                 interaction_type="assessment",
                 channel_type="text",
-                session_status="active",
+                session_status="pending",
                 started_at=now,
                 creator="system",
                 updator="system",
@@ -269,6 +272,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
             db.scalar(
                 select(func.count(AssessmentQuestion.id)).where(
                     AssessmentQuestion.scale_version_id.in_(version_ids),
+                    AssessmentQuestion.required.is_(True),
                     AssessmentQuestion.derived.is_(False),
                     AssessmentQuestion.deleted == 0,
                 )
@@ -288,6 +292,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
                     AssessmentSubmission.interaction_session_id == session.id,
                     AssessmentSubmission.deleted == 0,
                     AssessmentAnswer.deleted == 0,
+                    valid_assessment_answer_condition(),
                 )
             )
             or 0

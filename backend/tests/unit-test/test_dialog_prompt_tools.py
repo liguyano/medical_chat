@@ -39,6 +39,11 @@ def test_system_prompt_contains_cicare_patient_and_tasks():
     assert "选填" in prompt
     assert "{patient_name}" not in prompt
     assert "TODO" not in prompt
+    assert "只有系统确认全部必填评估进度完成后" in prompt
+    assert "先接住患者当前内容" in prompt
+    assert "禁止照抄" in prompt
+    assert "开水房" in prompt
+    assert "青霉素过敏" in prompt
 
 
 def test_system_prompt_includes_dynamic_constraints():

@@ -62,8 +62,20 @@ class ExtractionResultWriter:
             result = {}
             for ans in answers:
                 # 提取答案值
-                answer_value = (
-                    ans.answer_text or ans.answer_number or ans.answer_boolean or ans.answer_date
+                answer_value = next(
+                    (
+                        value
+                        for value in (
+                            ans.answer_text,
+                            ans.answer_number,
+                            ans.answer_boolean,
+                            ans.answer_date,
+                            ans.answer_time,
+                            ans.answer_datetime,
+                        )
+                        if value is not None
+                    ),
+                    None,
                 )
 
                 result[ans.question_id] = {
@@ -222,13 +234,16 @@ class ExtractionResultWriter:
                         "question_id": ans.question_id,
                         "answer_type": ans.answer_type,
                         "answer_text": (
-                            str(ans.answer_value)
-                            if ans.answer_type == "text" and ans.answer_value
+                            str(ans.answer_value).strip()
+                            if ans.answer_type == "text"
+                            and isinstance(ans.answer_value, str)
+                            and ans.answer_value.strip()
                             else None
                         ),
                         "answer_number": (
                             Decimal(str(ans.answer_value))
-                            if ans.answer_type == "number" and ans.answer_value
+                            if ans.answer_type == "number"
+                            and ans.answer_value is not None
                             else None
                         ),
                         "answer_boolean": (
@@ -238,7 +253,8 @@ class ExtractionResultWriter:
                         ),
                         "answer_date": (
                             ans.answer_value
-                            if ans.answer_type == "date" and ans.answer_value
+                            if ans.answer_type == "date"
+                            and ans.answer_value is not None
                             else None
                         ),
                         "answer_unit": ans.extra_inputs.get("unit"),

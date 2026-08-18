@@ -49,12 +49,16 @@ class FakeRedis:
     def __init__(self, state=None):
         self.state = state
         self.saved = None
+        self.values = {}
 
-    def get(self, _key):
-        return self.state
+    def get(self, key):
+        if key in self.values:
+            return self.values[key]
+        return self.state if key.startswith("schedule_agent:state:") else None
 
-    def set(self, _key, value, ex=None):
+    def set(self, key, value, ex=None):
         self.saved = value
+        self.values[key] = value
         return True
 
 
@@ -86,19 +90,24 @@ async def test_missing_scale_codes_fails_without_agent_creation():
 
 
 @pytest.mark.asyncio
-async def test_opening_does_not_start_schedule_model():
-    """首问阶段不应启动 Schedule Agent。"""
+async def test_opening_prepares_recoverable_task_todo():
+    """首问前必须由 Schedule Agent 生成并保存 Task-todo。"""
+    redis = FakeRedis()
     runner = ScheduleAgentRunner(
         loader=FakeLoader([question()]),
         history_manager=FakeHistory(),
-        redis_client=FakeRedis(),
+        redis_client=redis,
         publisher_factory=lambda _session: FakePublisher([]),
         model=object(),
     )
 
     result = await runner.run("session", scale_codes=["adl"])
 
-    assert result["status"] == "skipped"
+    assert result["status"] == "prepared"
+    assert result["question_count"] == 1
+    assert redis.values["schedule_agent:task_todo:session"]["tasks"][0][
+        "question_code"
+    ] == "q1"
 
 
 @pytest.mark.asyncio
@@ -143,7 +152,13 @@ async def test_single_turn_evaluates_real_schedule_agent(monkeypatch):
     assert result["status"] == "turn_completed"
     assert agent.evaluate.await_count == 1
     assert len(events) == 1
-    assert redis.saved["processed_message_ids"] == ["patient-msg-1"]
+    assert redis.values["schedule_agent:state:session"]["processed_message_ids"] == [
+        "patient-msg-1"
+    ]
+    assert (
+        redis.values["schedule_agent:guidance:session"]["constraint_prompt"]
+        == "请继续量表问诊"
+    )
 
 
 @pytest.mark.asyncio

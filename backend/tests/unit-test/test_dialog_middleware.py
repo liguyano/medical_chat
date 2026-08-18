@@ -72,6 +72,7 @@ async def test_keyword_middleware_matches_and_deduplicates_constraints():
 
     assert len(context["constraints"]) == 1
     assert "get_education_material" in context["constraints"][0]
+    assert "trigger_consent_form" in context["constraints"][0]
 
 
 @pytest.mark.asyncio

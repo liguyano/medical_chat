@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.managers.keyword_matcher import MatchResult, get_keyword_matcher
-from app.models.assessment_execution import AssessmentInstance
+from app.models.assessment_execution import (
+    AssessmentAnswer,
+    AssessmentInstance,
+    AssessmentSubmission,
+)
 from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask
@@ -25,6 +29,9 @@ from app.schemas.dialog import (
     SendMessageResponse,
 )
 from app.schemas.events import ConstraintEvent, PatientAnswerEvent
+from app.services.assessment_progress_service import (
+    valid_assessment_answer_condition,
+)
 from app.workers.event_publisher import DialogEventPublisher
 
 logger = logging.getLogger(__name__)
@@ -248,6 +255,7 @@ async def get_history(
             db.scalar(
                 select(func.count(AssessmentQuestion.id)).where(
                     AssessmentQuestion.scale_version_id.in_(version_ids),
+                    AssessmentQuestion.required.is_(True),
                     AssessmentQuestion.derived.is_(False),
                     AssessmentQuestion.deleted == 0,
                 )
@@ -256,10 +264,16 @@ async def get_history(
         )
     answered_questions = int(
         db.scalar(
-            select(func.count(func.distinct(InteractionMessage.turn_no))).where(
-                InteractionMessage.interaction_session_id == session.id,
-                InteractionMessage.role_type.in_(["患者", "家属"]),
-                InteractionMessage.deleted == 0,
+            select(func.count(func.distinct(AssessmentAnswer.question_id)))
+            .join(
+                AssessmentSubmission,
+                AssessmentSubmission.id == AssessmentAnswer.submission_id,
+            )
+            .where(
+                AssessmentSubmission.interaction_session_id == session.id,
+                AssessmentSubmission.deleted == 0,
+                AssessmentAnswer.deleted == 0,
+                valid_assessment_answer_condition(),
             )
         )
         or 0

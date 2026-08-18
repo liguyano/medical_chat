@@ -26,30 +26,29 @@ def question():
 
 
 def patch_common(monkeypatch, questions=None):
-    """替换 Celery 任务的应用层依赖（runtime / loader）。"""
+    """替换 Celery 任务的应用层依赖。"""
     import app.celery_app.runtime as runtime_module
-    import app.managers.assessment_loader as loader_module
     import app.utils.redis_client as redis_module
 
     order = []
+    result_questions = [question()] if questions is None else questions
     redis = SimpleNamespace(
         set=Mock(return_value=True),
+        get=Mock(
+            return_value={
+                "session_id": "session",
+                "tasks": [item.model_dump(mode="json") for item in result_questions],
+                "opening_guidance": "自然开场",
+            }
+        ),
     )
     monkeypatch.setattr(
         runtime_module,
         "ensure_worker_runtime",
         lambda: order.append("runtime"),
     )
-    # 区分 None（默认单题）与 []（显式无题）
-    result_questions = [question()] if questions is None else questions
-    loader = SimpleNamespace(
-        load_questions_by_scale_codes=AsyncMock(
-            side_effect=lambda _: order.append("loader") or result_questions
-        )
-    )
-    monkeypatch.setattr(loader_module, "AssessmentQuestionLoader", lambda: loader)
     monkeypatch.setattr(redis_module, "get_redis", lambda: redis)
-    return order, loader
+    return order, redis
 
 
 def patch_factory(monkeypatch):
@@ -83,7 +82,7 @@ def test_dialog_preheat_rejects_missing_scale_codes():
 
 def test_dialog_preheat_text_engine_uses_factory(monkeypatch):
     """text 模式应完成量表校验并保存预热标记。"""
-    order, loader = patch_common(monkeypatch)
+    order, redis = patch_common(monkeypatch)
     patch_factory(monkeypatch)
 
     result = dialog_agent_preheat.run(
@@ -98,9 +97,8 @@ def test_dialog_preheat_text_engine_uses_factory(monkeypatch):
         "engine_type": "text",
         "question_count": 1,
     }
-    assert order == ["runtime", "loader"]
-    loader.load_questions_by_scale_codes.assert_awaited_once_with(["scale"])
-    loader.load_questions_by_scale_codes.assert_awaited_once_with(["scale"])
+    assert order == ["runtime"]
+    redis.get.assert_called_once()
 
 
 def test_dialog_preheat_rejects_voice_engine(monkeypatch):

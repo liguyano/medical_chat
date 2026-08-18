@@ -184,8 +184,14 @@ from medagent.configs.agent_config import get_agent_config
   按需创建，不在会话上长驻 Redis Stream 消费。Windows `solo` 模式必须按
   `dialog_queue`、`schedule_queue`、`extraction_queue` 各启动一个独立 Worker。
 - `POST /api/tasks` 在同一数据库事务内创建 `care_task`、`interaction_session` 和每张量表
-  对应的 `assessment_instance`，提交后派发预热和 AI 首问。患者答案进入 PostgreSQL 后按
-  `Schedule -> (Dialog + Extraction)` 派发单轮任务。
+  对应的 `assessment_instance`。后台按 `Schedule prepare -> Dialog preheat -> Dialog opening`
+  生成并持久化 Task-todo、预热首问；准备期间会话为 `pending`，首问落库后转为 `active`。
+- 患者答案进入 PostgreSQL 后，Dialog、Schedule observe、Extraction 必须独立派发。
+  Dialog 不得等待另外两个 Agent；Schedule/Extraction 失败由各自 Celery 重试处理。
+- 评估完成的唯一事实来源是全部生效量表中 `required=true` 且 `derived=false` 的结构化
+  `assessment_answer`。Dialog 禁止按问题下标、消息轮数或 Task-todo 是否问完直接完成任务。
+- Extraction 更新结构化进度；进度完整后异步派发 Dialog CICARE Exit，结束语落库后再发布
+  `task_status_updated`。
 - REST 统一使用 `{code,message,data}`；前端可见的核心 SSE 事件为
   `assistant_text_delta`、`user_transcript_completed`、`extraction_updated`、
   `progress_updated` 和 `task_status_updated`。`dialog_turn` 只供 Agent 内部协作。
