@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
@@ -16,20 +14,8 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function NurseDashboardPage() {
-  const router = useRouter();
-  const { user, isAuthenticated } = useUserStore();
+  const { user } = useUserStore();
   const tasks = useTaskStore((state) => state.tasks);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/nurse/login');
-      return;
-    }
-  }, [isAuthenticated, router]);
-
-  if (!isAuthenticated) {
-    return null;
-  }
 
   // 统计数据
   const stats = {

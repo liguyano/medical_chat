@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-
 from medagent.agents.middlewares.base import DialogMiddleware
 from medagent.agents.service_agent.dialog_agent.agent import DialogAgent
 from medagent.agents.service_agent.dialog_agent.engine import (
@@ -23,6 +22,7 @@ from medagent.agents.service_agent.dialog_agent.engine import (
 from medagent.agents.service_agent.dialog_agent.models import (
     DialogHistoryStore,
     DialogStateStore,
+    DialogTextDeltaSink,
     DialogToolExecutor,
 )
 from medagent.agents.service_agent.dialog_agent.tools import execute_tool
@@ -31,7 +31,7 @@ from medagent.agents.service_agent.schedule_agent import ScheduleAgent
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
 from medagent.configs import get_agent_config
 from medagent.configs.model_config import ModelType
-from medagent.providers import create_chat_model, create_voice_engine
+from medagent.providers import create_voice_engine
 
 __all__ = [
     "create_dialog_agent",
@@ -51,6 +51,7 @@ def create_dialog_agent(
     state_store: DialogStateStore | None = None,
     history_store: DialogHistoryStore | None = None,
     tool_executor: DialogToolExecutor = execute_tool,
+    text_delta_sink: DialogTextDeltaSink | None = None,
 ) -> DialogAgent:
     """创建 Dialog Agent（SDK 工厂入口）
     作用：根据 engine_type 从 agent_models 绑定解析模型，装配对应引擎并组装 Dialog Agent。
@@ -92,6 +93,8 @@ def create_dialog_agent(
             model=model_config.model,
             api_base=model_config.api_base,
             timeout=model_config.timeout,
+            max_retries=model_config.max_retries,
+            request_options=model_config.chat_completion_options(),
         )
 
     elif engine_type == "doubao":
@@ -119,6 +122,7 @@ def create_dialog_agent(
         state_store=state_store,
         history_store=history_store,
         tool_executor=tool_executor,
+        text_delta_sink=text_delta_sink,
     )
 
 

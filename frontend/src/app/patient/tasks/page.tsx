@@ -1,10 +1,15 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
+import { careRepository } from '@/lib/repositories';
+import { isRequestCancelled, abortRequest } from '@/lib/api/httpClient';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import {
@@ -23,9 +28,35 @@ const statusLabels = {
 };
 
 export default function PatientTasksPage() {
+  const router = useRouter();
   const { user } = useUserStore();
   const allTasks = useTaskStore((state) => state.tasks);
+  const setTasks = useTaskStore((state) => state.setTasks);
+  const [loadError, setLoadError] = useState('');
   const tasks = allTasks.filter((task) => task.patientId === user?.id);
+
+  useEffect(() => {
+    if (runtimeConfig.dataMode !== 'api') return;
+    if (!user) {
+      router.replace('/patient');
+      return;
+    }
+
+    const controller = new AbortController();
+    void careRepository
+      .listMyTasks(controller.signal)
+      .then((nextTasks) => {
+        setTasks(nextTasks);
+        setLoadError('');
+      })
+      .catch((error) => {
+        if (controller.signal.aborted || isRequestCancelled(error)) return;
+        setLoadError(
+          error instanceof Error ? error.message : '任务加载失败'
+        );
+      });
+    return () => abortRequest(controller);
+  }, [router, setTasks, user]);
 
   return (
     <PatientLayout title="我的护理任务" showNavigation>
@@ -33,9 +64,17 @@ export default function PatientTasksPage() {
         <div className="mb-5">
           <h1 className="text-2xl mb-1">任务中心</h1>
           <p className="text-sm text-foreground-muted">
-            请按顺序完成评估、宣教与知情同意，提交后由护士复核。
+            {runtimeConfig.dataMode === 'api'
+              ? '请选择医护端发布的任务，完成 AI 文本问诊后等待护士复核。'
+              : '请按顺序完成评估、宣教与知情同意，提交后由护士复核。'}
           </p>
         </div>
+
+        {loadError && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {loadError}
+          </div>
+        )}
 
         {tasks.length === 0 ? (
           <Card padding="lg" className="text-center">

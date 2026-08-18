@@ -119,6 +119,10 @@ def _build_celery_app() -> Celery:
             "task": "app.celery_app.tasks.cleanup_expired_sessions",
             "schedule": 300.0,  # 300秒 = 5分钟
         },
+        "reconcile-pending-dialog-turns": {
+            "task": "app.celery_app.tasks.reconcile_pending_dialog_turns",
+            "schedule": 30.0,
+        },
     }
 
     # ==================== 日志配置 ====================

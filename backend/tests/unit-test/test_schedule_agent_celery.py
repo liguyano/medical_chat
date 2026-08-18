@@ -76,6 +76,8 @@ def test_worker_builds_runner_with_chat_model(monkeypatch):
     fake_runner.run.assert_awaited_once_with(
         "session",
         scale_codes=["adl"],
+        source_message_id=None,
+        source_event_id=None,
         check_interval=5,
     )
 

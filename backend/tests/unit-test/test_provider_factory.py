@@ -7,7 +7,6 @@
 
 import pytest
 from langchain_openai import ChatOpenAI
-
 from medagent.configs.model_config import ModelConfig, ModelType
 from medagent.providers import create_chat_model, create_voice_engine
 
@@ -64,6 +63,13 @@ def test_create_chat_model_passes_extra_fields():
     )
     assert model.temperature == 0.3
     assert model.max_tokens == 1234
+    assert model.extra_body["enable_thinking"] is False
+
+
+def test_create_chat_model_passes_thinking_mode_to_extra_body():
+    model = create_chat_model(language_model(enable_thinking=True))
+
+    assert model.extra_body["enable_thinking"] is True
 
 
 # ---------------- create_voice_engine ----------------

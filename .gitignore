@@ -1,4 +1,5 @@
 tmp/
+.playwright-cli/
 .env
 .DS_Store
 Thumbs.db
@@ -14,6 +15,7 @@ __pycache__/
 htmlcov/
 .pytest_cache/
 celerybeat-schedule*
+backend/logs/
 
 # 医疗资料
 docs/文档

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(name="app.celery_app.tasks.schedule_agent_worker", bind=True)
 def schedule_agent_worker(self, session_id: str, task_config: dict):
     """Schedule Agent 后台任务
-    作用：组装 OpenAI 兼容客户端并运行可恢复的 Redis Stream 调度循环。
+    作用：按需创建 Schedule Agent，处理一条患者答案后立即释放实例。
     """
     import asyncio
 
@@ -45,13 +45,18 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
             publisher_factory=DialogEventPublisher,
             model=model,
         )
-        return asyncio.run(
+        result = asyncio.run(
             runner.run(
                 session_id,
                 scale_codes=task_config.get("scale_codes", []),
-                check_interval=task_config.get("check_interval", 5),
+                source_message_id=task_config.get("source_message_id"),
+                source_event_id=task_config.get("source_event_id"),
+                check_interval=task_config.get("check_interval", 1),
             )
         )
+        if result.get("status") == "already_running":
+            raise self.retry(countdown=2, max_retries=10)
+        return result
     except Exception as exc:
         logger.exception("[Schedule Agent] Celery任务失败: session=%s", session_id)
         raise self.retry(exc=exc, countdown=10, max_retries=3)
@@ -63,7 +68,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
 @celery_app.task(name="app.celery_app.tasks.dialog_agent_worker", bind=True)
 def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: dict):
     """Dialog Agent 后台任务
-    作用：运行 AI 主导问诊循环，首轮发开场白，后续轮消费患者答案产出下一问
+    作用：按需创建 Dialog Agent，生成首问或处理一条患者答案后立即释放实例。
     Args:
         - session_id: 会话ID
         - patient_info: 患者信息
@@ -71,7 +76,7 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
             必需字段：
             - scale_codes: List[str] - 量表编码列表
             可选字段：
-            - check_interval: int - Redis Stream 阻塞读取间隔（秒，默认 5）
+            - source_message_id: str - 患者答案消息编号；为空时生成首问
     """
     import asyncio
 
@@ -99,7 +104,15 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
             redis_client=get_redis(),
         )
 
-        return asyncio.run(runner.run(check_interval=task_config.get("check_interval", 5)))
+        result = asyncio.run(
+            runner.run(
+                source_message_id=task_config.get("source_message_id"),
+                source_event_id=task_config.get("source_event_id"),
+            )
+        )
+        if result.get("status") == "already_running":
+            raise self.retry(countdown=2, max_retries=10)
+        return result
     except Exception as exc:
         logger.exception("[Dialog Agent] Celery任务失败: session=%s", session_id)
         raise self.retry(exc=exc, countdown=10, max_retries=3)
@@ -191,14 +204,14 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
 @celery_app.task(name="app.celery_app.tasks.extraction_agent_worker", bind=True)
 def extraction_agent_worker(self, session_id: str, task_config: dict):
     """Field Extraction Agent 后台任务
-    作用：订阅对话流，调用抽取 Agent，写入数据库，发布结果
+    作用：按需创建 Extraction Agent，处理一条患者答案后立即释放实例。
     Args:
         - session_id: 会话ID
         - task_config: 任务配置
             必需字段：
             - scale_codes: List[str] - 量表编码列表
             可选字段：
-            - check_interval: int - Redis Stream 阻塞读取间隔（秒，默认 5）
+            - source_message_id: str - 患者答案消息编号
     """
     import asyncio
 
@@ -231,13 +244,18 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
             model=model,
         )
 
-        return asyncio.run(
+        result = asyncio.run(
             runner.run(
                 session_id,
                 scale_codes=task_config.get("scale_codes", []),
-                check_interval=task_config.get("check_interval", 5),
+                source_message_id=task_config.get("source_message_id"),
+                source_event_id=task_config.get("source_event_id"),
+                check_interval=task_config.get("check_interval", 1),
             )
         )
+        if result.get("status") == "already_running":
+            raise self.retry(countdown=2, max_retries=10)
+        return result
     except Exception as exc:
         logger.exception("[Extraction Agent] Celery任务失败: session=%s", session_id)
         raise self.retry(exc=exc, countdown=10, max_retries=3)
@@ -265,6 +283,78 @@ def cleanup_expired_sessions():
     except Exception as e:
         logger.error(f"[定时任务] 清理失败: {e}")
         raise
+
+
+@celery_app.task(name="app.celery_app.tasks.reconcile_pending_dialog_turns")
+def reconcile_pending_dialog_turns():
+    """补偿未完成的患者答案任务
+    作用：Worker 重启、Broker 任务丢失或旧版长驻任务超时后，重新派发未生成下一问的单轮流水线。
+    """
+    from sqlalchemy import func, select
+
+    from app.celery_app.runtime import ensure_worker_runtime
+    from app.models import base as model_base
+    from app.models.interaction import InteractionMessage, InteractionSession
+    from app.services.agent_dispatch_service import (
+        dispatch_answer_workers,
+        dispatch_opening_workers,
+    )
+
+    ensure_worker_runtime()
+    if model_base.SessionLocal is None:
+        return {"status": "skipped", "reason": "database_not_initialized"}
+
+    dispatched = 0
+    with model_base.SessionLocal() as db:
+        sessions = list(
+            db.scalars(
+                select(InteractionSession).where(
+                    InteractionSession.session_status == "active",
+                    InteractionSession.deleted == 0,
+                )
+            ).all()
+        )
+        for session in sessions:
+            latest_ai_turn = db.scalar(
+                select(func.max(InteractionMessage.turn_no)).where(
+                    InteractionMessage.interaction_session_id == session.id,
+                    InteractionMessage.role_type.in_(["AI", "assistant"]),
+                    InteractionMessage.deleted == 0,
+                )
+            )
+            latest_patient = db.scalar(
+                select(InteractionMessage)
+                .where(
+                    InteractionMessage.interaction_session_id == session.id,
+                    InteractionMessage.role_type.in_(["患者", "家属", "user"]),
+                    InteractionMessage.deleted == 0,
+                )
+                .order_by(
+                    InteractionMessage.turn_no.desc(),
+                    InteractionMessage.id.desc(),
+                )
+            )
+            try:
+                if latest_ai_turn is None:
+                    dispatch_opening_workers(db, session)
+                    dispatched += 1
+                elif (
+                    latest_patient is not None
+                    and latest_patient.turn_no >= latest_ai_turn
+                ):
+                    dispatch_answer_workers(
+                        db,
+                        session,
+                        source_message_id=latest_patient.message_no,
+                        source_event_id=None,
+                    )
+                    dispatched += 1
+            except Exception:
+                logger.exception(
+                    "[Dialog Reconcile] 补偿派发失败: session=%s",
+                    session.session_no,
+                )
+    return {"status": "completed", "dispatched": dispatched}
 
 
 # ==================== 测试任务 ====================

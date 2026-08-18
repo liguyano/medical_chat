@@ -45,7 +45,7 @@ export default function PatientTaskDetailPage() {
         <Card padding="lg">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <Badge variant="primary" size="sm">演示任务</Badge>
+              <Badge variant="primary" size="sm">住院护理任务</Badge>
               <h1 className="text-2xl mt-3">{task.taskType}</h1>
               <p className="text-sm text-foreground-muted mt-1">
                 {task.collectionMode === 'ai_dialogue' ? 'AI对话评估' : '传统问卷评估'}

@@ -1,18 +1,12 @@
-"""Dialog Agent 应用层 Redis 与事件适配器测试。"""
+"""Dialog Agent 应用层 Redis 与依赖适配器测试。"""
 
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from medagent.agents.service_agent.dialog_agent import DialogEngine
-from medagent.agents.service_agent.schedule_agent import QuestionTask
+from medagent.agents.service_agent.dialog_agent.tools import execute_tool
 
-from app.schemas.events import EventType
-from app.workers.dialog_agent_runtime import (
-    AppDialogEventSink,
-    RedisConstraintSource,
-    build_dialog_agent,
-)
+from app.utils import redis_client as redis_module
+from app.workers import dialog_agent_runtime as runtime_module
 
 
 class FakeRedis:
@@ -66,7 +60,7 @@ def stream_entries():
 def test_constraint_source_consumes_flat_stream_and_saves_cursor():
     """适配器应读取统一 dialog_stream 扁平字段并保存最后事件 ID。"""
     redis = FakeRedis([stream_entries(), []])
-    source = RedisConstraintSource(redis)
+    source = runtime_module.RedisConstraintSource(redis)
 
     first = source("session")
     second = source("session")
@@ -85,131 +79,24 @@ def test_constraint_source_raises_when_cursor_cannot_be_saved():
     redis = FakeRedis([stream_entries()], set_result=False)
 
     with pytest.raises(RuntimeError, match="约束游标保存失败"):
-        RedisConstraintSource(redis)("session")
+        runtime_module.RedisConstraintSource(redis)("session")
 
 
-def test_app_event_sink_builds_pydantic_events(monkeypatch):
-    """SDK 事件字典应转换为应用事件并交给统一发布器。"""
-    import app.workers.dialog_agent_runtime as runtime_module
-
-    published = []
-    publisher = SimpleNamespace(
-        publish=lambda event: published.append(event) or "1-0"
-    )
-    monkeypatch.setattr(
-        runtime_module,
-        "DialogEventPublisher",
-        lambda _: publisher,
-    )
-    sink = AppDialogEventSink("session")
-
-    turn_id = sink(
-        {
-            "event_type": "dialog_turn",
-            "session_id": "session",
-            "turn_number": 1,
-            "question": "问题",
-            "answer": "回答",
-            "tool_calls": None,
-        }
-    )
-    tool_id = sink(
-        {
-            "event_type": "tool_call",
-            "session_id": "session",
-            "turn_number": 1,
-            "tool_name": "tool",
-            "tool_args": {},
-            "tool_result": {"success": True},
-        }
-    )
-
-    assert turn_id == tool_id == "1-0"
-    assert published[0].event_type == EventType.DIALOG_TURN
-    assert published[1].event_type == EventType.TOOL_CALL
-
-
-def test_app_event_sink_rejects_unknown_event(monkeypatch):
-    """未知 SDK 事件类型不得静默发布。"""
-    import app.workers.dialog_agent_runtime as runtime_module
-
-    monkeypatch.setattr(
-        runtime_module,
-        "DialogEventPublisher",
-        lambda _: SimpleNamespace(publish=Mock()),
-    )
-    sink = AppDialogEventSink("session")
-
-    with pytest.raises(ValueError, match="不支持"):
-        sink({"event_type": "unknown"})
-
-
-class NoopEngine(DialogEngine):
-    async def create_session(self, system_prompt, tools, **kwargs):
-        return None
-
-    async def send_input(self, input_data):
-        return None
-
-    async def stream_response(self):
-        if False:
-            yield {}
-
-    async def send_tool_result(self, call_id, result):
-        return None
-
-    async def update_session(self, instructions=None, tools=None):
-        return None
-
-    async def close_session(self):
-        return None
-
-
-def test_builder_injects_all_application_adapters(monkeypatch):
-    """App builder 应组装状态、历史、约束、事件和超时适配器。"""
-    import app.workers.dialog_agent_runtime as runtime_module
-
+def test_runtime_dependencies_inject_real_tool_executor(monkeypatch):
+    """运行时依赖应注入真实工具执行器和三个应用适配器。"""
+    redis = FakeRedis([])
     state_store = object()
     history_store = object()
-    timeout = SimpleNamespace(update_activity=Mock(return_value=True))
-    monkeypatch.setattr(
-        runtime_module,
-        "AsyncAgentStateManager",
-        lambda: state_store,
-    )
-    monkeypatch.setattr(
-        runtime_module,
-        "DialogHistoryManager",
-        lambda: history_store,
-    )
-    monkeypatch.setattr(
-        runtime_module,
-        "SessionTimeoutManager",
-        lambda: timeout,
-    )
-    monkeypatch.setattr(
-        runtime_module,
-        "AppDialogEventSink",
-        lambda _: Mock(),
-    )
-    question = QuestionTask(
-        question_id=1,
-        question_code="q1",
-        question_name="问题",
-        patient_text="请回答",
-        question_type="文本",
-        required=True,
-        sort_no=1,
-    )
+    timeout_manager = Mock()
 
-    dialog = build_dialog_agent(
-        session_id="session",
-        patient_info={},
-        task_list=[question],
-        engine=NoopEngine(),
-        redis_client=FakeRedis([]),
-    )
+    monkeypatch.setattr(redis_module, "get_redis", lambda: redis)
+    monkeypatch.setattr(runtime_module, "AsyncAgentStateManager", lambda: state_store)
+    monkeypatch.setattr(runtime_module, "DialogHistoryManager", lambda: history_store)
+    monkeypatch.setattr(runtime_module, "SessionTimeoutManager", lambda: timeout_manager)
 
-    assert dialog.state_store is state_store
-    assert dialog.history_store is history_store
-    assert len(dialog.middleware.middlewares) == 4
+    dependencies = runtime_module.get_runtime_dependencies("session")
+
+    assert dependencies["state_store"] is state_store
+    assert dependencies["history_store"] is history_store
+    assert dependencies["tool_executor"] is execute_tool
+    assert len(dependencies["middlewares"]) == 4

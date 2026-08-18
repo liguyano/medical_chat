@@ -211,13 +211,9 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         raise
 
     if session is not None:
-        _dispatch_ai_dialog_workers(
-            task=task,
-            session=session,
-            patient=patient,
-            encounter=encounter,
-            scale_codes=[scale.scale_code for scale, _ in selected_versions],
-        )
+        from app.services.agent_dispatch_service import dispatch_opening_workers
+
+        dispatch_opening_workers(db, session)
 
     dto = _to_backend_task_dto(db, task)
     return CreateTaskResponse(
@@ -227,52 +223,6 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         status=task.task_status,
         task=dto,
     )
-
-
-def _dispatch_ai_dialog_workers(
-    *,
-    task: CareTask,
-    session: InteractionSession,
-    patient: Patient,
-    encounter: PatientEncounter,
-    scale_codes: list[str],
-) -> None:
-    """派发预热、问诊、调度和抽取四个Worker。"""
-    from app.celery_app.tasks import (
-        dialog_agent_preheat,
-        dialog_agent_worker,
-        extraction_agent_worker,
-        schedule_agent_worker,
-    )
-
-    patient_info = {
-        "patient_id": patient.id,
-        "encounter_id": encounter.id,
-        "name": patient.patient_name,
-        "gender": patient.sex or "",
-        "age": _calculate_age(patient.birthday),
-        "department": encounter.department_name or "",
-        "bed_no": encounter.bed_no or "",
-    }
-    task_config = {
-        "task_id": task.id,
-        "task_no": task.task_no,
-        "scale_codes": scale_codes,
-        "engine_type": "text",
-        "check_interval": 5,
-    }
-    try:
-        dialog_agent_preheat.delay(session.session_no, patient_info, task_config)
-        dialog_agent_worker.delay(session.session_no, patient_info, task_config)
-        schedule_agent_worker.delay(session.session_no, task_config)
-        extraction_agent_worker.delay(session.session_no, task_config)
-    except Exception as exc:
-        logger.exception("AI对话Worker派发失败: session=%s", session.session_no)
-        raise AppError(
-            ErrorCode.ERR_TASK_005,
-            f"后台任务派发失败: {type(exc).__name__}",
-            http_status=503,
-        ) from exc
 
 
 def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
@@ -376,3 +326,22 @@ def get_task(db: Session, task_ref: str) -> BackendTaskDto:
     if task is None:
         raise AppError(ErrorCode.ERR_TASK_003)
     return _to_backend_task_dto(db, task)
+
+
+def list_patient_tasks(
+    db: Session,
+    *,
+    patient_id: int,
+    encounter_id: int,
+) -> list[BackendTaskDto]:
+    """查询患者当前住院记录下的护理任务。"""
+    tasks = db.scalars(
+        select(CareTask)
+        .where(
+            CareTask.patient_id == patient_id,
+            CareTask.encounter_id == encounter_id,
+            CareTask.deleted == 0,
+        )
+        .order_by(CareTask.create_time.desc(), CareTask.id.desc())
+    ).all()
+    return [_to_backend_task_dto(db, task) for task in tasks]

@@ -1,9 +1,15 @@
-import { mockEncounters, mockPatients, mockScales } from '@/lib/mock/data';
+import {
+  mockEncounters,
+  mockPatients,
+  mockScales,
+  mockTasks,
+} from '@/lib/mock/data';
 import type { CareTask, InteractionSession } from '@/lib/types';
 import type {
   CareRepository,
   CreateTaskInput,
   DialogueSnapshot,
+  PatientLoginInput,
   PatientWithEncounter,
   SendMessageInput,
 } from '@/lib/repositories/types';
@@ -96,6 +102,20 @@ export class MockCareRepository implements CareRepository {
   async listScales(signal?: AbortSignal) {
     await wait(signal);
     return mockScales;
+  }
+
+  async loginPatient(_input: PatientLoginInput, signal?: AbortSignal) {
+    await wait(signal);
+    return {
+      patient: mockPatients[0],
+      encounter: mockEncounters[0],
+      tasks: mockTasks.filter((task) => task.patientId === mockPatients[0].id),
+    };
+  }
+
+  async listMyTasks(signal?: AbortSignal) {
+    await wait(signal);
+    return mockTasks;
   }
 
   async createTask(input: CreateTaskInput, signal?: AbortSignal) {

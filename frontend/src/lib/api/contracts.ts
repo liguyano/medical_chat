@@ -42,6 +42,17 @@ export interface InHospitalPatientDto {
   encounter: PatientEncounterDto;
 }
 
+export interface PatientLoginRequest {
+  id_card_no: string;
+  phone: string;
+}
+
+export interface PatientLoginResponse {
+  patient: PatientDto;
+  encounter: PatientEncounterDto;
+  tasks: BackendTaskDto[];
+}
+
 export interface AssessmentScaleDto {
   id: ApiId;
   scale_code: string;

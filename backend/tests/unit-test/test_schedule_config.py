@@ -76,5 +76,5 @@ def test_config_example_resolves_schedule_agent_binding(monkeypatch):
     config = AppConfig()
     model = config.get_agent_model_config("schedule_agent")
     assert model is not None
-    assert model.name == "qwen-plus"
+    assert model.name == "qwen-plus-precise"
     assert model.api_base.endswith("/compatible-mode/v1")

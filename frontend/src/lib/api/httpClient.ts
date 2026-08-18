@@ -13,6 +13,22 @@ export class ApiError extends Error {
   }
 }
 
+export function isRequestCancelled(error: unknown): boolean {
+  return (
+    (error instanceof ApiError &&
+      error.status === 0 &&
+      error.message === '请求已取消') ||
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
+}
+
+export function abortRequest(controller: AbortController): void {
+  if (!controller.signal.aborted) {
+    controller.abort('component-unmounted');
+  }
+}
+
 export interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
   timeoutMs?: number;

@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import TaskCard from '@/components/task/TaskCard';
-import { useUserStore } from '@/lib/stores/useUserStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type { CareTask } from '@/lib/types';
 import { PlusIcon, FunnelIcon } from '@heroicons/react/24/outline';
@@ -15,20 +14,8 @@ type FilterStatus = 'all' | CareTask['taskStatus'];
 
 export default function NurseTasksPage() {
   const router = useRouter();
-  const { isAuthenticated } = useUserStore();
   const tasks = useTaskStore((state) => state.tasks);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/nurse/login');
-      return;
-    }
-  }, [isAuthenticated, router]);
-
-  if (!isAuthenticated) {
-    return null;
-  }
 
   // 过滤任务
   const filteredTasks =

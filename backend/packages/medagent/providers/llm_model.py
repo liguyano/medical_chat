@@ -91,6 +91,7 @@ def _warn_unknown_model_settings(settings: dict[str, Any], model_config: ModelCo
         "stream_chunk_timeout",
         "thinking",
         "model_kwargs",
+        "extra_body",
     }
     extra = model_config.extra_settings()
     unknown = set(extra.keys()) - known_params
@@ -122,8 +123,8 @@ def create_chat_model(model_config: ModelConfig) -> BaseChatModel:
         "max_retries": model_config.max_retries,
     }
 
-    # 透传供应商特有字段（temperature / max_tokens / top_p 等）
-    settings.update(model_config.extra_settings())
+    # 透传供应商特有字段，并显式关闭 qwen3.5 的思考模式，避免结构化结果被推理 token 截断。
+    settings.update(model_config.chat_completion_options())
 
     # 规整 api_base → base_url
     _normalize_openai_base_url(settings, model_config)
@@ -138,6 +139,16 @@ def create_chat_model(model_config: ModelConfig) -> BaseChatModel:
     _warn_unknown_model_settings(settings, model_config)
 
     # 当前固定使用 ChatOpenAI；未来若需支持其他供应商，可参考 deerflow resolve_class 动态加载
+    logger.info(
+        "[LLM] 创建真实语言模型客户端: agent_model=%s, model=%s, api_base=%s, "
+        "temperature=%s, max_tokens=%s, enable_thinking=%s",
+        model_config.name,
+        model_config.model,
+        model_config.api_base,
+        settings.get("temperature"),
+        settings.get("max_tokens") or settings.get("max_completion_tokens"),
+        settings.get("extra_body", {}).get("enable_thinking"),
+    )
     return ChatOpenAI(**settings)
 
 

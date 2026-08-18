@@ -46,6 +46,7 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
 {json.dumps(questions_schema, ensure_ascii=False, indent=2)}
 
 ## 输出格式（严格遵守JSON Schema）
+The response must be a valid json object and must not contain markdown or explanatory text.
 {{
   "extracted_answers": [
     {{
@@ -116,10 +117,10 @@ def build_user_prompt(
         turn_num = turn_data.get("turn", "?")
         message_id = turn_data.get("message_id", "")
         patient_text = turn_data.get("patient", "")
-        ai_text = turn_data.get("ai", "")
+        ai_text = turn_data.get("ai_question", turn_data.get("ai", ""))
         prompt_parts.append(f"[轮次{turn_num} | message_id={message_id}]")
-        prompt_parts.append(f"患者：{patient_text}")
-        prompt_parts.append(f"AI：{ai_text}")
+        prompt_parts.append(f"护理人员问：{ai_text}")
+        prompt_parts.append(f"患者答：{patient_text}")
         prompt_parts.append("")
 
     # 4. 任务指令

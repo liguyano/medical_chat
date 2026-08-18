@@ -1,54 +1,50 @@
-"""Schedule Agent 后台运行器
-作用：连接应用层数据库、Redis Stream、事件发布器与 medagent 调度智能体。
+"""Schedule Agent 单轮运行器
+作用：按需创建调度 Agent，检查一条患者答案并发布下一轮约束。
 """
+
+from __future__ import annotations
 
 import json
 import logging
-from collections import deque
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-
 from medagent.agents.factory import create_schedule_agent
-from medagent.agents.service_agent.schedule_agent import ScheduleAgent, ToolCallRecord
+from medagent.agents.service_agent.schedule_agent import ToolCallRecord
+from sqlalchemy import select
 
 from app.managers.assessment_loader import AssessmentQuestionLoader
 from app.managers.dialog_history_manager import DialogHistoryManager
-from app.schemas.events import ConstraintEvent, EventType, SessionEndEvent
+from app.models import base as model_base
+from app.models.interaction import InteractionSession
+from app.schemas.events import ConstraintEvent
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
+from app.workers.worker_lease import WorkerLease
 
 logger = logging.getLogger(__name__)
 
 
-def decode_stream_fields(
-    fields: Mapping[Any, Any],
-) -> dict[str, Any]:
-    """解码 Redis Stream 字段
-    作用：统一处理 bytes、JSON 复杂字段和普通字符串。
-    """
+def decode_stream_fields(fields: Mapping[Any, Any]) -> dict[str, Any]:
+    """解码 Redis Stream 字段。"""
     decoded: dict[str, Any] = {}
-    json_fields = {"tool_calls", "metadata"}
     for raw_key, raw_value in fields.items():
         key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else raw_key
         value: Any = (
-            raw_value.decode("utf-8")
-            if isinstance(raw_value, bytes)
-            else raw_value
+            raw_value.decode("utf-8") if isinstance(raw_value, bytes) else raw_value
         )
-        if key in json_fields and isinstance(value, str):
+        if key in {"tool_calls", "metadata", "tool_args"} and isinstance(value, str):
             try:
                 value = None if value == "None" else json.loads(value)
-            except json.JSONDecodeError:
+            except (TypeError, ValueError):
                 logger.warning("Redis Stream JSON 字段解析失败: %s", key)
         decoded[key] = value
     return decoded
 
 
 class ScheduleAgentRunner:
-    """可注入依赖、可恢复状态的 Schedule Agent 事件循环。"""
+    """Schedule Agent 患者答案单轮执行器。"""
 
     def __init__(
         self,
@@ -58,150 +54,156 @@ class ScheduleAgentRunner:
         redis_client: RedisClient,
         publisher_factory: Callable[[str], DialogEventPublisher],
         model: BaseChatModel,
-        block_ms: int = 5000,
-        max_idle_reads: int = 60,
+        state_ttl: int = 86400,
     ) -> None:
-        """初始化运行器。"""
         self.loader = loader
         self.history_manager = history_manager
         self.redis = redis_client
         self.publisher_factory = publisher_factory
         self.model = model
-        self.block_ms = block_ms
-        self.max_idle_reads = max_idle_reads
+        self.state_ttl = state_ttl
 
     async def run(
         self,
         session_id: str,
         *,
         scale_codes: list[str],
-        check_interval: int = 5,
+        source_message_id: str | None = None,
+        source_event_id: str | None = None,
+        check_interval: int = 1,
     ) -> dict[str, Any]:
-        """运行指定会话的调度循环。"""
+        """检查一条患者答案并发布约束。"""
         if not scale_codes:
             return {"status": "failed", "reason": "missing_scale_codes"}
+        if not source_message_id:
+            return {
+                "status": "skipped",
+                "reason": "opening_does_not_require_schedule",
+                "session_id": session_id,
+            }
 
         questions = await self.loader.load_questions_by_scale_codes(scale_codes)
         if not questions:
             return {"status": "failed", "reason": "no_questions_loaded"}
 
-        agent = create_schedule_agent(
+        lease = WorkerLease(
+            self.redis,
+            agent_name="schedule_agent",
             session_id=session_id,
-            task_list=questions,
-            model=self.model,
-            check_interval=check_interval,
+            work_id=source_message_id,
         )
+        if not lease.acquire():
+            return {
+                "status": "already_running",
+                "session_id": session_id,
+                "source_message_id": source_message_id,
+            }
+
         state_key = f"schedule_agent:state:{session_id}"
-        state = self.redis.get(state_key)
-        if isinstance(state, dict):
-            agent.restore_state(state)
-        last_id = str(state.get("last_event_id", "0")) if isinstance(state, dict) else "0"
+        try:
+            state = self.redis.get(state_key)
+            state = state if isinstance(state, dict) else {}
+            processed = list(state.get("processed_message_ids") or [])
+            if source_message_id in processed:
+                return {
+                    "status": "already_completed",
+                    "session_id": session_id,
+                    "source_message_id": source_message_id,
+                }
 
-        recent_tool_calls: deque[ToolCallRecord] = deque(maxlen=50)
-        stream_key = f"dialog_stream:{session_id}"
-        idle_reads = 0
-        started_at = datetime.now(UTC)
-
-        while idle_reads < self.max_idle_reads:
-            messages = self.redis.xread(
-                {stream_key: last_id},
-                count=10,
-                block=self.block_ms,
+            agent = create_schedule_agent(
+                session_id=session_id,
+                task_list=questions,
+                model=self.model,
+                check_interval=max(check_interval, 1),
             )
-            if not messages:
-                idle_reads += 1
-                continue
-            idle_reads = 0
+            agent.restore_state(state)
+            history = await self.history_manager.get_dialog_history(
+                session_id,
+                limit=40,
+            )
+            result = await agent.evaluate(
+                self.history_manager.format_for_langchain(history),
+                tool_calls=self._load_recent_tool_calls(session_id),
+                force=True,
+            )
+            processed.append(source_message_id)
+            saved_state = agent.dump_state()
+            saved_state.update(
+                {
+                    "last_event_id": source_event_id or state.get("last_event_id") or "0-0",
+                    "processed_message_ids": processed[-100:],
+                }
+            )
+            if not self.redis.set(state_key, saved_state, ex=self.state_ttl):
+                raise RuntimeError(f"Schedule Agent 状态保存失败: {state_key}")
 
-            for _, message_list in messages:
-                for raw_message_id, raw_fields in message_list:
-                    message_id = (
-                        raw_message_id.decode("utf-8")
-                        if isinstance(raw_message_id, bytes)
-                        else raw_message_id
-                    )
-                    last_id = str(message_id)
-                    fields = decode_stream_fields(raw_fields)
-                    if fields.get("event_type") != EventType.DIALOG_TURN.value:
-                        self._save_state(state_key, agent, last_id)
-                        continue
-
-                    for call in fields.get("tool_calls") or []:
-                        call_name = (
-                            call.get("name") or call.get("tool_name")
-                            if isinstance(call, dict)
-                            else None
-                        )
-                        if call_name:
-                            recent_tool_calls.append(
-                                ToolCallRecord(
-                                    name=call_name,
-                                    arguments=(
-                                        call.get("arguments")
-                                        or call.get("tool_args")
-                                        or {}
-                                    ),
-                                )
-                            )
-
-                    history = await self.history_manager.get_dialog_history(
-                        session_id,
-                        limit=30,
-                    )
-                    result = await agent.evaluate(
-                        self.history_manager.format_for_langchain(history),
-                        tool_calls=list(recent_tool_calls),
-                    )
-                    self._save_state(state_key, agent, last_id)
-
-                    publisher = self.publisher_factory(session_id)
-                    if result.is_deviation:
-                        constraint_type = (
+            if result.is_deviation or result.missing_tool_calls:
+                task_id = self._load_task_id(session_id)
+                self.publisher_factory(session_id).publish(
+                    ConstraintEvent(
+                        session_id=session_id,
+                        task_id=task_id,
+                        constraint_type=(
                             "missing_tool"
                             if result.missing_tool_calls
                             else "deviation"
-                        )
-                        publisher.publish(
-                            ConstraintEvent(
-                                session_id=session_id,
-                                constraint_type=constraint_type,
-                                constraint_prompt=result.constraint_prompt,
-                                remaining_tasks=result.remaining_questions,
-                            )
-                        )
+                        ),
+                        constraint_prompt=result.constraint_prompt,
+                        remaining_tasks=result.remaining_questions,
+                    )
+                )
+            logger.info(
+                "[Schedule Agent] 单轮完成: session=%s, source_message_id=%s, deviation=%s",
+                session_id,
+                source_message_id,
+                result.is_deviation,
+            )
+            return {
+                "status": "turn_completed",
+                "session_id": session_id,
+                "source_message_id": source_message_id,
+                "is_deviation": result.is_deviation,
+                "remaining_questions": result.remaining_questions,
+            }
+        finally:
+            lease.release()
 
-                    if not result.remaining_questions:
-                        duration = int(
-                            (datetime.now(UTC) - started_at).total_seconds()
-                        )
-                        publisher.publish(
-                            SessionEndEvent(
-                                session_id=session_id,
-                                end_reason="completed",
-                                total_turns=agent.turn_counter,
-                                duration_seconds=duration,
-                            )
-                        )
-                        return {
-                            "status": "completed",
-                            "session_id": session_id,
-                            "turns": agent.turn_counter,
-                        }
+    def _load_task_id(self, session_id: str) -> int | None:
+        """读取会话关联任务主键。"""
+        if model_base.SessionLocal is None:
+            return None
+        with model_base.SessionLocal() as db:
+            return db.scalar(
+                select(InteractionSession.task_id).where(
+                    InteractionSession.session_no == session_id,
+                    InteractionSession.deleted == 0,
+                )
+            )
 
-        return {
-            "status": "idle_timeout",
-            "session_id": session_id,
-            "turns": agent.turn_counter,
-        }
-
-    def _save_state(
-        self,
-        state_key: str,
-        agent: ScheduleAgent,
-        last_event_id: str,
-    ) -> None:
-        """保存调度状态和最后消费位置，TTL 为一小时。"""
-        state = agent.dump_state()
-        state["last_event_id"] = last_event_id
-        if not self.redis.set(state_key, state, ex=3600):
-            raise RuntimeError(f"Schedule Agent 状态保存失败: {state_key}")
+    def _load_recent_tool_calls(self, session_id: str) -> list[ToolCallRecord]:
+        """从最近的 Agent 内部事件中恢复工具调用记录。"""
+        try:
+            messages = self.redis.xread(
+                {f"dialog_stream:{session_id}": "0-0"},
+                count=100,
+                block=None,
+            )
+        except Exception:
+            logger.exception("[Schedule Agent] 读取工具调用记录失败")
+            return []
+        calls: list[ToolCallRecord] = []
+        for _, entries in messages:
+            for _, raw_fields in entries:
+                fields = decode_stream_fields(raw_fields)
+                if fields.get("event_type") != "tool_call":
+                    continue
+                name = str(fields.get("tool_name") or "")
+                if name:
+                    calls.append(
+                        ToolCallRecord(
+                            name=name,
+                            arguments=dict(fields.get("tool_args") or {}),
+                        )
+                    )
+        return calls[-20:]

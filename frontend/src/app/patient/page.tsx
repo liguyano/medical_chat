@@ -7,6 +7,8 @@ import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
 import { Badge } from '@/components/shared/Badge';
+import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import { mockPatients } from '@/lib/mock/data';
@@ -37,12 +39,14 @@ function VerifyFallback() {
 }
 
 function PatientVerifyContent() {
+  const apiMode = runtimeConfig.dataMode === 'api';
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { tasks, updateTask } = useTaskStore();
+  const { tasks, setTasks, updateTask } = useTaskStore();
   const { login } = useUserStore();
   const [taskNo, setTaskNo] = useState(() => searchParams.get('taskNo') ?? '');
-  const [idCardLastFour, setIdCardLastFour] = useState('');
+  const [idCardNo, setIdCardNo] = useState('');
+  const [phone, setPhone] = useState('');
   const [participantType, setParticipantType] = useState<'patient' | 'family'>('patient');
   const [relationship, setRelationship] = useState('女儿');
   const [loading, setLoading] = useState(false);
@@ -57,7 +61,7 @@ function PatientVerifyContent() {
     if (!task) return;
     const patient = mockPatients.find((item) => item.id === task.patientId);
     setTaskNo(task.taskNo);
-    setIdCardLastFour(patient?.idCard ?? '');
+    setIdCardNo(patient?.idCard ?? '');
     setError('');
   };
 
@@ -65,6 +69,33 @@ function PatientVerifyContent() {
     event.preventDefault();
     setError('');
     setLoading(true);
+
+    if (apiMode) {
+      try {
+        const portal = await careRepository.loginPatient({
+          idCardNo: idCardNo.trim(),
+          phone: phone.trim(),
+        });
+        setTasks(portal.tasks);
+        login({
+          id: portal.patient.id,
+          role: 'patient',
+          name: portal.patient.name,
+          department: portal.encounter.department,
+        });
+        router.push('/patient/tasks');
+      } catch (loginError) {
+        setError(
+          loginError instanceof Error
+            ? loginError.message
+            : '患者身份核验失败'
+        );
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 450));
 
     const task = tasks.find((item) => item.taskNo.toLowerCase() === taskNo.trim().toLowerCase());
@@ -78,7 +109,7 @@ function PatientVerifyContent() {
       return;
     }
 
-    if (patient.idCard !== idCardLastFour.trim()) {
+    if (patient.idCard !== idCardNo.trim()) {
       setError('证件后四位与任务患者不匹配');
       setLoading(false);
       return;
@@ -108,30 +139,48 @@ function PatientVerifyContent() {
             </div>
             <div className="flex items-center justify-center gap-2 mb-2">
               <h1 className="text-3xl text-foreground">患者身份核验</h1>
-              <Badge variant="primary" size="sm">演示数据</Badge>
+              <Badge variant="primary" size="sm">
+                {apiMode ? '住院患者登录' : '演示数据'}
+              </Badge>
             </div>
             <p className="text-sm text-foreground-muted">
-              核验成功后仅展示本次住院对应的护理任务
+              {apiMode
+                ? '仅已办理入院的患者可以进入，登录后展示本人护理任务'
+                : '核验成功后仅展示本次住院对应的护理任务'}
             </p>
           </div>
 
           <Card padding="lg">
             <form onSubmit={handleVerify} className="space-y-5">
+              {!apiMode && (
+                <Input
+                  label="任务编号"
+                  value={taskNo}
+                  onChange={(event) => setTaskNo(event.target.value)}
+                  placeholder="例如 T2026080001"
+                  required
+                />
+              )}
               <Input
-                label="任务编号"
-                value={taskNo}
-                onChange={(event) => setTaskNo(event.target.value)}
-                placeholder="例如 T2026080001"
+                label={apiMode ? '身份证号' : '证件号码后四位'}
+                value={idCardNo}
+                onChange={(event) => setIdCardNo(event.target.value)}
+                placeholder={
+                  apiMode ? '请输入办理住院时登记的身份证号' : '请输入4位数字'
+                }
+                maxLength={apiMode ? 18 : 4}
                 required
               />
-              <Input
-                label="证件号码后四位"
-                value={idCardLastFour}
-                onChange={(event) => setIdCardLastFour(event.target.value)}
-                placeholder="请输入4位数字"
-                maxLength={4}
-                required
-              />
+              {apiMode && (
+                <Input
+                  label="手机号"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  placeholder="请输入办理住院时登记的手机号"
+                  maxLength={20}
+                  required
+                />
+              )}
 
               <div>
                 <p className="text-sm font-medium text-foreground mb-3">本次参与人</p>
@@ -194,17 +243,41 @@ function PatientVerifyContent() {
             </form>
 
             <div className="mt-6 pt-5 border-t border-border">
-              <p className="text-xs text-foreground-muted text-center mb-3">快速填充演示身份</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => fillDemo('ai')}>
-                  AI对话任务
+              <p className="text-xs text-foreground-muted text-center mb-3">
+                {apiMode ? 'API 联调演示身份' : '快速填充演示身份'}
+              </p>
+              {apiMode ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    setIdCardNo('110101196801180043');
+                    setPhone('13800000004');
+                    setError('');
+                  }}
+                >
+                  填充陈建军演示身份
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => fillDemo('form')}>
-                  传统问卷任务
-                </Button>
-              </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => fillDemo('ai')}>
+                    AI对话任务
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => fillDemo('form')}>
+                    传统问卷任务
+                  </Button>
+                </div>
+              )}
             </div>
           </Card>
+
+          {apiMode && (
+            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              患者端没有独立工号。身份证号和手机号用于确认住院身份；任务编号仅用于任务展示和审计。
+            </div>
+          )}
 
           <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-foreground-muted">
             <div className="rounded-xl bg-surface-secondary p-3">

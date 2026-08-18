@@ -17,12 +17,14 @@ class EventType(str, Enum):
     DIALOG_TEXT = "dialog_text"  # 文本输出事件
     DIALOG_AUDIO = "dialog_audio"  # 音频输出事件
     DIALOG_MESSAGE = "dialog_message"  # AI问诊问题事件（Dialog Agent输出）
+    ASSISTANT_MESSAGE_STARTED = "assistant_message_started"  # AI消息开始生成
     PATIENT_ANSWER = "patient_answer"  # 患者答案事件（POST /api/dialog/message输入）
     TOOL_CALL = "tool_call"  # 工具调用事件
     CONSTRAINT = "constraint"  # 约束提示事件
     SESSION_START = "session_start"  # 会话启动事件
     SESSION_END = "session_end"  # 会话结束事件
     EXTRACTION_RESULT = "extraction_result"  # 字段抽取结果事件
+    AGENT_ERROR = "agent_error"  # Agent 真实模型调用失败事件
 
 
 class BaseEvent(BaseModel):
@@ -60,6 +62,8 @@ class DialogTextEvent(BaseEvent):
     event_type: EventType = EventType.DIALOG_TEXT
     turn_number: int
     text_chunk: str  # 文本片段
+    generation_id: str = ""
+    question_id: str | None = None
     is_final: bool = False  # 是否最后一片
 
 
@@ -142,6 +146,19 @@ class DialogMessageEvent(BaseEvent):
     content: str  # 问诊问题文本
     question_id: str | None = None  # 对应Task-todo问题ID
     is_opening: bool = False  # 是否首个问诊问题
+    generation_id: str | None = None
+
+
+class AssistantMessageStartedEvent(BaseEvent):
+    """AI 消息开始事件
+    作用：模型开始生成前建立前端占位消息，并关联 Redis 完整文本快照。
+    """
+
+    event_type: EventType = EventType.ASSISTANT_MESSAGE_STARTED
+    turn_number: int
+    generation_id: str
+    question_id: str | None = None
+    role: str = "assistant"
 
 
 class PatientAnswerEvent(BaseEvent):
@@ -157,13 +174,28 @@ class PatientAnswerEvent(BaseEvent):
     input_mode: str = "text"  # text | voice
 
 
+class AgentErrorEvent(BaseEvent):
+    """Agent 错误事件
+    作用：向前端明确报告真实模型调用失败，禁止使用静态问题伪装成功。
+    """
+
+    event_type: EventType = EventType.AGENT_ERROR
+    agent_name: str
+    error_code: str
+    message: str
+    retrying: bool = True
+    generation_id: str | None = None
+
+
 # 事件类型映射
 EVENT_TYPE_MAP = {
     EventType.DIALOG_TURN: DialogTurnEvent,
     EventType.DIALOG_TEXT: DialogTextEvent,
     EventType.DIALOG_AUDIO: DialogAudioEvent,
     EventType.DIALOG_MESSAGE: DialogMessageEvent,
+    EventType.ASSISTANT_MESSAGE_STARTED: AssistantMessageStartedEvent,
     EventType.PATIENT_ANSWER: PatientAnswerEvent,
+    EventType.AGENT_ERROR: AgentErrorEvent,
     EventType.TOOL_CALL: ToolCallEvent,
     EventType.CONSTRAINT: ConstraintEvent,
     EventType.SESSION_START: SessionStartEvent,
