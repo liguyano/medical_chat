@@ -2,6 +2,7 @@ tmp/
 .env
 .DS_Store
 Thumbs.db
+.playwright-cli/
 
 # 本地配置（由 config.example.yaml 拷贝生成，不入库）
 config.yaml
@@ -14,6 +15,8 @@ __pycache__/
 htmlcov/
 .pytest_cache/
 celerybeat-schedule*
+backend/logs/
+
 
 # 医疗资料
 docs/文档
