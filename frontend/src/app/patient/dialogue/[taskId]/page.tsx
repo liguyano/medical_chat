@@ -18,6 +18,7 @@ import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
+import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
 import {
   buildDialogueSnapshotKey,
   shouldLoadDialogueSnapshot,
@@ -822,17 +823,14 @@ export default function PatientDialoguePage() {
                           <div>
                             <p className="text-xs text-foreground-muted">{answer.questionText}</p>
                             <p className="text-sm font-medium mt-1">
-                              {answer.answerText ??
-                                answer.answerNumber ??
-                                answer.selectedOptions?.join('、') ??
-                                '已记录'}
+                              {getStructuredAnswerDisplayValue(answer)}
                             </p>
                           </div>
                           <button
                             type="button"
                             onClick={() => {
                               setEditingAnswerId(answer.questionId);
-                              setCorrection(String(answer.answerText ?? answer.answerNumber ?? ''));
+                              setCorrection(getStructuredAnswerDisplayValue(answer));
                             }}
                             className="text-primary"
                             aria-label={`纠正${answer.questionText}`}
@@ -874,10 +872,7 @@ export default function PatientDialoguePage() {
                         <div>
                           <p className="text-xs text-foreground-muted">{answer.questionText}</p>
                           <p className="text-sm font-medium mt-1">
-                            {answer.answerText ??
-                              answer.answerNumber ??
-                              answer.selectedOptions?.join('、') ??
-                              '已记录'}
+                            {getStructuredAnswerDisplayValue(answer)}
                           </p>
                           <p className="text-xs text-foreground-muted mt-1">
                             可信度 {Math.round(answer.extractionConfidence * 100)}%
@@ -888,7 +883,7 @@ export default function PatientDialoguePage() {
                           type="button"
                           onClick={() => {
                             setEditingAnswerId(answer.questionId);
-                            setCorrection(String(answer.answerText ?? answer.answerNumber ?? ''));
+                            setCorrection(getStructuredAnswerDisplayValue(answer));
                           }}
                           className="text-primary"
                           aria-label={`纠正${answer.questionText}`}

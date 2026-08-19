@@ -54,6 +54,14 @@ export type ParticipantType = 'patient' | 'family' | 'agent';
 export type AssessmentScene = 'admission' | 'reassessment' | 'transfer' | 'discharge';
 export type PrototypeAnswerValue = string | string[] | number | boolean | null;
 
+export interface TaskScaleProgress {
+  scaleId: string;
+  scaleName: string;
+  answeredQuestionCount: number;
+  totalQuestionCount: number;
+  status: 'pending' | 'collecting' | 'completed';
+}
+
 // 护理任务
 export interface CareTask {
   id: string;
@@ -62,11 +70,16 @@ export interface CareTask {
   patientId: string;
   encounterId: string;
   encounterNo?: string;
+  inpatientNo?: string;
   parentTaskId?: string;
   patientName: string;
   bedNo: string;
   department?: string;
   wardName?: string;
+  sex?: string;
+  age?: number;
+  admissionDate?: string;
+  encounterStatus?: string;
   taskType: string;
   collectionMode: CollectionMode;
   taskStatus: TaskStatus;
@@ -77,6 +90,7 @@ export interface CareTask {
   scaleVersion?: string;
   scaleIds?: string[];
   scaleNames?: string[];
+  scaleProgress?: TaskScaleProgress[];
   participantType?: ParticipantType;
   participantName?: string;
   relationshipToPatient?: string;
@@ -251,7 +265,10 @@ export interface StructuredAnswer {
   answerText?: string;
   answerNumber?: number;
   answerBoolean?: boolean;
-  selectedOptions?: string[]; // option codes
+  selectedOptions?: string[]; // option codes, retained for audit
+  selectedOptionLabels?: string[]; // user-visible scale labels
+  selectedOptionValues?: string[]; // scale value snapshots
+  displayValue?: string; // normalized user-visible answer
   sourceMessageIds: string[];
   extractionConfidence: number;
   corrected: boolean; // 患者是否已纠正

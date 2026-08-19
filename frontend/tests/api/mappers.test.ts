@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mapCreateTaskRequest,
   mapMessageRating,
+  mapExtractedField,
   mapPatientPortal,
   mapQualityReview,
   mapTaskDto,
@@ -55,6 +56,20 @@ describe('API mappers', () => {
       session_id: 88,
       patient_id: 12,
       encounter_id: 13,
+      inpatient_no: 'ZY000012',
+      sex: '女',
+      age: 68,
+      admission_time: '2026-08-19T08:30:00+08:00',
+      encounter_status: '在院中',
+      scale_progress: [
+        {
+          scale_id: 5,
+          scale_name: 'Braden压疮评估量表',
+          answered_question_count: 3,
+          total_question_count: 6,
+          status: 'collecting',
+        },
+      ],
       collection_mode: 'ai_dialogue',
       task_status: 'pending',
       assigned_nurse_id: 14,
@@ -64,6 +79,16 @@ describe('API mappers', () => {
     expect(task.sessionId).toBe('88');
     expect(task.patientId).toBe('12');
     expect(task.assignedNurseId).toBe('14');
+    expect(task.inpatientNo).toBe('ZY000012');
+    expect(task.sex).toBe('女');
+    expect(task.age).toBe(68);
+    expect(task.admissionDate).toBe('2026-08-19T08:30:00+08:00');
+    expect(task.scaleProgress?.[0]).toMatchObject({
+      scaleId: '5',
+      answeredQuestionCount: 3,
+      totalQuestionCount: 6,
+      status: 'collecting',
+    });
   });
 
   it('映射患者登录后的住院信息和本人任务', () => {
@@ -134,5 +159,23 @@ describe('API mappers', () => {
     expect(review.taskId).toBe('3');
     expect(review.dialogueScores['追问合理性']).toBe(4);
     expect(review.submittedAt).toBe('2026-08-18T11:00:00Z');
+  });
+
+  it('结构化答案优先使用量表真实显示值并保留编码审计信息', () => {
+    const answer = mapExtractedField({
+      field_id: 1,
+      question_id: 2,
+      question_code: 'smoking_years',
+      question_text: '抽烟烟龄',
+      selected_options: ['option_3'],
+      selected_option_labels: ['10年以上'],
+      selected_option_values: ['10年以上'],
+      display_value: '10年以上',
+      source_message_ids: ['MSG-1'],
+      confidence: 0.95,
+    });
+    expect(answer.displayValue).toBe('10年以上');
+    expect(answer.selectedOptionLabels).toEqual(['10年以上']);
+    expect(answer.selectedOptions).toEqual(['option_3']);
   });
 });

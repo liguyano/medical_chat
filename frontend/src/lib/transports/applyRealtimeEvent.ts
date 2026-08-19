@@ -252,6 +252,16 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           selectedOptions: Array.isArray(raw.selected_options)
             ? raw.selected_options.map(String)
             : undefined,
+          selectedOptionLabels: Array.isArray(raw.selected_option_labels)
+            ? raw.selected_option_labels.map(String)
+            : undefined,
+          selectedOptionValues: Array.isArray(raw.selected_option_values)
+            ? raw.selected_option_values.map(String)
+            : undefined,
+          displayValue:
+            raw.display_value === undefined || raw.display_value === null
+              ? undefined
+              : String(raw.display_value),
           sourceMessageIds: Array.isArray(raw.source_message_ids)
             ? raw.source_message_ids.map(String)
             : event.message_id

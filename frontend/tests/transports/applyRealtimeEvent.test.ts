@@ -77,6 +77,50 @@ describe('实时事件进度口径', () => {
     });
   });
 
+  it('实时抽取事件保存量表真实值、可信度和证据消息', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+
+    applyRealtimeEvent({
+      event_id: 'extract-1',
+      event_type: 'extraction_updated',
+      task_id: '109',
+      session_id: 'SESS-109',
+      message_id: 'MSG-PATIENT-1',
+      occurred_at: '2026-08-19T10:00:00Z',
+      payload: {
+        fields: [
+          {
+            question_id: 3,
+            question_code: 'smoking_years',
+            question_text: '抽烟烟龄',
+            selected_options: ['option_3'],
+            selected_option_labels: ['10年以上'],
+            selected_option_values: ['10年以上'],
+            display_value: '10年以上',
+            source_message_ids: ['MSG-PATIENT-1'],
+            confidence: 0.95,
+          },
+        ],
+      },
+    });
+
+    const answer = useChatStore.getState().structuredAnswers['109'][0];
+    expect(answer.displayValue).toBe('10年以上');
+    expect(answer.selectedOptionLabels).toEqual(['10年以上']);
+    expect(answer.selectedOptions).toEqual(['option_3']);
+    expect(answer.extractionConfidence).toBe(0.95);
+    expect(answer.sourceMessageIds).toEqual(['MSG-PATIENT-1']);
+  });
+
   it('把工具领域事件写入宣教、同意和护士呼叫状态', async () => {
     const values = new Map<string, string>();
     vi.stubGlobal('sessionStorage', {
