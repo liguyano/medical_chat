@@ -11,7 +11,6 @@ import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
-import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
 import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
@@ -23,6 +22,13 @@ import { createMonitorSsePath } from '@/lib/transports/sseClient';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
 import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
+import {
+  filterMonitorTimeline,
+  formatConversationDuration,
+  sortMonitorTimeline,
+  type MonitorTimelineFilter,
+  type MonitorTimelineSort,
+} from '@/lib/dialogue/monitorTimeline';
 import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
 import type { MessageFeedback } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -78,6 +84,19 @@ function formatMonitorDateTime(value?: string): string {
   });
 }
 
+function getMonitorEventName(event: {
+  eventType: string;
+  title: string;
+  metadata?: Record<string, unknown>;
+}): string {
+  if (event.eventType !== 'handoff') return event.title;
+  const actionLabel = event.metadata?.actionLabel;
+  if (typeof actionLabel === 'string' && actionLabel.trim()) {
+    return actionLabel.trim();
+  }
+  return event.title.replace(/^需要护士协助/, '').trim() || '护士协助';
+}
+
 export default function NurseMonitorDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
@@ -98,7 +117,6 @@ export default function NurseMonitorDetailPage() {
   const feedback = useChatStore((state) => state.feedback);
   const setFeedback = useChatStore((state) => state.setFeedback);
   const saveFeedback = useChatStore((state) => state.saveFeedback);
-  const markEventHandled = useChatStore((state) => state.markEventHandled);
   const reviewerId = useUserStore((state) => state.user?.id ?? 'N001');
   const ratingPanelRef = useRef<HTMLDivElement>(null);
   const loadedSnapshotKeyRef = useRef<string | null>(null);
@@ -108,6 +126,11 @@ export default function NurseMonitorDetailPage() {
   >({});
   const [messageSaving, setMessageSaving] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [timelineFilter, setTimelineFilter] =
+    useState<MonitorTimelineFilter>('all');
+  const [timelineSort, setTimelineSort] =
+    useState<MonitorTimelineSort>('asc');
+  const [durationNow, setDurationNow] = useState(() => new Date());
 
   useEffect(() => {
     if (runtimeConfig.dataMode !== 'api') return;
@@ -172,6 +195,23 @@ export default function NurseMonitorDetailPage() {
     session?.messages,
     taskId,
   ]);
+  const visibleTimeline = useMemo(
+    () =>
+      sortMonitorTimeline(
+        filterMonitorTimeline(timeline, timelineFilter),
+        timelineSort
+      ),
+    [timeline, timelineFilter, timelineSort]
+  );
+  const conversationStartedAt =
+    session?.startedAt ?? session?.messages[0]?.occurredAt;
+
+  useEffect(() => {
+    if (!conversationStartedAt || session?.completedAt) return;
+    const timer = window.setInterval(() => setDurationNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, [conversationStartedAt, session?.completedAt]);
+
   const resolvedSelectedMessageId =
     selectedMessageId && aiMessages.some((message) => message.id === selectedMessageId)
       ? selectedMessageId
@@ -191,10 +231,22 @@ export default function NurseMonitorDetailPage() {
   const messageTags = selectedDraft?.issueTags ?? selectedFeedback?.issueTags ?? [];
   const messageComment = selectedDraft?.comment ?? selectedFeedback?.comment ?? '';
 
-  const { status: streamStatus, error: streamError } = useRealtimeStream({
+  const { error: streamError } = useRealtimeStream({
     path: task?.sessionId ? createMonitorSsePath(task.sessionId) : undefined,
     enabled: Boolean(task?.sessionId),
   });
+
+  const scrollToDialogueMessage = (messageId?: string) => {
+    if (!messageId) return;
+    setTimelineFilter('all');
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`dialogue-message-${messageId}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+  };
 
   if (!task) {
     return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
@@ -314,75 +366,53 @@ export default function NurseMonitorDetailPage() {
 
   return (
     <NurseLayout>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <Link href="/nurse/monitor" className="inline-flex items-center gap-2 text-foreground-muted text-sm mb-2">
-            <ArrowLeftIcon className="w-4 h-4" />
-            返回监控中心
-          </Link>
-          <h1 className="text-2xl font-semibold">实时监控</h1>
-        </div>
-        <div className="flex gap-2">
-          <IntegrationStatus streamStatus={streamStatus} compact />
-          {task.handoffRequired && (
-            <Button
-              variant="danger"
-              onClick={() => void handleResolveHandoff()}
-            >
-              <UserPlusIcon className="w-5 h-5 mr-2" />
-              接管并标记已处理
-            </Button>
-          )}
-          {task.taskStatus === 'pending_review' && (
-            <Link href={`/nurse/tasks/${taskId}/review`}>
-              <Button>进入护士复核</Button>
-            </Link>
-          )}
-        </div>
-      </div>
+      <Link
+        href="/nurse/monitor"
+        className="mb-3 inline-flex items-center gap-2 text-sm text-foreground-muted"
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+        返回
+      </Link>
 
-      <Card padding="md" className="mb-4">
-        <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
-          <div className="flex items-center gap-3 min-w-[180px]">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-100 text-orange-600 text-lg font-semibold">
+      <Card padding="sm" className="mb-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex min-w-[175px] items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-orange-600 text-sm font-semibold">
               {task.patientName.slice(0, 1)}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-lg font-semibold">{task.patientName}</span>
+                <span className="font-semibold">{task.patientName}</span>
                 <Badge variant="success" size="sm">
                   {task.encounterStatus ?? '在院中'}
                 </Badge>
               </div>
-              <p className="text-xs text-foreground-muted mt-1">
-                {task.taskNo} · {task.collectionMode === 'ai_dialogue' ? 'AI 对话采集' : '传统问卷'}
-              </p>
             </div>
           </div>
           <div className="hidden h-8 w-px bg-border lg:block" />
-          <dl className="grid flex-1 grid-cols-2 gap-x-7 gap-y-2 text-sm sm:grid-cols-3 xl:grid-cols-6">
+          <dl className="grid flex-1 grid-cols-2 gap-x-5 gap-y-1 text-xs sm:grid-cols-3 xl:grid-cols-6">
             <div>
-              <dt className="text-xs text-foreground-muted">住院号</dt>
+              <dt className="text-[11px] text-foreground-muted">住院号</dt>
               <dd className="mt-1 font-medium">{task.inpatientNo ?? task.encounterNo ?? '—'}</dd>
             </div>
             <div>
-              <dt className="text-xs text-foreground-muted">床位</dt>
+              <dt className="text-[11px] text-foreground-muted">床位</dt>
               <dd className="mt-1 font-medium">{task.bedNo}</dd>
             </div>
             <div>
-              <dt className="text-xs text-foreground-muted">科室</dt>
+              <dt className="text-[11px] text-foreground-muted">科室</dt>
               <dd className="mt-1 font-medium">{task.department ?? '—'}</dd>
             </div>
             <div>
-              <dt className="text-xs text-foreground-muted">性别/年龄</dt>
+              <dt className="text-[11px] text-foreground-muted">性别/年龄</dt>
               <dd className="mt-1 font-medium">{task.sex ?? '—'} / {task.age !== undefined ? `${task.age}岁` : '—'}</dd>
             </div>
             <div>
-              <dt className="text-xs text-foreground-muted flex items-center gap-1"><CalendarDaysIcon className="h-3.5 w-3.5" />入院日期</dt>
+              <dt className="flex items-center gap-1 text-[11px] text-foreground-muted"><CalendarDaysIcon className="h-3 w-3" />入院日期</dt>
               <dd className="mt-1 font-medium">{formatMonitorDate(task.admissionDate)}</dd>
             </div>
             <div>
-              <dt className="text-xs text-foreground-muted">病区</dt>
+              <dt className="text-[11px] text-foreground-muted">病区</dt>
               <dd className="mt-1 font-medium">{task.wardName ?? '—'}</dd>
             </div>
           </dl>
@@ -438,12 +468,6 @@ export default function NurseMonitorDetailPage() {
                 ))}
               </div>
             </div>
-            <div className="mt-5">
-              <p className="text-xs text-foreground-muted">连接状态</p>
-              <Badge variant={session?.sessionStatus === 'active' ? 'success' : 'default'} size="sm" className="mt-2">
-                {session?.sessionStatus === 'active' ? '患者在线' : session?.sessionStatus === 'paused' ? '患者已暂停' : '会话已结束'}
-              </Badge>
-            </div>
           </Card>
 
           {task.handoffRequired && pendingHandoffs.length > 0 && (
@@ -480,7 +504,7 @@ export default function NurseMonitorDetailPage() {
             </Card>
           )}
 
-          <Card padding="md">
+          <Card padding="sm">
             <h2 className="font-semibold mb-3">结构化答案</h2>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {answers.map((answer) => (
@@ -494,35 +518,41 @@ export default function NurseMonitorDetailPage() {
                   <p className="text-sm font-medium mt-1">
                     {getStructuredAnswerDisplayValue(answer)}
                   </p>
-                  <p className="text-xs text-primary mt-1">证据消息 {answer.sourceMessageIds.join(', ')}</p>
                 </div>
               ))}
               {!answers.length && <p className="text-sm text-foreground-muted">暂无结构化答案</p>}
             </div>
           </Card>
 
-          <Card padding="md">
-            <h2 className="font-semibold mb-3">风险与宣教事件</h2>
-            <div className="space-y-2">
+          <Card padding="sm">
+            <h2 className="mb-1.5 font-semibold">风险与宣教事件</h2>
+            <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
               {events.map((event) => (
-                <div key={event.id} className="rounded-xl border border-border p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium">{event.title}</p>
-                      <p className="text-xs text-foreground-muted mt-1">{event.description}</p>
-                    </div>
-                    <Badge variant={event.priority === 'high' ? 'danger' : 'warning'} size="sm">
-                      {event.priority === 'high' ? '高' : '中'}
-                    </Badge>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => markEventHandled(taskId, event.id)}
-                    className="mt-2 text-xs text-primary"
-                  >
-                    {event.handled ? '已处理' : '标记已处理'}
-                  </button>
-                </div>
+                <button
+                  key={event.id}
+                  type="button"
+                  disabled={!event.messageId}
+                  onClick={() => scrollToDialogueMessage(event.messageId)}
+                  className={cn(
+                    'grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-left',
+                    event.messageId && 'transition-colors hover:border-primary/40 hover:bg-primary-tint/30',
+                    !event.messageId && 'cursor-default'
+                  )}
+                  title={event.messageId ? '点击跳转到对应对话记录' : undefined}
+                >
+                  <span className="truncate text-xs font-medium">
+                    {getMonitorEventName(event)}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-foreground-muted">
+                    {formatMonitorDateTime(event.occurredAt)}
+                  </span>
+                  <span className={cn(
+                    'shrink-0 text-[10px]',
+                    event.handled ? 'text-emerald-600' : 'text-amber-600'
+                  )}>
+                    {event.handled ? '已处理' : '待处理'}
+                  </span>
+                </button>
               ))}
               {!events.length && <p className="text-sm text-foreground-muted">暂无风险事件</p>}
             </div>
@@ -536,20 +566,70 @@ export default function NurseMonitorDetailPage() {
           )}
         </div>
 
-        <Card padding="md" className="overflow-y-auto max-h-[72vh]">
+        <Card padding="sm" className="overflow-y-auto max-h-[72vh]">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="font-semibold">对话回放</h2>
-              <p className="text-xs text-foreground-muted mt-1">
-                点击 AI 消息，在右侧完成本轮质评
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
+                <Badge
+                  variant={session?.sessionStatus === 'active' ? 'success' : 'default'}
+                  size="sm"
+                >
+                  {session?.sessionStatus === 'active'
+                    ? '患者在线'
+                    : session?.sessionStatus === 'paused'
+                      ? '患者已暂停'
+                      : '会话已结束'}
+                </Badge>
+                <span>开始 {formatMonitorDateTime(conversationStartedAt)}</span>
+                <span>
+                  对话时长 {formatConversationDuration(
+                    conversationStartedAt,
+                    session?.completedAt,
+                    durationNow
+                  )}
+                </span>
+              </div>
             </div>
             <Badge variant="primary" size="sm">
               {Object.values(feedback).filter((item) => item.taskId === taskId).length} 条已评
             </Badge>
           </div>
-          {timeline.length ? (
-            timeline.map((item) => {
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="筛选消息类型">
+              {([
+                ['all', '全部'],
+                ['ai', 'AI'],
+                ['patient', '患者'],
+                ['tool', '工具结果'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTimelineFilter(value)}
+                  aria-pressed={timelineFilter === value}
+                  className={cn(
+                    'rounded-full border px-2.5 py-1 text-xs',
+                    timelineFilter === value
+                      ? 'border-primary bg-primary-tint text-primary'
+                      : 'border-border text-foreground-muted hover:border-primary/40'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setTimelineSort((current) => current === 'asc' ? 'desc' : 'asc')}
+              className="rounded-full border border-border px-2.5 py-1 text-xs text-foreground-muted hover:border-primary/40"
+              aria-label={timelineSort === 'asc' ? '切换为时间倒序' : '切换为时间正序'}
+            >
+              时间{timelineSort === 'asc' ? '升序 ↑' : '降序 ↓'}
+            </button>
+          </div>
+          {visibleTimeline.length ? (
+            visibleTimeline.map((item) => {
               if (item.kind === 'event' && item.event.eventType === 'handoff') {
                 return (
                   <div key={item.id} className="mb-4">
@@ -594,6 +674,7 @@ export default function NurseMonitorDetailPage() {
               return (
               <div
                 key={message.id}
+                id={`dialogue-message-${message.id}`}
                 role={isAiMessage ? 'button' : undefined}
                 tabIndex={isAiMessage ? 0 : undefined}
                 onClick={
@@ -619,7 +700,7 @@ export default function NurseMonitorDetailPage() {
                 aria-pressed={isAiMessage ? isSelected : undefined}
                 aria-label={isAiMessage ? `选择第 ${message.turnNo} 轮 AI 消息进行质评` : undefined}
               >
-                <ChatBubble message={message} showTime animate={false} />
+                <ChatBubble message={message} showTime animate={false} wide />
                 {isAiMessage && (
                   <div className="flex items-center gap-2 -mt-3 mb-4 ml-14 text-xs">
                     <span className={isSelected ? 'text-primary font-medium' : 'text-foreground-muted'}>
