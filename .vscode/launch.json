@@ -1,0 +1,146 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "后端 API：FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}\\backend\\.venv\\Scripts\\python.exe",
+      "module": "uvicorn",
+      "cwd": "${workspaceFolder}\\backend",
+      "args": [
+        "app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}\\backend;${workspaceFolder}\\backend\\packages",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "justMyCode": false,
+      "subProcess": true,
+      "showReturnValue": true
+    },
+    {
+      "name": "Worker：Dialog Agent",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}\\backend\\.venv\\Scripts\\python.exe",
+      "module": "celery",
+      "cwd": "${workspaceFolder}\\backend",
+      "args": [
+        "-A",
+        "app.celery_app.celery_config:celery_app",
+        "worker",
+        "--pool=solo",
+        "--concurrency=1",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "-Q",
+        "dialog_queue",
+        "-n",
+        "dialog-debug@%h",
+        "--loglevel=info"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}\\backend;${workspaceFolder}\\backend\\packages",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "justMyCode": false,
+      "subProcess": true,
+      "showReturnValue": true
+    },
+    {
+      "name": "Worker：Schedule Agent",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}\\backend\\.venv\\Scripts\\python.exe",
+      "module": "celery",
+      "cwd": "${workspaceFolder}\\backend",
+      "args": [
+        "-A",
+        "app.celery_app.celery_config:celery_app",
+        "worker",
+        "--pool=solo",
+        "--concurrency=1",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "-Q",
+        "schedule_queue",
+        "-n",
+        "schedule-debug@%h",
+        "--loglevel=info"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}\\backend;${workspaceFolder}\\backend\\packages",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "justMyCode": false,
+      "subProcess": true,
+      "showReturnValue": true
+    },
+    {
+      "name": "Worker：Extraction Agent",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}\\backend\\.venv\\Scripts\\python.exe",
+      "module": "celery",
+      "cwd": "${workspaceFolder}\\backend",
+      "args": [
+        "-A",
+        "app.celery_app.celery_config:celery_app",
+        "worker",
+        "--pool=solo",
+        "--concurrency=1",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+        "-Q",
+        "extraction_queue",
+        "-n",
+        "extraction-debug@%h",
+        "--loglevel=info"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}\\backend;${workspaceFolder}\\backend\\packages",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "justMyCode": false,
+      "subProcess": true,
+      "showReturnValue": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "完整后端链路：API + 三个 Worker",
+      "configurations": [
+        "后端 API：FastAPI",
+        "Worker：Dialog Agent",
+        "Worker：Schedule Agent",
+        "Worker：Extraction Agent"
+      ],
+      "preLaunchTask": "debug:检查后端调试环境",
+      "stopAll": true
+    }
+  ]
+}
