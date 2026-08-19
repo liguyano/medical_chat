@@ -16,6 +16,10 @@ import { useRealtimeStream } from '@/hooks/useRealtimeStream';
 import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
+import {
+  buildDialogueSnapshotKey,
+  shouldLoadDialogueSnapshot,
+} from '@/lib/dialogue/sessionRecovery';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { createDialogueSsePath } from '@/lib/transports/sseClient';
@@ -196,6 +200,7 @@ export default function PatientDialoguePage() {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const voiceClientRef = useRef<VoiceSocketClient | undefined>(undefined);
+  const loadedSnapshotKeyRef = useRef<string | null>(null);
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const updateTask = useTaskStore((state) => state.updateTask);
   const requestHandoff = useTaskStore((state) => state.requestHandoff);
@@ -231,11 +236,34 @@ export default function PatientDialoguePage() {
   const [editingAnswerId, setEditingAnswerId] = useState<string | null>(null);
   const [correction, setCorrection] = useState('');
 
+  const dialogueSnapshotKey = task
+    ? buildDialogueSnapshotKey(taskId, task.sessionId)
+    : '';
+
   useEffect(() => {
-    if (session || !task) return;
+    const currentTask = useTaskStore
+      .getState()
+      .tasks.find((item) => item.id === taskId);
+    const hasSession = Boolean(
+      useChatStore.getState().sessions[taskId]
+    );
+    if (
+      !shouldLoadDialogueSnapshot({
+        dataMode: runtimeConfig.dataMode,
+        hasTask: Boolean(currentTask),
+        hasSession,
+        snapshotKey: dialogueSnapshotKey,
+        loadedSnapshotKey: loadedSnapshotKeyRef.current,
+      }) ||
+      !currentTask
+    ) {
+      return;
+    }
+
     if (runtimeConfig.dataMode === 'mock') {
       const timestamp = Date.now();
-      const sessionId = task.sessionId ?? `SESSION-${taskId}-${timestamp}`;
+      const sessionId =
+        currentTask.sessionId ?? `SESSION-${taskId}-${timestamp}`;
       const welcome: InteractionMessage = {
         id: `MSG-${timestamp}`,
         messageNo: `MSG-${timestamp}`,
@@ -244,15 +272,15 @@ export default function PatientDialoguePage() {
         role: 'ai',
         cicareStage: 'connect',
         intentType: 'greeting',
-        contentText: `您好，${task.participantName ?? task.patientName}。我是AI护理评估助手小医，请确认您现在方便开始评估吗？`,
+        contentText: `您好，${currentTask.participantName ?? currentTask.patientName}。我是AI护理评估助手小医，请确认您现在方便开始评估吗？`,
         occurredAt: new Date().toISOString(),
       };
       const nextSession: InteractionSession = {
         id: sessionId,
         sessionNo: sessionId,
         taskId,
-        patientId: task.patientId,
-        encounterId: task.encounterId,
+        patientId: currentTask.patientId,
+        encounterId: currentTask.encounterId,
         interactionType: 'assessment',
         channelType: 'mixed',
         sessionStatus: 'active',
@@ -272,15 +300,21 @@ export default function PatientDialoguePage() {
       return;
     }
 
+    loadedSnapshotKeyRef.current = dialogueSnapshotKey;
     const controller = new AbortController();
     void careRepository
-      .getDialogueSnapshot(task, controller.signal)
+      .getDialogueSnapshot(currentTask, controller.signal)
       .then((snapshot) => {
+        loadedSnapshotKeyRef.current = buildDialogueSnapshotKey(
+          taskId,
+          snapshot.session.id
+        );
         setSession(taskId, snapshot.session);
         useChatStore
           .getState()
           .setStructuredAnswers(taskId, snapshot.answers);
         snapshot.events.forEach(applyRealtimeEvent);
+        setConnectionError('');
         updateTask(taskId, {
           sessionId: snapshot.session.id,
           taskStatus: 'in_progress',
@@ -289,13 +323,14 @@ export default function PatientDialoguePage() {
             current: snapshot.session.answeredQuestionCount ?? 0,
             total:
               snapshot.session.totalQuestionCount ??
-              task.progress?.total ??
+              currentTask.progress?.total ??
               totalQuestions,
           },
         });
       })
       .catch((loadError) => {
         if (controller.signal.aborted || isRequestCancelled(loadError)) return;
+        loadedSnapshotKeyRef.current = null;
         setConnectionError(
           loadError instanceof Error
             ? `会话加载失败：${loadError.message}`
@@ -303,7 +338,12 @@ export default function PatientDialoguePage() {
         );
       });
     return () => abortRequest(controller);
-  }, [session, setSession, task, taskId, updateTask]);
+  }, [
+    dialogueSnapshotKey,
+    setSession,
+    taskId,
+    updateTask,
+  ]);
 
   const streamPath = session?.id
     ? createDialogueSsePath(session.id)

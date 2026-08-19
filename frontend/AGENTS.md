@@ -38,6 +38,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `progress_updated`（必填、非派生结构化答案进度）更新。
 - AI 会话 `pending` 表示 Schedule Task-todo 与首问正在后台准备；该阶段患者输入保持禁用，
   首问完成并转为 `active` 后才允许发送。
+- API 模式进入患者对话页时必须以最新后端快照校正 Zustand 中的持久化会话，不能因为
+  sessionStorage 已存在旧会话就跳过刷新；首问完成事件必须把旧 `pending` 状态切换为
+  `active`。`streamingTaskId` 等瞬时传输状态不得跨页面恢复为正在生成。
 - 患者实时语音仅通过 `src/lib/transports/voiceSocket.ts` 连接后端 WebSocket；浏览器音频必须量化为 16kHz 单声道 PCM16，不得直接发送 Float32 底层字节。
 - 语音或网络失败时保留文字输入，并在 UI 显示 Mock/API、SSE 和语音连接状态。
 - 前端单元测试位于 `frontend/tests/`，使用 Vitest；涉及适配器变更时至少覆盖 DTO 映射、事件解析和传输边界。
