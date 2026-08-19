@@ -347,6 +347,15 @@ export const useChatStore = create<ChatStore>()(
     {
       name: 'medical-evaluate-chat-storage',
       storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        ...state,
+        streamingTaskId: null,
+      }),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<ChatStore>),
+        streamingTaskId: null,
+      }),
     }
   )
 );

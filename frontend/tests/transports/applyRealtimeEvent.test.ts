@@ -166,4 +166,56 @@ describe('实时事件进度口径', () => {
       useChatStore.getState().nurseAssistanceRequests['NURSE-1'].patientName
     ).toBe('张三');
   });
+
+  it('首问完成后把旧 pending 会话恢复为 active 并解除流式锁定', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+
+    useChatStore.setState({
+      sessions: {
+        '109': {
+          id: 'SESS-109',
+          sessionNo: 'SESS-109',
+          taskId: '109',
+          patientId: '84',
+          encounterId: '84',
+          interactionType: 'assessment',
+          channelType: 'text',
+          sessionStatus: 'pending',
+          currentCicareStage: 'connect',
+          answeredQuestionCount: 0,
+          totalQuestionCount: 6,
+          messages: [],
+        },
+      },
+      streamingTaskId: '109',
+    });
+
+    applyRealtimeEvent({
+      event_id: 'opening-completed-1',
+      event_type: 'assistant_message_completed',
+      task_id: '109',
+      session_id: 'SESS-109',
+      message_id: 'MSG-AI-OPENING',
+      occurred_at: '2026-08-19T11:46:11+08:00',
+      payload: {
+        content_text: '周阿姨您好，请告诉我现在最不舒服的地方。',
+        turn_no: 1,
+        is_final: true,
+      },
+    });
+
+    expect(useChatStore.getState().sessions['109'].sessionStatus).toBe(
+      'active'
+    );
+    expect(useChatStore.getState().streamingTaskId).toBeNull();
+  });
 });

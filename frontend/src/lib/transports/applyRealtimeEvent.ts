@@ -165,6 +165,9 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       appendDelta(event, 'ai');
       break;
     case 'assistant_message_completed': {
+      if (!currentSession(event.task_id)) {
+        chatStore.setSession(event.task_id, session);
+      }
       const message = buildMessage(event, 'ai', false);
       const existing = currentSession(event.task_id)?.messages.find(
         (item) => item.id === message.id
@@ -174,6 +177,13 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         contentText: message.contentText || existing?.contentText || '',
         isStreaming: false,
       });
+      const completedSession = currentSession(event.task_id) ?? session;
+      if (completedSession.sessionStatus === 'pending') {
+        chatStore.setSession(event.task_id, {
+          ...completedSession,
+          sessionStatus: 'active',
+        });
+      }
       chatStore.setStreaming(null);
       break;
     }
