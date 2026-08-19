@@ -16,6 +16,7 @@ interface ChatBubbleProps {
   showAvatar?: boolean;
   showTime?: boolean;
   animate?: boolean;
+  wide?: boolean;
 }
 
 export default function ChatBubble({
@@ -23,6 +24,7 @@ export default function ChatBubble({
   showAvatar = true,
   showTime = false,
   animate = true,
+  wide = false,
 }: ChatBubbleProps) {
   const isAI = message.role === 'ai';
   const isPatient = message.role === 'patient';
@@ -39,7 +41,11 @@ export default function ChatBubble({
 
   const BubbleContent = (
     <div className={`flex ${isPatient ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`flex ${isPatient ? 'flex-row-reverse' : 'flex-row'} items-start space-x-3 max-w-[80%]`}>
+      <div
+        className={`flex ${isPatient ? 'flex-row-reverse' : 'flex-row'} items-start space-x-3 ${
+          wide ? 'max-w-[94%]' : 'max-w-[80%]'
+        }`}
+      >
         {/* 头像 */}
         {showAvatar && (
           <div
