@@ -318,6 +318,25 @@ export class MockCareRepository implements CareRepository {
     await wait(signal);
   }
 
+  async acknowledgeEducation(
+    _taskId: string,
+    _eventId: string,
+    _materialId: string,
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    return {
+      event_id: `EDUCATION-STATUS-${Date.now()}`,
+      event_type: 'education_status_updated',
+      task_id: _taskId,
+      source_event_id: _eventId,
+      material_id: _materialId,
+      status: 'acknowledged',
+      acknowledged: true,
+      acknowledged_at: new Date().toISOString(),
+    };
+  }
+
   async submitQualityReview(
     _review: Parameters<CareRepository['submitQualityReview']>[0],
     signal?: AbortSignal

@@ -13,7 +13,11 @@ from app.api.dependencies import require_patient, require_staff
 from app.models.base import get_db
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
-from app.schemas.interaction_tools import HandoffRequest, HandoffResolveRequest
+from app.schemas.interaction_tools import (
+    EducationAcknowledgeRequest,
+    HandoffRequest,
+    HandoffResolveRequest,
+)
 from app.schemas.response import ApiResponse, ok
 from app.schemas.task import BackendTaskDto, CreateTaskRequest, CreateTaskResponse
 from app.services import task_service
@@ -111,5 +115,33 @@ def resolve_handoff(
             staff_id=staff.id,
             staff_no=staff.staff_no,
             staff_name=staff.staff_name,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/education/acknowledge",
+    response_model=ApiResponse[dict],
+    summary="患者确认已阅读医学宣教",
+)
+def acknowledge_education(
+    task_ref: str,
+    req: EducationAcknowledgeRequest,
+    db: DbSession,
+    patient_context: Annotated[
+        tuple[Patient, PatientEncounter],
+        Depends(require_patient),
+    ],
+) -> dict:
+    """保存患者阅读宣教材料的结果，并向医护端推送状态事件。"""
+    from app.services import tool_interaction_service
+
+    patient, _ = patient_context
+    return ok(
+        tool_interaction_service.acknowledge_education(
+            db,
+            task_ref,
+            req,
+            patient_id=patient.id,
         )
     )

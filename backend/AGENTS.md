@@ -201,7 +201,9 @@ from medagent.configs.agent_config import get_agent_config
   Dialog Agent 可执行安全兜底工具并要求模型基于真实结果继续回答。
 - 宣教材料在患者端保留原文、通俗文本与播报文本三个快照；知情同意条款在对话内确认和
   签名，签名图片保存到 `backend/storage/consent-signatures`，禁止把 data URL 直接写入
-  PostgreSQL。呼叫医护同时写入会话流与 `nurse_stream:{staff_id}` 全局提醒流。
+  PostgreSQL。患者确认宣教阅读时必须持久化 `education_status_updated` 事件，携带材料编号、
+  确认状态和确认时间，供医护端回放恢复。呼叫医护同时写入会话流与
+  `nurse_stream:{staff_id}` 全局提醒流。
   呼叫请求必须永久保留在 `interaction_event`：事件 payload 需区分
   `request_source=patient|agent`，Agent 呼叫还需保存 `tool_name`、`tool_args`、
   `tool_result`；护士处理时更新原请求事件的处理状态，并记录处理护士 ID、工号、姓名、

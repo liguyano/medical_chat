@@ -29,6 +29,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `src/lib/api` 保存后端 DTO、HTTP Client 和领域模型映射。后端数字 ID 必须在映射边界转换为字符串。
 - 患者和护士的文本、任务状态、字段抽取、宣教与人工介入事件通过 `src/lib/transports/sseClient.ts` 接收，并由 `applyRealtimeEvent.ts` 幂等写入 Zustand Store。
 - `education_triggered` 必须渲染医学宣教原文卡片并按 `spoken_content` 自动播报；
+  患者确认阅读后通过仓储调用后端持久化 `education_status_updated`，医护回放显示确认状态和时间；
   `consent_triggered` 必须在对话内渲染强制条款、播放和签名组件；`handoff_requested`
   必须同时更新患者呼叫状态和医护端全局提醒。页面刷新时通过对话事件快照接口恢复组件，
   不能只依赖当次 SSE。

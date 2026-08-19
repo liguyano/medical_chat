@@ -22,13 +22,8 @@ import { useUserStore } from '@/lib/stores/useUserStore';
 import { createMonitorSsePath } from '@/lib/transports/sseClient';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
-import type {
-  ConsentRequest,
-  EducationCard,
-  InteractionEvent,
-  InteractionMessage,
-  MessageFeedback,
-} from '@/lib/types';
+import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
+import type { MessageFeedback } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeftIcon,
@@ -128,72 +123,12 @@ export default function NurseMonitorDetailPage() {
 
   const aiMessages = session?.messages.filter((message) => message.role === 'ai') ?? [];
   const timeline = useMemo(() => {
-    const timelineEvents = interactionEvents[taskId] ?? [];
-    const timelineEducationMaterials = educationCards[taskId] ?? [];
-    const timelineConsentForms = consentRequests[taskId] ?? [];
-    const items: Array<
-      | {
-          kind: 'message';
-          id: string;
-          occurredAt: string;
-          message: InteractionMessage;
-        }
-      | {
-          kind: 'handoff';
-          id: string;
-          occurredAt: string;
-          event: InteractionEvent;
-        }
-      | {
-          kind: 'education';
-          id: string;
-          occurredAt: string;
-          item: EducationCard;
-        }
-      | {
-          kind: 'consent';
-          id: string;
-          occurredAt: string;
-          item: ConsentRequest;
-        }
-    > = [];
-    for (const message of session?.messages ?? []) {
-      items.push({
-        kind: 'message',
-        id: message.id,
-        occurredAt: message.occurredAt,
-        message,
-      });
-    }
-    for (const event of timelineEvents.filter(
-      (item) => item.eventType === 'handoff'
-    )) {
-      items.push({
-        kind: 'handoff',
-        id: event.id,
-        occurredAt: event.occurredAt,
-        event,
-      });
-    }
-    for (const item of timelineEducationMaterials) {
-      items.push({
-        kind: 'education',
-        id: `education-${item.id}`,
-        occurredAt: item.occurredAt,
-        item,
-      });
-    }
-    for (const item of timelineConsentForms) {
-      items.push({
-        kind: 'consent',
-        id: `consent-${item.id}`,
-        occurredAt: item.occurredAt,
-        item,
-      });
-    }
-    return items.sort((left, right) =>
-      left.occurredAt.localeCompare(right.occurredAt)
-    );
+    return buildDialogueHistoryTimeline({
+      messages: session?.messages,
+      educationCards: educationCards[taskId],
+      consentRequests: consentRequests[taskId],
+      events: interactionEvents[taskId],
+    });
   }, [
     consentRequests,
     educationCards,
@@ -501,7 +436,7 @@ export default function NurseMonitorDetailPage() {
           </div>
           {timeline.length ? (
             timeline.map((item) => {
-              if (item.kind === 'handoff') {
+              if (item.kind === 'event' && item.event.eventType === 'handoff') {
                 return (
                   <div key={item.id} className="mb-4">
                     <HandoffHistoryCard event={item.event} />
@@ -524,6 +459,17 @@ export default function NurseMonitorDetailPage() {
                     kind="consent"
                     item={item.item}
                   />
+                );
+              }
+              if (item.kind === 'event') {
+                return (
+                  <div
+                    key={item.id}
+                    className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+                  >
+                    <p className="font-medium">{item.event.title}</p>
+                    <p className="mt-1 text-sm">{item.event.description}</p>
+                  </div>
                 );
               }
               const message = item.message;

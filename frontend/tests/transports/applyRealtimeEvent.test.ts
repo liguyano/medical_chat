@@ -114,6 +114,52 @@ describe('实时事件进度口径', () => {
     ).toBe('宣教原文');
 
     applyRealtimeEvent({
+      event_id: 'edu-status-1',
+      event_type: 'education_status_updated',
+      task_id: '88',
+      session_id: 'SESS-88',
+      occurred_at: '2026-08-19T10:00:30Z',
+      payload: {
+        source_event_id: 'edu-1',
+        material_id: 'EDU-ALLERGY',
+        status: 'acknowledged',
+        acknowledged: true,
+        acknowledged_at: '2026-08-19T10:00:30Z',
+      },
+    });
+    expect(
+      useChatStore.getState().educationCards['88'][0].acknowledged
+    ).toBe(true);
+    expect(
+      useChatStore.getState().educationCards['88'][0].acknowledgedAt
+    ).toBe('2026-08-19T10:00:30Z');
+
+    applyRealtimeEvent({
+      event_id: 'edu-2',
+      event_type: 'education_triggered',
+      task_id: '88',
+      session_id: 'SESS-88',
+      occurred_at: '2026-08-19T10:00:45Z',
+      payload: {
+        material_id: 'EDU-ALLERGY',
+        category: 'allergy',
+        title: '药物过敏安全宣教',
+        document_version: '1.0',
+        original_content: '第二次宣教原文',
+        patient_content: '第二次通俗说明',
+        spoken_content: '第二次播报内容',
+        auto_play: true,
+      },
+    });
+    expect(useChatStore.getState().educationCards['88']).toHaveLength(2);
+    expect(useChatStore.getState().educationCards['88'][0].acknowledged).toBe(
+      true
+    );
+    expect(useChatStore.getState().educationCards['88'][1].acknowledged).toBe(
+      false
+    );
+
+    applyRealtimeEvent({
       event_id: 'consent-1',
       event_type: 'consent_triggered',
       task_id: '88',
@@ -290,5 +336,75 @@ describe('实时事件进度口径', () => {
       useChatStore.getState().events['109'][0].metadata?.resolvedByStaffNo
     ).toBe('N001');
     expect(useTaskStore.getState().tasks[0].handoffRequired).toBe(false);
+  });
+
+  it('知情同意签署后保留完整条款和患者操作结果', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+
+    applyRealtimeEvent({
+      event_id: 'consent-triggered-1',
+      event_type: 'consent_triggered',
+      task_id: '109',
+      session_id: 'SESS-109',
+      occurred_at: '2026-08-19T15:58:00Z',
+      payload: {
+        form_id: 'FORM-TOBACCO',
+        title: '住院戒烟知情确认',
+        document_version: '1.0',
+        full_text: '戒烟知情同意完整内容',
+        clauses: [
+          {
+            id: 'C1',
+            clause_name: '无烟病区说明',
+            patient_content: '病区内禁止吸烟。',
+            importance_level: 'critical',
+            mandatory_delivery: true,
+            explicit_confirmation_required: true,
+          },
+        ],
+      },
+    });
+
+    applyRealtimeEvent({
+      event_id: 'consent-status-1',
+      event_type: 'consent_status_updated',
+      task_id: '109',
+      session_id: 'SESS-109',
+      occurred_at: '2026-08-19T16:00:00Z',
+      payload: {
+        form_id: 'FORM-TOBACCO',
+        status: 'signed',
+        decision: 'agreed',
+        completed_at: '2026-08-19T16:00:00Z',
+        clauses: [
+          {
+            id: 'C1',
+            clause_name: '无烟病区说明',
+            patient_content: '病区内禁止吸烟。',
+            importance_level: 'critical',
+            mandatory_delivery: true,
+            explicit_confirmation_required: true,
+            delivery_status: 'delivered',
+            listened: true,
+            confirmed: true,
+          },
+        ],
+      },
+    });
+
+    const request = useChatStore.getState().consentRequests['109'][0];
+    expect(request.status).toBe('signed');
+    expect(request.fullText).toBe('戒烟知情同意完整内容');
+    expect(request.clauses[0].confirmed).toBe(true);
+    expect(request.completedAt).toBe('2026-08-19T16:00:00Z');
   });
 });

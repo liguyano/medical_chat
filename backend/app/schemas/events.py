@@ -231,9 +231,11 @@ class EducationStatusUpdatedEvent(BaseEvent):
     """宣教状态变化事件。"""
 
     event_type: EventType = EventType.EDUCATION_STATUS_UPDATED
+    source_event_id: str
     material_id: str
     status: str
     acknowledged: bool = False
+    acknowledged_at: datetime | None = None
 
 
 class ConsentTriggeredEvent(BaseEvent):
@@ -263,6 +265,7 @@ class ConsentStatusUpdatedEvent(BaseEvent):
     form_id: str
     status: str
     decision: str
+    clauses: list[dict[str, Any]] = Field(default_factory=list)
     signature_file_url: str | None = None
     completed_at: datetime | None = None
 

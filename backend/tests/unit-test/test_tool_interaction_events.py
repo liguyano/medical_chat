@@ -57,6 +57,29 @@ def test_education_event_maps_to_frontend_payload():
     assert envelope["payload"]["tool_result"]["material_id"] == "EDU-1"
 
 
+def test_education_status_event_keeps_acknowledged_time():
+    """患者确认宣教后应向医护端传输确认状态和时间。"""
+    from app.schemas.events import EducationStatusUpdatedEvent
+
+    event = EducationStatusUpdatedEvent(
+        session_id="SESS-1",
+        task_id=1,
+        source_event_id="EDUCATION-EVENT-1",
+        material_id="EDU-1",
+        status="acknowledged",
+        acknowledged=True,
+        acknowledged_at="2026-08-19T12:00:00Z",
+    )
+    formatted = format_sse_event("1-1", _fields(event))
+    envelope = json.loads(formatted["data"])
+
+    assert envelope["payload"]["acknowledged"] is True
+    assert envelope["payload"]["source_event_id"] == "EDUCATION-EVENT-1"
+    assert envelope["payload"]["acknowledged_at"].startswith(
+        "2026-08-19T12:00:00"
+    )
+
+
 def test_consent_event_maps_clauses():
     """知情同意事件应向前端传输结构化条款。"""
     event = ConsentTriggeredEvent(
@@ -77,6 +100,35 @@ def test_consent_event_maps_clauses():
     assert formatted["event"] == "consent_triggered"
     assert envelope["payload"]["clauses"][0]["id"] == "C1"
     assert envelope["payload"]["tool_name"] == "trigger_consent_form"
+
+
+def test_consent_status_event_keeps_patient_operation_and_clauses():
+    """知情同意完成事件应携带逐条操作结果，供两端历史卡片恢复。"""
+    from app.schemas.events import ConsentStatusUpdatedEvent
+
+    event = ConsentStatusUpdatedEvent(
+        session_id="SESS-1",
+        task_id=1,
+        form_id="FORM-1",
+        status="signed",
+        decision="agreed",
+        clauses=[
+            {
+                "id": "C1",
+                "clause_name": "风险说明",
+                "patient_content": "风险内容",
+                "listened": True,
+                "confirmed": True,
+            }
+        ],
+        completed_at="2026-08-19T12:00:00Z",
+    )
+    formatted = format_sse_event("2-1", _fields(event))
+    envelope = json.loads(formatted["data"])
+
+    assert envelope["payload"]["status"] == "signed"
+    assert envelope["payload"]["decision"] == "agreed"
+    assert envelope["payload"]["clauses"][0]["confirmed"] is True
 
 
 def test_handoff_event_maps_patient_and_action():

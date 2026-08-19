@@ -353,6 +353,26 @@ export class ApiCareRepository implements CareRepository {
     );
   }
 
+  async acknowledgeEducation(
+    taskId: string,
+    eventId: string,
+    materialId: string,
+    signal?: AbortSignal
+  ) {
+    return apiRequest<Record<string, unknown>>(
+      `/api/tasks/${encodeURIComponent(taskId)}/education/acknowledge`,
+      {
+        method: 'POST',
+        body: {
+          task_id: taskId,
+          event_id: eventId,
+          material_id: materialId,
+        },
+        signal,
+      }
+    );
+  }
+
   async submitQualityReview(
     review: Parameters<CareRepository['submitQualityReview']>[0],
     signal?: AbortSignal

@@ -20,6 +20,14 @@ interface ConsentInteractionCardProps {
   participantName: string;
   onSubmit: (progress: ConsentProgress) => Promise<void>;
 }
+
+function statusLabel(request: ConsentRequest): string {
+  if (request.status === 'signed') return '患者已确认并签署';
+  if (request.status === 'refused') return '患者已拒绝';
+  if (request.status === 'needs_explanation') return '患者请求护士解释';
+  return '待患者确认';
+}
+
 export default function ConsentInteractionCard({
   request,
   participantName,
@@ -117,16 +125,87 @@ export default function ConsentInteractionCard({
     }
   };
 
-  if (request.status === 'signed') {
+  if (request.status !== 'pending_signature') {
     return (
-      <section className="mb-4 rounded-2xl border border-green-200 bg-green-50 p-4">
-        <div className="flex items-center gap-2 font-medium text-green-800">
-          <CheckCircleIcon className="h-5 w-5" />
-          {request.title}已完成签署
+      <section
+        className={`mb-4 overflow-hidden rounded-2xl border p-4 ${
+          request.status === 'signed'
+            ? 'border-green-200 bg-green-50'
+            : 'border-amber-200 bg-amber-50'
+        }`}
+        aria-label={`知情同意历史：${request.title}`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {request.status === 'signed' ? (
+            <CheckCircleIcon className="h-5 w-5 text-green-700" />
+          ) : (
+            <ExclamationTriangleIcon className="h-5 w-5 text-amber-700" />
+          )}
+          <span className="font-medium">{request.title}</span>
+          <Badge
+            variant={request.status === 'signed' ? 'success' : 'warning'}
+            size="sm"
+          >
+            {statusLabel(request)}
+          </Badge>
         </div>
-        <p className="mt-1 text-xs text-green-700">
+        <p
+          className={`mt-1 text-xs ${
+            request.status === 'signed' ? 'text-green-700' : 'text-amber-700'
+          }`}
+        >
           文档版本 {request.documentVersion}
         </p>
+        {request.fullText && (
+          <div className="mt-3 rounded-xl border border-violet-100 bg-white p-4">
+            <p className="mb-2 text-xs font-medium text-violet-800">
+              知情同意全文
+            </p>
+            <p className="whitespace-pre-wrap text-sm leading-7">
+              {request.fullText}
+            </p>
+          </div>
+        )}
+        <div className="mt-3 space-y-3">
+          {request.clauses.map((clause, index) => (
+            <article
+              key={clause.id}
+              className="rounded-xl border border-violet-100 bg-white p-4"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs text-foreground-muted">
+                    第 {index + 1} 条
+                  </p>
+                  <h3 className="mt-1 text-sm font-semibold">
+                    {clause.clauseName}
+                  </h3>
+                </div>
+                {clause.importanceLevel === 'critical' && (
+                  <Badge variant="danger" size="sm">
+                    必须确认
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-3 text-sm leading-7">
+                {clause.patientContent}
+              </p>
+              <p className="mt-3 text-xs text-foreground-muted">
+                患者操作：
+                {clause.confirmed
+                  ? '已阅读并确认'
+                  : clause.listened
+                    ? '已播放/阅读，未确认'
+                    : '未完成阅读'}
+              </p>
+            </article>
+          ))}
+        </div>
+        {request.completedAt && (
+          <p className="mt-3 text-xs text-foreground-muted">
+            操作时间：{new Date(request.completedAt).toLocaleString('zh-CN')}
+          </p>
+        )}
       </section>
     );
   }

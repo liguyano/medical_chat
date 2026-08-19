@@ -47,3 +47,13 @@ class ConsentSignRequest(BaseModel):
     decision: Literal["agreed", "refused", "needs_explanation"]
     signature_data: str | None = None
     clauses: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EducationAcknowledgeRequest(BaseModel):
+    """患者确认已阅读医学宣教材料。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str | int
+    event_id: str = Field(..., min_length=1, max_length=128)
+    material_id: str = Field(..., min_length=1, max_length=128)

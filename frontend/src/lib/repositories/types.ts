@@ -129,6 +129,12 @@ export interface CareRepository {
     consent: ConsentProgress,
     signal?: AbortSignal
   ): Promise<void>;
+  acknowledgeEducation(
+    taskId: string,
+    eventId: string,
+    materialId: string,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>>;
   submitQualityReview(
     review: QualityReview,
     signal?: AbortSignal

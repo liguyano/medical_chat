@@ -206,9 +206,11 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
         }
     elif event_type == EventType.EDUCATION_STATUS_UPDATED.value:
         return {
+            "source_event_id": data.get("source_event_id", ""),
             "material_id": data.get("material_id", ""),
             "status": data.get("status", ""),
             "acknowledged": bool(data.get("acknowledged", False)),
+            "acknowledged_at": data.get("acknowledged_at"),
         }
     elif event_type == EventType.CONSENT_TRIGGERED.value:
         return {
@@ -230,6 +232,7 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "form_id": data.get("form_id", ""),
             "status": data.get("status", ""),
             "decision": data.get("decision", ""),
+            "clauses": data.get("clauses", []),
             "signature_file_url": data.get("signature_file_url"),
             "completed_at": data.get("completed_at"),
         }

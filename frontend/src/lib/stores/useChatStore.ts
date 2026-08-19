@@ -181,14 +181,14 @@ export const useChatStore = create<ChatStore>()(
         set((state) => {
           const current = state.educationCards[taskId] ?? [];
           const exists = current.some(
-            (item) => item.materialId === card.materialId
+            (item) => item.id === card.id
           );
           return {
               educationCards: {
                 ...state.educationCards,
                 [taskId]: exists
                   ? current.map((item) =>
-                    item.materialId === card.materialId
+                    item.id === card.id
                       ? {
                           ...item,
                           ...card,
@@ -207,7 +207,7 @@ export const useChatStore = create<ChatStore>()(
           educationCards: {
             ...state.educationCards,
             [taskId]: (state.educationCards[taskId] ?? []).map((item) =>
-              item.materialId === materialId
+              item.id === materialId || item.materialId === materialId
                 ? { ...item, ...updates }
                 : item
             ),

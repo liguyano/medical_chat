@@ -17,6 +17,7 @@ import { useRealtimeStream } from '@/hooks/useRealtimeStream';
 import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
+import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
 import {
   buildDialogueSnapshotKey,
   shouldLoadDialogueSnapshot,
@@ -25,7 +26,10 @@ import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { createDialogueSsePath } from '@/lib/transports/sseClient';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
-import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
+import {
+  toDomainSseEnvelope,
+  toHandoffSseEnvelope,
+} from '@/lib/transports/handoffResponse';
 import {
   VoiceSocketClient,
   type VoiceConnectionState,
@@ -211,18 +215,28 @@ export default function PatientDialoguePage() {
   const educationCards = useChatStore((state) => state.educationCards);
   const consentRequests = useChatStore((state) => state.consentRequests);
   const answers = structuredAnswers[taskId] ?? [];
-  const events = interactionEvents[taskId] ?? [];
-  const educationMaterials = educationCards[taskId] ?? [];
-  const consentForms = consentRequests[taskId] ?? [];
+  const historyTimeline = useMemo(
+    () =>
+      buildDialogueHistoryTimeline({
+        messages: session?.messages,
+        educationCards: educationCards[taskId],
+        consentRequests: consentRequests[taskId],
+        events: interactionEvents[taskId],
+      }),
+    [
+      consentRequests,
+      educationCards,
+      interactionEvents,
+      session?.messages,
+      taskId,
+    ]
+  );
   const streamingTaskId = useChatStore((state) => state.streamingTaskId);
   const setSession = useChatStore((state) => state.setSession);
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const upsertAnswer = useChatStore((state) => state.upsertStructuredAnswer);
   const addEvent = useChatStore((state) => state.addEvent);
-  const updateEducationCard = useChatStore(
-    (state) => state.updateEducationCard
-  );
   const updateConsentRequest = useChatStore(
     (state) => state.updateConsentRequest
   );
@@ -545,10 +559,41 @@ export default function PatientDialoguePage() {
             : progress.decision === 'needs_explanation'
               ? 'needs_explanation'
               : 'refused',
+        decision: progress.decision,
+        clauses: progress.clauses,
+        completedAt: progress.completedAt,
       });
     }
     if (progress.decision === 'agreed') {
       updateTask(taskId, { taskStatus: 'pending_review' });
+    }
+  };
+
+  const handleEducationAcknowledge = async (
+    eventId: string,
+    materialId: string
+  ) => {
+    try {
+      const response = await careRepository.acknowledgeEducation(
+        taskId,
+        eventId,
+        materialId
+      );
+      applyRealtimeEvent(
+        toDomainSseEnvelope(response, {
+          taskId,
+          sessionId: session?.id,
+          eventType: 'education_status_updated',
+        })
+      );
+      setConnectionError('');
+    } catch (acknowledgeError) {
+      setConnectionError(
+        acknowledgeError instanceof Error
+          ? `宣教确认失败：${acknowledgeError.message}`
+          : '宣教确认失败'
+      );
+      throw acknowledgeError;
     }
   };
 
@@ -697,70 +742,76 @@ export default function PatientDialoguePage() {
         <div className="flex-1 overflow-hidden">
           <div className="max-w-6xl mx-auto h-full grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div className="overflow-y-auto p-4">
-              {session?.messages.map((message) => (
-                <ChatBubble key={message.id} message={message} showAvatar animate />
-              ))}
-
-              {educationMaterials.map((card) => (
-                <EducationMaterialCard
-                  key={card.id}
-                  card={card}
-                  onAcknowledge={() =>
-                    updateEducationCard(taskId, card.materialId, {
-                      acknowledged: true,
-                    })
-                  }
-                />
-              ))}
-
-              {consentForms
-                .filter((request) => request.status !== 'signed')
-                .map((request) => (
-                  <ConsentInteractionCard
-                    key={request.formId}
-                    request={request}
-                    participantName={task.participantName ?? task.patientName}
-                    onSubmit={handleConsentSubmit}
-                  />
-                ))}
-
-              {events
-                .filter((event) => event.eventType === 'handoff')
-                .map((event) => (
-                  <div key={event.id} className="mb-4">
-                    <HandoffHistoryCard event={event} />
-                  </div>
-                ))}
-
-              {events
-                .filter(
-                  (event) =>
-                    event.eventType !== 'education' &&
-                    event.eventType !== 'handoff'
-                )
-                .map((event) => (
-                <div
-                  key={event.id}
-                  className={`rounded-2xl border p-4 mb-4 ${
-                    event.priority === 'high'
-                      ? 'bg-red-50 border-red-200'
-                      : 'bg-amber-50 border-amber-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 font-medium">
-                    <ExclamationTriangleIcon className="w-5 h-5" />
-                    {event.title}
-                  </div>
-                  <p className="text-sm mt-1">{event.description}</p>
-                  <button
-                    type="button"
-                    onClick={() => useChatStore.getState().markEventHandled(taskId, event.id)}
-                    className="mt-2 text-xs text-primary underline"
+              {historyTimeline.map((item) => {
+                if (item.kind === 'message') {
+                  return (
+                    <ChatBubble
+                      key={item.id}
+                      message={item.message}
+                      showAvatar
+                      animate
+                    />
+                  );
+                }
+                if (item.kind === 'education') {
+                  return (
+                    <EducationMaterialCard
+                      key={item.id}
+                      card={item.item}
+                      onAcknowledge={() =>
+                        handleEducationAcknowledge(
+                          item.item.id,
+                          item.item.materialId
+                        )
+                      }
+                    />
+                  );
+                }
+                if (item.kind === 'consent') {
+                  return (
+                    <ConsentInteractionCard
+                      key={item.id}
+                      request={item.item}
+                      participantName={task.participantName ?? task.patientName}
+                      onSubmit={handleConsentSubmit}
+                    />
+                  );
+                }
+                if (item.event.eventType === 'handoff') {
+                  return (
+                    <div key={item.id} className="mb-4">
+                      <HandoffHistoryCard event={item.event} />
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    key={item.id}
+                    className={`rounded-2xl border p-4 mb-4 ${
+                      item.event.priority === 'high'
+                        ? 'bg-red-50 border-red-200'
+                        : 'bg-amber-50 border-amber-200'
+                    }`}
                   >
-                    {event.handled ? '已了解' : '我已了解'}
-                  </button>
-                </div>
-                ))}
+                    <div className="flex items-center gap-2 font-medium">
+                      <ExclamationTriangleIcon className="w-5 h-5" />
+                      {item.event.title}
+                    </div>
+                    <p className="text-sm mt-1">{item.event.description}</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        useChatStore
+                          .getState()
+                          .markEventHandled(taskId, item.event.id)
+                      }
+                      className="mt-2 text-xs text-primary underline"
+                    >
+                      {item.event.handled ? '已了解' : '我已了解'}
+                    </button>
+                  </div>
+                );
+              })}
               {answers.length > 0 && (
                 <details className="lg:hidden rounded-2xl border border-border bg-surface p-4 mb-4">
                   <summary className="font-medium cursor-pointer">查看已记录信息（{answers.length}项）</summary>

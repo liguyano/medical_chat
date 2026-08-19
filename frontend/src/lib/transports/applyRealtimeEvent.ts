@@ -13,6 +13,43 @@ function value<T>(payload: Record<string, unknown>, key: string, fallback: T): T
   return (payload[key] as T | undefined) ?? fallback;
 }
 
+function parseConsentClauses(rawClauses: unknown): ConsentClause[] {
+  if (!Array.isArray(rawClauses)) return [];
+  return rawClauses.map((item, index) => {
+    const raw =
+      item && typeof item === 'object'
+        ? (item as Record<string, unknown>)
+        : {};
+    return {
+      id: String(raw.id ?? `clause-${index + 1}`),
+      clauseCode: String(raw.clause_code ?? raw.clauseCode ?? ''),
+      clauseName: String(
+        raw.clause_name ?? raw.clauseName ?? `条款 ${index + 1}`
+      ),
+      patientContent: String(raw.patient_content ?? raw.patientContent ?? ''),
+      importanceLevel: String(
+        raw.importance_level ?? raw.importanceLevel ?? 'important'
+      ) as ConsentClause['importanceLevel'],
+      mandatoryDelivery: Boolean(
+        raw.mandatory_delivery ?? raw.mandatoryDelivery ?? true
+      ),
+      explicitConfirmationRequired: Boolean(
+        raw.explicit_confirmation_required ??
+          raw.explicitConfirmationRequired ??
+          true
+      ),
+      deliveryStatus: String(
+        raw.delivery_status ?? raw.deliveryStatus ?? 'pending'
+      ) as ConsentClause['deliveryStatus'],
+      listened: Boolean(raw.listened),
+      confirmed: Boolean(raw.confirmed),
+      understandingStatus: raw.understanding_status
+        ? (String(raw.understanding_status) as ConsentClause['understandingStatus'])
+        : undefined,
+    };
+  });
+}
+
 function currentSession(taskId: string): InteractionSession | undefined {
   return useChatStore.getState().sessions[taskId];
 }
@@ -276,6 +313,7 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         autoPlay: value(event.payload, 'auto_play', true),
         acknowledged: false,
         occurredAt: event.occurred_at,
+        messageId: event.message_id,
         toolName: value(event.payload, 'tool_name', undefined),
         toolArgs: value(event.payload, 'tool_args', undefined),
         toolResult: value(event.payload, 'tool_result', undefined),
@@ -304,48 +342,23 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
     case 'education_status_updated':
       chatStore.updateEducationCard(
         event.task_id,
-        value(event.payload, 'material_id', ''),
+        value(
+          event.payload,
+          'source_event_id',
+          value(event.payload, 'material_id', '')
+        ),
         {
           acknowledged: value(event.payload, 'acknowledged', false),
+          acknowledgedAt: value(
+            event.payload,
+            'acknowledged_at',
+            undefined
+          ),
         }
       );
       break;
     case 'consent_triggered': {
-      const rawClauses = Array.isArray(event.payload.clauses)
-        ? event.payload.clauses
-        : [];
-      const clauses: ConsentClause[] = rawClauses.map((item, index) => {
-        const raw =
-          item && typeof item === 'object'
-            ? (item as Record<string, unknown>)
-            : {};
-        return {
-          id: String(raw.id ?? `clause-${index + 1}`),
-          clauseCode: String(raw.clause_code ?? raw.clauseCode ?? ''),
-          clauseName: String(
-            raw.clause_name ?? raw.clauseName ?? `条款 ${index + 1}`
-          ),
-          patientContent: String(
-            raw.patient_content ?? raw.patientContent ?? ''
-          ),
-          importanceLevel: String(
-            raw.importance_level ?? raw.importanceLevel ?? 'important'
-          ) as ConsentClause['importanceLevel'],
-          mandatoryDelivery: Boolean(
-            raw.mandatory_delivery ?? raw.mandatoryDelivery ?? true
-          ),
-          explicitConfirmationRequired: Boolean(
-            raw.explicit_confirmation_required ??
-              raw.explicitConfirmationRequired ??
-              true
-          ),
-          deliveryStatus: String(
-            raw.delivery_status ?? raw.deliveryStatus ?? 'pending'
-          ) as ConsentClause['deliveryStatus'],
-          listened: Boolean(raw.listened),
-          confirmed: Boolean(raw.confirmed),
-        };
-      });
+      const clauses = parseConsentClauses(event.payload.clauses);
       chatStore.upsertConsentRequest(event.task_id, {
         id: event.event_id || `CONSENT-${Date.now()}`,
         taskId: event.task_id,
@@ -367,6 +380,7 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         ),
         autoPlay: value(event.payload, 'auto_play', true),
         occurredAt: event.occurred_at,
+        messageId: event.message_id,
         toolName: value(event.payload, 'tool_name', undefined),
         toolArgs: value(event.payload, 'tool_args', undefined),
         toolResult: value(event.payload, 'tool_result', undefined),
@@ -374,17 +388,32 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       break;
     }
     case 'consent_status_updated':
-      chatStore.updateConsentRequest(
-        event.task_id,
-        value(event.payload, 'form_id', ''),
-        {
+      {
+        const clauses = parseConsentClauses(event.payload.clauses);
+        chatStore.updateConsentRequest(
+          event.task_id,
+          value(event.payload, 'form_id', ''),
+          {
           status: value(
             event.payload,
             'status',
             'pending_signature'
           ) as 'signed' | 'refused' | 'needs_explanation',
-        }
-      );
+          decision: value(
+            event.payload,
+            'decision',
+            undefined
+          ) as 'agreed' | 'refused' | 'needs_explanation' | undefined,
+            ...(clauses.length ? { clauses } : {}),
+            completedAt: value(event.payload, 'completed_at', undefined),
+            signatureFileUrl: value(
+              event.payload,
+              'signature_file_url',
+              undefined
+            ),
+          }
+        );
+      }
       break;
     case 'handoff_requested': {
       const requestId = value(

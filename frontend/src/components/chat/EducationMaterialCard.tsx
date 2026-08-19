@@ -12,7 +12,7 @@ import {
 
 interface EducationMaterialCardProps {
   card: EducationCard;
-  onAcknowledge: () => void;
+  onAcknowledge: () => Promise<void> | void;
 }
 
 export default function EducationMaterialCard({
@@ -23,6 +23,7 @@ export default function EducationMaterialCard({
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [speechUnavailable, setSpeechUnavailable] = useState(false);
+  const [acknowledging, setAcknowledging] = useState(false);
 
   const stop = () => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
@@ -51,6 +52,15 @@ export default function EducationMaterialCard({
     };
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
+  };
+
+  const acknowledge = async () => {
+    setAcknowledging(true);
+    try {
+      await onAcknowledge();
+    } finally {
+      setAcknowledging(false);
+    }
   };
 
   useEffect(() => {
@@ -136,8 +146,9 @@ export default function EducationMaterialCard({
             type="button"
             className="w-full"
             variant={card.acknowledged ? 'outline' : 'primary'}
-            disabled={card.acknowledged}
-            onClick={onAcknowledge}
+            disabled={card.acknowledged || acknowledging}
+            loading={acknowledging}
+            onClick={() => void acknowledge()}
           >
             <CheckCircleIcon className="mr-2 h-5 w-5" />
             {card.acknowledged ? '已确认阅读' : '我已阅读并了解'}

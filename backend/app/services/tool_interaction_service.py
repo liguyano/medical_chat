@@ -33,11 +33,13 @@ from app.schemas.events import (
     BaseEvent,
     ConsentStatusUpdatedEvent,
     ConsentTriggeredEvent,
+    EducationStatusUpdatedEvent,
     EducationTriggeredEvent,
     HandoffRequestedEvent,
     HandoffResolvedEvent,
 )
 from app.schemas.interaction_tools import (
+    EducationAcknowledgeRequest,
     ConsentSignRequest,
     HandoffRequest,
     HandoffResolveRequest,
@@ -576,6 +578,7 @@ def submit_consent(
         form_id=request.form_id,
         status=status,
         decision=request.decision,
+        clauses=request.clauses,
         signature_file_url=signature_file_url,
         completed_at=completed_at,
     )
@@ -596,6 +599,62 @@ def submit_consent(
     db.commit()
     DialogEventPublisher(session.session_no).publish(event)
     return payload
+
+
+def acknowledge_education(
+    db: Session,
+    task_ref: str,
+    request: EducationAcknowledgeRequest,
+    *,
+    patient_id: int,
+) -> dict[str, Any]:
+    """持久化患者已阅读宣教材料的操作结果，并通知医护端。"""
+    task, session, _, _ = _load_task_context(db, task_ref)
+    if session.patient_id != patient_id:
+        raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权确认该任务宣教")
+    if str(request.task_id) not in {str(task.id), task.task_no}:
+        raise AppError(ErrorCode.ERR_DIALOG_004, "task_id 与宣教任务不匹配")
+
+    material_event = db.scalar(
+        select(InteractionEventModel)
+        .where(
+            InteractionEventModel.interaction_session_id == session.id,
+            InteractionEventModel.event_type
+            == EducationTriggeredEvent.model_fields["event_type"].default.value,
+            InteractionEventModel.event_payload["event_id"].astext
+            == request.event_id,
+            InteractionEventModel.deleted == 0,
+        )
+        .order_by(InteractionEventModel.id.desc())
+    )
+    if material_event is None or str(
+        (material_event.event_payload or {}).get("material_id") or ""
+    ) != request.material_id:
+        raise AppError(ErrorCode.ERR_COMMON_001, "宣教材料不存在或已失效")
+
+    acknowledged_at = datetime.now(UTC)
+    event = EducationStatusUpdatedEvent(
+        event_id=f"EDUCATION-STATUS-{uuid.uuid4().hex.upper()}",
+        session_id=session.session_no,
+        task_id=task.id,
+        source_event_id=request.event_id,
+        material_id=request.material_id,
+        status="acknowledged",
+        acknowledged=True,
+        acknowledged_at=acknowledged_at,
+    )
+    _persist_event(
+        db,
+        session=session,
+        message_no=None,
+        event_type=event.event_type.value,
+        payload=event.model_dump(mode="json"),
+        handled_status="completed",
+        creator="patient",
+    )
+    db.commit()
+    DialogEventPublisher(session.session_no).publish(event)
+    return event.model_dump(mode="json")
 
 
 def _interaction_event_payload(row: InteractionEventModel) -> dict[str, Any]:

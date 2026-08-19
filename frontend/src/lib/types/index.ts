@@ -295,7 +295,9 @@ export interface EducationCard {
   requiresAcknowledgement: boolean;
   autoPlay: boolean;
   acknowledged: boolean;
+  acknowledgedAt?: string;
   occurredAt: string;
+  messageId?: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolResult?: Record<string, unknown>;
@@ -346,6 +348,10 @@ export interface ConsentRequest {
   requiresSignature: boolean;
   autoPlay: boolean;
   occurredAt: string;
+  messageId?: string;
+  decision?: ConsentProgress['decision'];
+  completedAt?: string;
+  signatureFileUrl?: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolResult?: Record<string, unknown>;
