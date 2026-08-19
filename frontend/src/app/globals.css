@@ -89,6 +89,33 @@ body {
   background-clip: padding-box;
 }
 
+html.patient-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground-muted) 42%, transparent) transparent;
+  scrollbar-gutter: stable;
+}
+
+html.patient-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.patient-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html.patient-scrollbar::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground-muted) 38%, transparent);
+  background-clip: padding-box;
+}
+
+html.patient-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 62%, var(--foreground-muted));
+  background-clip: padding-box;
+}
+
 h1, h2 {
   font-family: var(--font-serif);
   font-weight: 500;

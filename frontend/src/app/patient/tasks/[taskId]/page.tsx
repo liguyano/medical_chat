@@ -6,6 +6,7 @@ import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import { Badge } from '@/components/shared/Badge';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { isPatientTaskReadOnly } from '@/lib/patient/taskGroups';
 import {
   CheckCircleIcon,
   ClockIcon,
@@ -38,6 +39,8 @@ export default function PatientTaskDetailPage() {
     task.collectionMode === 'ai_dialogue'
       ? `/patient/dialogue/${task.id}`
       : `/patient/form/${task.id}`;
+  const canViewDialogue =
+    task.collectionMode === 'ai_dialogue' && isPatientTaskReadOnly(task);
 
   return (
     <PatientLayout title="任务详情" showBack onBack={() => router.push('/patient/tasks')}>
@@ -105,11 +108,31 @@ export default function PatientTaskDetailPage() {
           <div className="rounded-2xl bg-primary-tint border border-primary/20 p-5 text-center">
             <CheckCircleIcon className="w-9 h-9 text-primary mx-auto mb-2" />
             <p className="font-medium">评估已提交，等待护士复核</p>
+            {canViewDialogue && (
+              <Button
+                variant="outline"
+                className="mt-4 w-full"
+                onClick={() => router.push(`/patient/dialogue/${task.id}`)}
+              >
+                查看对话记录
+              </Button>
+            )}
           </div>
         ) : task.taskStatus === 'completed' ? (
-          <Button className="w-full" onClick={() => router.push(`/patient/complete/${task.id}`)}>
-            查看完成结果
-          </Button>
+          <div className="space-y-3">
+            <Button className="w-full" onClick={() => router.push(`/patient/complete/${task.id}`)}>
+              查看完成结果
+            </Button>
+            {canViewDialogue && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push(`/patient/dialogue/${task.id}`)}
+              >
+                查看对话记录
+              </Button>
+            )}
+          </div>
         ) : (
           <Button className="w-full" size="lg" onClick={() => router.push(startPath)}>
             {task.taskStatus === 'in_progress' ? '从上次位置继续' : '开始评估'}
