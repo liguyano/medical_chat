@@ -425,6 +425,23 @@ def get_task(db: Session, task_ref: str) -> BackendTaskDto:
     return _to_backend_task_dto(db, task)
 
 
+def list_staff_tasks(
+    db: Session,
+    *,
+    staff_id: int,
+) -> list[BackendTaskDto]:
+    """查询当前医护账号负责的全部历史任务。"""
+    tasks = db.scalars(
+        select(CareTask)
+        .where(
+            CareTask.assigned_nurse_id == staff_id,
+            CareTask.deleted == 0,
+        )
+        .order_by(CareTask.update_time.desc(), CareTask.id.desc())
+    ).all()
+    return [_to_backend_task_dto(db, task) for task in tasks]
+
+
 def list_patient_tasks(
     db: Session,
     *,
