@@ -76,4 +76,94 @@ describe('实时事件进度口径', () => {
       total: 10,
     });
   });
+
+  it('把工具领域事件写入宣教、同意和护士呼叫状态', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { useTaskStore } = await import('@/lib/stores/useTaskStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+    const task = useTaskStore.getState().tasks[0];
+    useTaskStore.setState({ tasks: [{ ...task, id: '88' }] });
+
+    applyRealtimeEvent({
+      event_id: 'edu-1',
+      event_type: 'education_triggered',
+      task_id: '88',
+      session_id: 'SESS-88',
+      occurred_at: '2026-08-19T10:00:00Z',
+      payload: {
+        material_id: 'EDU-ALLERGY',
+        category: 'allergy',
+        title: '药物过敏安全宣教',
+        document_version: '1.0',
+        original_content: '宣教原文',
+        patient_content: '通俗说明',
+        spoken_content: '播报内容',
+        auto_play: true,
+      },
+    });
+    expect(
+      useChatStore.getState().educationCards['88'][0].originalContent
+    ).toBe('宣教原文');
+
+    applyRealtimeEvent({
+      event_id: 'consent-1',
+      event_type: 'consent_triggered',
+      task_id: '88',
+      session_id: 'SESS-88',
+      occurred_at: '2026-08-19T10:01:00Z',
+      payload: {
+        form_id: 'FORM-1',
+        form_type: 'surgery',
+        title: '手术知情同意提醒',
+        document_version: '1.0',
+        full_text: '完整条款',
+        clauses: [
+          {
+            id: 'C1',
+            clause_code: 'RISK',
+            clause_name: '风险说明',
+            patient_content: '风险内容',
+            importance_level: 'critical',
+            mandatory_delivery: true,
+            explicit_confirmation_required: true,
+          },
+        ],
+      },
+    });
+    expect(
+      useChatStore.getState().consentRequests['88'][0].clauses[0].clauseName
+    ).toBe('风险说明');
+
+    applyRealtimeEvent({
+      event_id: 'handoff-1',
+      event_type: 'handoff_requested',
+      task_id: '88',
+      session_id: 'SESS-88',
+      occurred_at: '2026-08-19T10:02:00Z',
+      payload: {
+        request_id: 'NURSE-1',
+        reason: '需要测量血压',
+        requested_action: 'measure_blood_pressure',
+        action_label: '测量血压',
+        patient_name: '张三',
+        bed_no: '08床',
+        urgency: 'urgent',
+      },
+    });
+    expect(useTaskStore.getState().tasks[0].handoffRequired).toBe(true);
+    expect(useTaskStore.getState().tasks[0].handoffActionLabel).toBe(
+      '测量血压'
+    );
+    expect(
+      useChatStore.getState().nurseAssistanceRequests['NURSE-1'].patientName
+    ).toBe('张三');
+  });
 });

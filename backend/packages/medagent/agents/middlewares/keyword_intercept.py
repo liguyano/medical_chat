@@ -3,6 +3,7 @@
 """
 import logging
 from typing import Any
+from uuid import uuid4
 
 from .base import DialogMiddleware
 
@@ -41,6 +42,162 @@ class KeywordInterceptMiddleware(DialogMiddleware):
                 "你必须追问具体过敏药物名称和反应，"
                 "调用 get_education_material(category='allergy', level=3)"
             ),
+            "量体温": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_temperature') 呼叫护士，禁止仅用文字等待"
+            ),
+            "测体温": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_temperature') 呼叫护士，禁止仅用文字等待"
+            ),
+            "量血压": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_blood_pressure') 呼叫护士，禁止仅用文字等待"
+            ),
+            "测血压": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_blood_pressure') 呼叫护士，禁止仅用文字等待"
+            ),
+            "量体重": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_weight') 呼叫护士，禁止仅用文字等待"
+            ),
+            "测体重": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_weight') 呼叫护士，禁止仅用文字等待"
+            ),
+            "量身高": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_height') 呼叫护士，禁止仅用文字等待"
+            ),
+            "测身高": (
+                "必须调用 request_nurse_assistance("
+                "requested_action='measure_height') 呼叫护士，禁止仅用文字等待"
+            ),
+        }
+        self.builtin_tool_calls: dict[str, list[dict[str, Any]]] = {
+            "抽烟": [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "tobacco", "level": 2},
+                },
+                {
+                    "name": "trigger_consent_form",
+                    "arguments": {"form_type": "tobacco"},
+                },
+            ],
+            "吸烟": [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "tobacco", "level": 2},
+                },
+                {
+                    "name": "trigger_consent_form",
+                    "arguments": {"form_type": "tobacco"},
+                },
+            ],
+            "喝酒": [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "alcohol", "level": 2},
+                }
+            ],
+            "饮酒": [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "alcohol", "level": 2},
+                }
+            ],
+            "手术": [
+                {
+                    "name": "trigger_consent_form",
+                    "arguments": {"form_type": "surgery"},
+                }
+            ],
+            "青霉素过敏": [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "allergy", "level": 3},
+                }
+            ],
+            "药物过敏": [
+                {
+                    "name": "get_education_material",
+                    "arguments": {"category": "allergy", "level": 3},
+                }
+            ],
+            "量体温": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_temperature",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "测体温": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_temperature",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "量血压": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_blood_pressure",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "测血压": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_blood_pressure",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "量体重": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_weight",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "测体重": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_weight",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "量身高": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_height",
+                        "urgency": "routine",
+                    },
+                }
+            ],
+            "测身高": [
+                {
+                    "name": "request_nurse_assistance",
+                    "arguments": {
+                        "requested_action": "measure_height",
+                        "urgency": "routine",
+                    },
+                }
+            ],
         }
         logger.info("[KeywordInterceptMiddleware] 初始化完成")
 
@@ -63,12 +220,33 @@ class KeywordInterceptMiddleware(DialogMiddleware):
             "手术": ("不做手术", "无需手术"),
         }
         matched_constraints: list[str] = []
+        required_tool_calls: list[dict[str, Any]] = []
         for keyword, constraint in self.builtin_keywords.items():
             negatives = negative_phrases.get(keyword, ())
             if keyword in patient_input and not any(
                 phrase in patient_input for phrase in negatives
             ):
                 matched_constraints.append(constraint)
+                for tool_call in self.builtin_tool_calls.get(keyword, []):
+                    arguments = dict(tool_call["arguments"])
+                    if tool_call["name"] == "request_nurse_assistance":
+                        arguments["reason"] = patient_input
+                    signature = (tool_call["name"], repr(sorted(arguments.items())))
+                    existing_signatures = {
+                        (
+                            str(item.get("name") or ""),
+                            repr(sorted(dict(item.get("arguments") or {}).items())),
+                        )
+                        for item in required_tool_calls
+                    }
+                    if signature not in existing_signatures:
+                        required_tool_calls.append(
+                            {
+                                "call_id": f"required-{uuid4().hex}",
+                                "name": tool_call["name"],
+                                "arguments": arguments,
+                            }
+                        )
                 logger.info(
                     f"[KeywordInterceptMiddleware] 命中关键词: {keyword} "
                     f"-> 约束: {constraint[:50]}..."
@@ -84,6 +262,7 @@ class KeywordInterceptMiddleware(DialogMiddleware):
                 for constraint in matched_constraints
                 if constraint not in existing
             )
+            context.setdefault("required_tool_calls", []).extend(required_tool_calls)
 
     async def after_agent(self, context: dict[str, Any], output: Any) -> None:
         """执行后钩子：关键词拦截无需 after 处理

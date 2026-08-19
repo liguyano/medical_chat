@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.configs.app_config import get_app_config
 from app.configs.logging_config import setup_logging
@@ -91,7 +93,17 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # 注册业务路由
-    from app.api import auth, dialog, extraction, patients, quality, scales, sse, tasks
+    from app.api import (
+        auth,
+        consent,
+        dialog,
+        extraction,
+        patients,
+        quality,
+        scales,
+        sse,
+        tasks,
+    )
 
     app.include_router(auth.router)
     app.include_router(tasks.router)
@@ -101,6 +113,17 @@ def create_app() -> FastAPI:
     app.include_router(scales.router)
     app.include_router(extraction.router)
     app.include_router(quality.router)
+    app.include_router(consent.router)
+
+    signature_directory = (
+        Path(__file__).resolve().parents[1] / "storage" / "consent-signatures"
+    )
+    signature_directory.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/media/consent-signatures",
+        StaticFiles(directory=signature_directory),
+        name="consent-signatures",
+    )
 
     # 健康检查
     @app.get("/health", tags=["system"])

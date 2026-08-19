@@ -2,6 +2,7 @@ import type { SseEnvelope } from '@/lib/api/contracts';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type {
+  ConsentClause,
   InteractionEvent,
   InteractionMessage,
   InteractionSession,
@@ -235,45 +236,244 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       });
       break;
     }
-    case 'education_triggered':
-    case 'consent_triggered':
-    case 'handoff_requested': {
-      const eventType: InteractionEvent['eventType'] =
-        event.event_type === 'education_triggered'
-          ? 'education'
-          : event.event_type === 'handoff_requested'
-            ? 'handoff'
-            : 'follow_up';
-      chatStore.addEvent(event.task_id, {
-        id: event.event_id || `EVENT-${Date.now()}`,
+    case 'education_triggered': {
+      const materialId = value(
+        event.payload,
+        'material_id',
+        event.event_id
+      );
+      chatStore.upsertEducationCard(event.task_id, {
+        id: event.event_id || `EDU-${materialId}`,
         taskId: event.task_id,
-        messageId: event.message_id,
-        eventType,
-        title: value(
-          event.payload,
-          'title',
-          eventType === 'handoff' ? '请求护士协助' : '护理提醒'
-        ),
-        description: value(event.payload, 'description', ''),
+        materialId,
+        category: value(event.payload, 'category', ''),
+        title: value(event.payload, 'title', '医学宣教'),
+        documentVersion: value(event.payload, 'document_version', ''),
+        originalContent: value(event.payload, 'original_content', ''),
+        patientContent: value(event.payload, 'patient_content', ''),
+        spokenContent: value(event.payload, 'spoken_content', ''),
+        sourceName: value(event.payload, 'source_name', undefined),
         priority: value(
           event.payload,
           'priority',
-          eventType === 'handoff' ? 'high' : 'medium'
+          'medium'
+        ) as 'low' | 'medium' | 'high',
+        requiresAcknowledgement: value(
+          event.payload,
+          'requires_acknowledgement',
+          true
+        ),
+        autoPlay: value(event.payload, 'auto_play', true),
+        acknowledged: false,
+        occurredAt: event.occurred_at,
+      });
+      chatStore.addEvent(event.task_id, {
+        id: `EDUCATION-${materialId}`,
+        taskId: event.task_id,
+        messageId: event.message_id,
+        eventType: 'education',
+        title: value(event.payload, 'title', '医学宣教'),
+        description: value(
+          event.payload,
+          'patient_content',
+          value(event.payload, 'original_content', '')
+        ),
+        priority: value(
+          event.payload,
+          'priority',
+          'medium'
         ) as InteractionEvent['priority'],
         handled: false,
         occurredAt: event.occurred_at,
       });
-      if (eventType === 'handoff') {
-        taskStore.requestHandoff(
-          event.task_id,
-          value(event.payload, 'reason', '患者请求护士协助')
-        );
+      break;
+    }
+    case 'education_status_updated':
+      chatStore.updateEducationCard(
+        event.task_id,
+        value(event.payload, 'material_id', ''),
+        {
+          acknowledged: value(event.payload, 'acknowledged', false),
+        }
+      );
+      break;
+    case 'consent_triggered': {
+      const rawClauses = Array.isArray(event.payload.clauses)
+        ? event.payload.clauses
+        : [];
+      const clauses: ConsentClause[] = rawClauses.map((item, index) => {
+        const raw =
+          item && typeof item === 'object'
+            ? (item as Record<string, unknown>)
+            : {};
+        return {
+          id: String(raw.id ?? `clause-${index + 1}`),
+          clauseCode: String(raw.clause_code ?? raw.clauseCode ?? ''),
+          clauseName: String(
+            raw.clause_name ?? raw.clauseName ?? `条款 ${index + 1}`
+          ),
+          patientContent: String(
+            raw.patient_content ?? raw.patientContent ?? ''
+          ),
+          importanceLevel: String(
+            raw.importance_level ?? raw.importanceLevel ?? 'important'
+          ) as ConsentClause['importanceLevel'],
+          mandatoryDelivery: Boolean(
+            raw.mandatory_delivery ?? raw.mandatoryDelivery ?? true
+          ),
+          explicitConfirmationRequired: Boolean(
+            raw.explicit_confirmation_required ??
+              raw.explicitConfirmationRequired ??
+              true
+          ),
+          deliveryStatus: String(
+            raw.delivery_status ?? raw.deliveryStatus ?? 'pending'
+          ) as ConsentClause['deliveryStatus'],
+          listened: Boolean(raw.listened),
+          confirmed: Boolean(raw.confirmed),
+        };
+      });
+      chatStore.upsertConsentRequest(event.task_id, {
+        id: event.event_id || `CONSENT-${Date.now()}`,
+        taskId: event.task_id,
+        formId: value(event.payload, 'form_id', event.event_id),
+        formType: value(event.payload, 'form_type', ''),
+        title: value(event.payload, 'title', '知情同意确认'),
+        documentVersion: value(event.payload, 'document_version', ''),
+        fullText: value(event.payload, 'full_text', ''),
+        clauses,
+        status: value(
+          event.payload,
+          'status',
+          'pending_signature'
+        ) as 'pending_signature',
+        requiresSignature: value(
+          event.payload,
+          'requires_signature',
+          true
+        ),
+        autoPlay: value(event.payload, 'auto_play', true),
+        occurredAt: event.occurred_at,
+      });
+      break;
+    }
+    case 'consent_status_updated':
+      chatStore.updateConsentRequest(
+        event.task_id,
+        value(event.payload, 'form_id', ''),
+        {
+          status: value(
+            event.payload,
+            'status',
+            'pending_signature'
+          ) as 'signed' | 'refused' | 'needs_explanation',
+        }
+      );
+      break;
+    case 'handoff_requested': {
+      const requestId = value(
+        event.payload,
+        'request_id',
+        event.event_id || `NURSE-${Date.now()}`
+      );
+      const reason = value(
+        event.payload,
+        'reason',
+        '患者请求护士协助'
+      );
+      chatStore.addEvent(event.task_id, {
+        id: `HANDOFF-${requestId}`,
+        taskId: event.task_id,
+        messageId: event.message_id,
+        eventType: 'handoff',
+        title: value(event.payload, 'title', '请求护士协助'),
+        description: value(event.payload, 'description', reason),
+        priority: value(
+          event.payload,
+          'priority',
+          'high'
+        ) as InteractionEvent['priority'],
+        handled: false,
+        occurredAt: event.occurred_at,
+        metadata: {
+          requestId: value(event.payload, 'request_id', ''),
+          requestedAction: value(
+            event.payload,
+            'requested_action',
+            'other'
+          ),
+          actionLabel: value(
+            event.payload,
+            'action_label',
+            '人工护理操作'
+          ),
+          urgency: value(event.payload, 'urgency', 'routine'),
+          patientName: value(event.payload, 'patient_name', ''),
+          bedNo: value(event.payload, 'bed_no', ''),
+          wardName: value(event.payload, 'ward_name', ''),
+        },
+      });
+      taskStore.requestHandoff(event.task_id, reason, {
+        requestId: value(event.payload, 'request_id', ''),
+        requestedAction: value(
+          event.payload,
+          'requested_action',
+          'other'
+        ),
+        actionLabel: value(
+          event.payload,
+          'action_label',
+          '人工护理操作'
+        ),
+        urgency: value(
+          event.payload,
+          'urgency',
+          'routine'
+        ) as 'routine' | 'urgent',
+      });
+      chatStore.upsertNurseAssistanceRequest({
+        requestId,
+        taskId: event.task_id,
+        patientName: value(event.payload, 'patient_name', undefined),
+        bedNo: value(event.payload, 'bed_no', undefined),
+        wardName: value(event.payload, 'ward_name', undefined),
+        reason,
+        requestedAction: value(
+          event.payload,
+          'requested_action',
+          'other'
+        ),
+        actionLabel: value(
+          event.payload,
+          'action_label',
+          '人工护理操作'
+        ),
+        urgency: value(
+          event.payload,
+          'urgency',
+          'routine'
+        ) as 'routine' | 'urgent',
+        status: 'requested',
+        occurredAt: event.occurred_at,
+      });
+      break;
+    }
+    case 'handoff_resolved': {
+      taskStore.resolveHandoff(event.task_id);
+      const requestId = value(event.payload, 'request_id', '');
+      if (requestId) {
+        chatStore.resolveNurseAssistanceRequest(requestId);
+      } else {
+        for (const request of Object.values(
+          chatStore.nurseAssistanceRequests
+        )) {
+          if (request.taskId === event.task_id) {
+            chatStore.resolveNurseAssistanceRequest(request.requestId);
+          }
+        }
       }
       break;
     }
-    case 'handoff_resolved':
-      taskStore.resolveHandoff(event.task_id);
-      break;
     case 'task_status_updated': {
       const taskStatus = value(
         event.payload,
@@ -301,7 +501,6 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       break;
     case 'heartbeat':
     case 'assistant_audio_delta':
-    case 'education_status_updated':
       break;
   }
 }

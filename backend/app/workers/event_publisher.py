@@ -139,6 +139,21 @@ class DialogEventPublisher:
             return None
 
 
+class NurseEventPublisher(DialogEventPublisher):
+    """责任护士全局提醒事件发布器
+    作用：把人工介入事件写入 nurse_stream:{staff_id}，供医护端全局 SSE 订阅。
+    """
+
+    def __init__(
+        self,
+        staff_id: int | str,
+        redis_client: RedisClient | None = None,
+    ) -> None:
+        super().__init__(session_id=None, redis_client=redis_client)
+        self.staff_id = str(staff_id)
+        self.stream_key = f"nurse_stream:{self.staff_id}"
+
+
 class StreamKeyHelper:
     """Stream键名辅助类
     作用:提供统一的Stream键名生成规则

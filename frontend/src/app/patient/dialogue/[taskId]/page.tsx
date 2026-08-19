@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import ChatBubble from '@/components/chat/ChatBubble';
 import ChatInput from '@/components/chat/ChatInput';
+import ConsentInteractionCard from '@/components/chat/ConsentInteractionCard';
+import EducationMaterialCard from '@/components/chat/EducationMaterialCard';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
@@ -17,6 +19,7 @@ import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { createDialogueSsePath } from '@/lib/transports/sseClient';
+import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import {
   VoiceSocketClient,
   type VoiceConnectionState,
@@ -199,14 +202,25 @@ export default function PatientDialoguePage() {
   const session = useChatStore((state) => state.sessions[taskId]);
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
   const interactionEvents = useChatStore((state) => state.events);
+  const educationCards = useChatStore((state) => state.educationCards);
+  const consentRequests = useChatStore((state) => state.consentRequests);
   const answers = structuredAnswers[taskId] ?? [];
   const events = interactionEvents[taskId] ?? [];
+  const educationMaterials = educationCards[taskId] ?? [];
+  const consentForms = consentRequests[taskId] ?? [];
   const streamingTaskId = useChatStore((state) => state.streamingTaskId);
   const setSession = useChatStore((state) => state.setSession);
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const upsertAnswer = useChatStore((state) => state.upsertStructuredAnswer);
   const addEvent = useChatStore((state) => state.addEvent);
+  const updateEducationCard = useChatStore(
+    (state) => state.updateEducationCard
+  );
+  const updateConsentRequest = useChatStore(
+    (state) => state.updateConsentRequest
+  );
+  const saveConsent = useTaskStore((state) => state.saveConsent);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -266,6 +280,7 @@ export default function PatientDialoguePage() {
         useChatStore
           .getState()
           .setStructuredAnswers(taskId, snapshot.answers);
+        snapshot.events.forEach(applyRealtimeEvent);
         updateTask(taskId, {
           sessionId: snapshot.session.id,
           taskStatus: 'in_progress',
@@ -468,6 +483,35 @@ export default function PatientDialoguePage() {
     });
   };
 
+  const handleConsentSubmit = async (
+    progress: Parameters<typeof saveConsent>[0]
+  ) => {
+    if (progress.decision === 'needs_explanation') {
+      const reason = '患者对知情同意内容需要护士人工解释';
+      await careRepository.requestHandoff(taskId, reason);
+      requestHandoff(taskId, reason, {
+        actionLabel: '解释知情同意条款',
+        requestedAction: 'other',
+        urgency: 'routine',
+      });
+    }
+    await careRepository.submitConsent(progress);
+    saveConsent(progress);
+    if (progress.formId) {
+      updateConsentRequest(taskId, progress.formId, {
+        status:
+          progress.decision === 'agreed'
+            ? 'signed'
+            : progress.decision === 'needs_explanation'
+              ? 'needs_explanation'
+              : 'refused',
+      });
+    }
+    if (progress.decision === 'agreed') {
+      updateTask(taskId, { taskStatus: 'pending_review' });
+    }
+  };
+
   const togglePause = async () => {
     const current = useChatStore.getState().sessions[taskId];
     if (!current) return;
@@ -617,7 +661,36 @@ export default function PatientDialoguePage() {
                 <ChatBubble key={message.id} message={message} showAvatar animate />
               ))}
 
-              {events.map((event) => (
+              {educationMaterials.map((card) => (
+                <EducationMaterialCard
+                  key={card.id}
+                  card={card}
+                  onAcknowledge={() =>
+                    updateEducationCard(taskId, card.materialId, {
+                      acknowledged: true,
+                    })
+                  }
+                />
+              ))}
+
+              {consentForms
+                .filter((request) => request.status !== 'signed')
+                .map((request) => (
+                  <ConsentInteractionCard
+                    key={request.formId}
+                    request={request}
+                    participantName={task.participantName ?? task.patientName}
+                    onSubmit={handleConsentSubmit}
+                  />
+                ))}
+
+              {events
+                .filter(
+                  (event) =>
+                    event.eventType !== 'education' &&
+                    event.eventType !== 'handoff'
+                )
+                .map((event) => (
                 <div
                   key={event.id}
                   className={`rounded-2xl border p-4 mb-4 ${
@@ -639,7 +712,21 @@ export default function PatientDialoguePage() {
                     {event.handled ? '已了解' : '我已了解'}
                   </button>
                 </div>
-              ))}
+                ))}
+              {task.handoffRequired && (
+                <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4">
+                  <div className="flex items-center gap-2 font-medium text-red-800">
+                    <UserPlusIcon className="h-5 w-5" />
+                    护士正在赶来处理
+                  </div>
+                  <p className="mt-1 text-sm text-red-700">
+                    {task.handoffActionLabel
+                      ? `请求操作：${task.handoffActionLabel}。`
+                      : ''}
+                    {task.handoffReason}
+                  </p>
+                </div>
+              )}
               {answers.length > 0 && (
                 <details className="lg:hidden rounded-2xl border border-border bg-surface p-4 mb-4">
                   <summary className="font-medium cursor-pointer">查看已记录信息（{answers.length}项）</summary>
@@ -780,12 +867,10 @@ export default function PatientDialoguePage() {
                         ? '请输入文字回答'
                         : '支持文字与语音模拟输入'}
                   </p>
-                  {runtimeConfig.dataMode === 'mock' && (
-                    <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
-                      <UserPlusIcon className="w-4 h-4" />
-                      找护士
-                    </button>
-                  )}
+                  <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
+                    <UserPlusIcon className="w-4 h-4" />
+                    找护士
+                  </button>
                 </div>
                 <ChatInput
                   onSend={handleSendMessage}

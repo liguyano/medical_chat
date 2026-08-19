@@ -26,6 +26,12 @@ class EventType(str, Enum):
     EXTRACTION_RESULT = "extraction_result"  # 字段抽取结果事件
     PROGRESS_UPDATED = "progress_updated"  # 结构化评估进度事件
     AGENT_ERROR = "agent_error"  # Agent 真实模型调用失败事件
+    EDUCATION_TRIGGERED = "education_triggered"  # 医学宣教材料已发布
+    EDUCATION_STATUS_UPDATED = "education_status_updated"  # 宣教状态变化
+    CONSENT_TRIGGERED = "consent_triggered"  # 知情同意文档已发布
+    CONSENT_STATUS_UPDATED = "consent_status_updated"  # 知情同意状态变化
+    HANDOFF_REQUESTED = "handoff_requested"  # 请求医护人工介入
+    HANDOFF_RESOLVED = "handoff_resolved"  # 医护人工介入已处理
 
 
 class BaseEvent(BaseModel):
@@ -198,6 +204,93 @@ class AgentErrorEvent(BaseEvent):
     generation_id: str | None = None
 
 
+class EducationTriggeredEvent(BaseEvent):
+    """医学宣教触发事件
+    作用：向患者端和医护监控端发布可原样展示、可播报的宣教材料。
+    """
+
+    event_type: EventType = EventType.EDUCATION_TRIGGERED
+    material_id: str
+    category: str
+    level: int
+    document_version: str
+    title: str
+    original_content: str
+    patient_content: str
+    spoken_content: str
+    source_name: str | None = None
+    priority: str = "medium"
+    requires_acknowledgement: bool = True
+    auto_play: bool = True
+
+
+class EducationStatusUpdatedEvent(BaseEvent):
+    """宣教状态变化事件。"""
+
+    event_type: EventType = EventType.EDUCATION_STATUS_UPDATED
+    material_id: str
+    status: str
+    acknowledged: bool = False
+
+
+class ConsentTriggeredEvent(BaseEvent):
+    """知情同意文档触发事件
+    作用：向患者端发布条款内容和签署要求。
+    """
+
+    event_type: EventType = EventType.CONSENT_TRIGGERED
+    form_id: str
+    form_type: str
+    title: str
+    document_version: str
+    full_text: str
+    clauses: list[dict[str, Any]]
+    status: str = "pending_signature"
+    requires_signature: bool = True
+    auto_play: bool = True
+
+
+class ConsentStatusUpdatedEvent(BaseEvent):
+    """知情同意签署状态事件。"""
+
+    event_type: EventType = EventType.CONSENT_STATUS_UPDATED
+    form_id: str
+    status: str
+    decision: str
+    signature_file_url: str | None = None
+    completed_at: datetime | None = None
+
+
+class HandoffRequestedEvent(BaseEvent):
+    """呼叫医护事件
+    作用：同时推送患者端、单会话监控端和责任护士全局提醒流。
+    """
+
+    event_type: EventType = EventType.HANDOFF_REQUESTED
+    request_id: str
+    reason: str
+    requested_action: str
+    action_label: str
+    urgency: str = "routine"
+    priority: str = "high"
+    title: str = "请求护士协助"
+    description: str = ""
+    patient_name: str = ""
+    bed_no: str | None = None
+    ward_name: str | None = None
+    status: str = "requested"
+
+
+class HandoffResolvedEvent(BaseEvent):
+    """医护介入已处理事件。"""
+
+    event_type: EventType = EventType.HANDOFF_RESOLVED
+    request_id: str | None = None
+    status: str = "resolved"
+    resolved_by: str | None = None
+    resolution: str | None = None
+
+
 # 事件类型映射
 EVENT_TYPE_MAP = {
     EventType.DIALOG_TURN: DialogTurnEvent,
@@ -213,4 +306,10 @@ EVENT_TYPE_MAP = {
     EventType.SESSION_END: SessionEndEvent,
     EventType.EXTRACTION_RESULT: ExtractionResultEvent,
     EventType.PROGRESS_UPDATED: ProgressUpdatedEvent,
+    EventType.EDUCATION_TRIGGERED: EducationTriggeredEvent,
+    EventType.EDUCATION_STATUS_UPDATED: EducationStatusUpdatedEvent,
+    EventType.CONSENT_TRIGGERED: ConsentTriggeredEvent,
+    EventType.CONSENT_STATUS_UPDATED: ConsentStatusUpdatedEvent,
+    EventType.HANDOFF_REQUESTED: HandoffRequestedEvent,
+    EventType.HANDOFF_RESOLVED: HandoffResolvedEvent,
 }

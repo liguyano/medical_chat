@@ -195,6 +195,13 @@ from medagent.configs.agent_config import get_agent_config
 - REST 统一使用 `{code,message,data}`；前端可见的核心 SSE 事件为
   `assistant_text_delta`、`user_transcript_completed`、`extraction_updated`、
   `progress_updated` 和 `task_status_updated`。`dialog_turn` 只供 Agent 内部协作。
+- Dialog 原生工具结果必须转换为独立业务事件并保存到 `interaction_event`：
+  `education_triggered`、`consent_triggered`、`handoff_requested`；通用
+  `tool_call` 仅用于内部审计，不得直接推给患者端。模型漏掉关键词规则要求的工具时，
+  Dialog Agent 可执行安全兜底工具并要求模型基于真实结果继续回答。
+- 宣教材料在患者端保留原文、通俗文本与播报文本三个快照；知情同意条款在对话内确认和
+  签名，签名图片保存到 `backend/storage/consent-signatures`，禁止把 data URL 直接写入
+  PostgreSQL。呼叫医护同时写入会话流与 `nurse_stream:{staff_id}` 全局提醒流。
 - `dialog_agent` 在 `agent_models` 中详写绑定两类模型：`language`（OpenAI 兼容文本降级）
   与 `voice`（豆包实时语音，`type: voice`）。豆包真实语音上线前必须用真实 App ID、
   Resource ID、API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。

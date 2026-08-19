@@ -87,6 +87,10 @@ export interface CareTask {
   notes?: string;
   handoffRequired?: boolean;
   handoffReason?: string;
+  handoffRequestId?: string;
+  handoffRequestedAction?: string;
+  handoffActionLabel?: string;
+  handoffUrgency?: 'routine' | 'urgent';
   currentStage?: CicareStage;
   aiSummary?: string;
   createdAt: string;
@@ -278,12 +282,20 @@ export interface AssessmentScore {
 // 宣教内容卡片
 export interface EducationCard {
   id: string;
+  taskId: string;
+  materialId: string;
+  category: string;
   title: string;
-  content: string;
-  triggerReason: string;
-  sourceQuestionId?: string;
+  documentVersion: string;
+  originalContent: string;
+  patientContent: string;
+  spokenContent: string;
+  sourceName?: string;
+  priority: 'low' | 'medium' | 'high';
+  requiresAcknowledgement: boolean;
+  autoPlay: boolean;
   acknowledged: boolean;
-  understandingStatus?: 'pending' | 'understood' | 'not_understood';
+  occurredAt: string;
 }
 
 // 知情同意条款
@@ -310,6 +322,40 @@ export interface InteractionEvent {
   description: string;
   priority: 'low' | 'medium' | 'high';
   handled: boolean;
+  occurredAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConsentRequest {
+  id: string;
+  taskId: string;
+  formId: string;
+  formType: string;
+  title: string;
+  documentVersion: string;
+  fullText: string;
+  clauses: ConsentClause[];
+  status:
+    | 'pending_signature'
+    | 'signed'
+    | 'refused'
+    | 'needs_explanation';
+  requiresSignature: boolean;
+  autoPlay: boolean;
+  occurredAt: string;
+}
+
+export interface NurseAssistanceRequest {
+  requestId: string;
+  taskId: string;
+  patientName?: string;
+  bedNo?: string;
+  wardName?: string;
+  reason: string;
+  requestedAction: string;
+  actionLabel: string;
+  urgency: 'routine' | 'urgent';
+  status: 'requested' | 'resolved';
   occurredAt: string;
 }
 
@@ -349,6 +395,8 @@ export interface QualityReview {
 
 export interface ConsentProgress {
   taskId: string;
+  formId?: string;
+  documentVersion?: string;
   clauses: ConsentClause[];
   participantName: string;
   decision: 'pending' | 'agreed' | 'refused' | 'needs_explanation';

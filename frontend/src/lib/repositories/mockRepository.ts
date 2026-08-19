@@ -216,7 +216,7 @@ export class MockCareRepository implements CareRepository {
     signal?: AbortSignal
   ): Promise<DialogueSnapshot> {
     await wait(signal);
-    return { session: buildEmptySession(task), answers: [] };
+    return { session: buildEmptySession(task), answers: [], events: [] };
   }
 
   async sendDialogMessage(
@@ -253,6 +253,10 @@ export class MockCareRepository implements CareRepository {
   async requestHandoff(
     _taskId: string,
     _reason: string,
+    _details?: {
+      requestedAction?: string;
+      urgency?: 'routine' | 'urgent';
+    },
     signal?: AbortSignal
   ) {
     await wait(signal);

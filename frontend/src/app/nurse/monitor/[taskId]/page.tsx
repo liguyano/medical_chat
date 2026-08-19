@@ -18,6 +18,7 @@ import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import { createMonitorSsePath } from '@/lib/transports/sseClient';
+import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import type { MessageFeedback } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
@@ -85,6 +86,7 @@ export default function NurseMonitorDetailPage() {
           useChatStore
             .getState()
             .setStructuredAnswers(taskId, snapshot.answers);
+          snapshot.events.forEach(applyRealtimeEvent);
         }
         const savedFeedback = await careRepository.listMessageFeedback(
           currentTask.id,
@@ -258,7 +260,7 @@ export default function NurseMonitorDetailPage() {
         </div>
         <div className="flex gap-2">
           <IntegrationStatus streamStatus={streamStatus} compact />
-          {runtimeConfig.dataMode === 'mock' && task.handoffRequired && (
+          {task.handoffRequired && (
             <Button
               variant="danger"
               onClick={() => void handleResolveHandoff()}
@@ -297,6 +299,40 @@ export default function NurseMonitorDetailPage() {
               </Badge>
             </div>
           </Card>
+
+          {task.handoffRequired && (
+            <Card padding="md" className="border-red-300 bg-red-50">
+              <div className="flex items-center gap-2 text-red-800">
+                <UserPlusIcon className="h-5 w-5" />
+                <h2 className="font-semibold">患者正在呼叫医护</h2>
+              </div>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div>
+                  <dt className="text-xs text-red-700">患者与床位</dt>
+                  <dd className="font-medium">
+                    {task.patientName} · {task.bedNo}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-red-700">请求操作</dt>
+                  <dd className="font-medium">
+                    {task.handoffActionLabel ?? '人工护理协助'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-red-700">呼叫原因</dt>
+                  <dd>{task.handoffReason}</dd>
+                </div>
+              </dl>
+              <Button
+                className="mt-4 w-full"
+                variant="danger"
+                onClick={() => void handleResolveHandoff()}
+              >
+                接管并标记已处理
+              </Button>
+            </Card>
+          )}
 
           <Card padding="md">
             <h2 className="font-semibold mb-3">结构化答案</h2>

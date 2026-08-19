@@ -81,6 +81,22 @@ class CaptureMiddleware(DialogMiddleware):
         self.after_output = output
 
 
+class RequireEducationMiddleware(DialogMiddleware):
+    """模拟关键词规则要求宣教工具。"""
+
+    async def before_agent(self, context):
+        context["required_tool_calls"] = [
+            {
+                "call_id": "required-1",
+                "name": "get_education_material",
+                "arguments": {"category": "allergy", "level": 3},
+            }
+        ]
+
+    async def after_agent(self, context, output):
+        return None
+
+
 def task():
     return QuestionTask(
         question_id=1,
@@ -305,6 +321,58 @@ async def test_tool_failure_is_returned_as_structured_result():
 
     assert result == "继续评估"
     assert engine.tool_results[0][1]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_required_tool_fallback_hides_narration_and_streams_followup():
+    """模型只说调用工具时，应实际执行工具且只推送后续患者可见回答。"""
+
+    class FallbackEngine(FakeEngine):
+        def __init__(self):
+            super().__init__()
+            self.rounds = [
+                [
+                    {"type": "text", "content": "我将调用工具获取宣教材料。"},
+                    {"type": "response_done"},
+                ],
+                [
+                    {"type": "text", "content": "过敏安全提醒已经展示，"},
+                    {"type": "text", "content": "以后每次就医请主动告知医护人员。"},
+                    {"type": "response_done"},
+                ],
+            ]
+
+        async def stream_response(self):
+            for event in self.rounds.pop(0):
+                yield event
+
+    streamed = []
+
+    async def text_sink(chunk, _context):
+        streamed.append(chunk)
+
+    engine = FallbackEngine()
+    tool_executor = AsyncMock(return_value={"success": True, "material_id": "EDU-1"})
+    dialog = agent(
+        engine,
+        middlewares=[RequireEducationMiddleware()],
+        tool_executor=tool_executor,
+        text_delta_sink=text_sink,
+    )
+
+    result = await dialog.handle_patient_input("我有青霉素过敏")
+
+    tool_executor.assert_awaited_once_with(
+        "get_education_material",
+        {"category": "allergy", "level": 3},
+    )
+    assert "调用工具" not in result
+    assert "调用工具" not in "".join(streamed)
+    assert result == "过敏安全提醒已经展示，以后每次就医请主动告知医护人员。"
+    assert streamed == [
+        "过敏安全提醒已经展示，",
+        "以后每次就医请主动告知医护人员。",
+    ]
 
 
 @pytest.mark.asyncio

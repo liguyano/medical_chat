@@ -20,7 +20,11 @@ from app.models.base import get_db
 from app.models.interaction import InteractionSession
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
-from app.services.sse_service import HEARTBEAT_INTERVAL, stream_dialog_events
+from app.services.sse_service import (
+    HEARTBEAT_INTERVAL,
+    stream_dialog_events,
+    stream_nurse_events,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,5 +120,25 @@ async def monitor_dialog(
     logger.info(f"医护端监听 SSE: session_no={session_no} last_event_id={resume_from}")
     return EventSourceResponse(
         stream_dialog_events(session_no, resume_from),
+        ping=HEARTBEAT_INTERVAL,
+    )
+
+
+@router.get("/nurse/alerts", summary="责任护士订阅全局人工介入提醒")
+async def subscribe_nurse_alerts(
+    request: Request,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+    last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
+    last_event_id: str | None = Query(default=None),
+) -> EventSourceResponse:
+    """订阅 nurse_stream:{staff_id}，在医护端任意页面接收患者呼叫。"""
+    resume_from = last_event_id_header or last_event_id
+    logger.info(
+        "医护端订阅全局提醒 SSE: staff_id=%s last_event_id=%s",
+        staff.id,
+        resume_from,
+    )
+    return EventSourceResponse(
+        stream_nurse_events(staff.id, resume_from),
         ping=HEARTBEAT_INTERVAL,
     )

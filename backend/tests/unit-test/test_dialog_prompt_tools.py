@@ -68,8 +68,8 @@ def test_constraint_update_prompt_handles_empty_and_multiple_items():
 
 
 def test_dialog_tool_schemas_follow_openai_function_contract():
-    """三个工具 Schema 必须具备名称、对象参数和必填字段。"""
-    assert len(DIALOG_TOOLS) == 3
+    """四个工具 Schema 必须具备名称、对象参数和必填字段。"""
+    assert len(DIALOG_TOOLS) == 4
     names = set()
     for tool in DIALOG_TOOLS:
         assert tool["type"] == "function"
@@ -80,13 +80,14 @@ def test_dialog_tool_schemas_follow_openai_function_contract():
     assert names == {
         "get_education_material",
         "trigger_consent_form",
+        "request_nurse_assistance",
         "play_audio",
     }
 
 
 @pytest.mark.asyncio
-async def test_education_placeholder_is_explicit_and_validated():
-    """宣教桩必须明确标识占位，且拒绝非法枚举。"""
+async def test_education_material_returns_real_structured_content_and_validates():
+    """宣教工具返回可直接展示和播报的结构化材料，并拒绝非法枚举。"""
     result = await execute_tool("get_education_material", {"category": "tobacco", "level": 2})
     invalid_category = await execute_tool(
         "get_education_material", {"category": "unknown", "level": 2}
@@ -96,20 +97,24 @@ async def test_education_placeholder_is_explicit_and_validated():
     )
 
     assert result["success"] is True
-    assert result["placeholder"] is True
+    assert result["original_content"]
+    assert result["patient_content"]
+    assert result["spoken_content"]
+    assert result["auto_play"] is True
     assert invalid_category["success"] is False
     assert invalid_level["success"] is False
 
 
 @pytest.mark.asyncio
-async def test_consent_placeholder_uses_unique_id_and_is_not_signed():
-    """知情同意桩不得伪造签署完成，form_id 必须避免固定碰撞。"""
+async def test_consent_returns_clauses_and_is_not_signed():
+    """知情同意工具返回条款并保持待签署状态，form_id 必须避免固定碰撞。"""
     first = await execute_tool("trigger_consent_form", {"form_type": "surgery"})
     second = await execute_tool("trigger_consent_form", {"form_type": "surgery"})
 
     assert first["success"] is True
-    assert first["placeholder"] is True
     assert first["status"] == "pending_signature"
+    assert first["requires_signature"] is True
+    assert first["clauses"]
     assert first["form_id"] != second["form_id"]
 
 
@@ -130,4 +135,21 @@ async def test_play_audio_is_explicitly_unavailable():
     result = await execute_tool("play_audio", {"audio_url": "https://example/audio"})
 
     assert result["success"] is False
-    assert "未实现" in result["message"]
+    assert "领域组件接管" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_request_nurse_assistance_returns_action_and_reason():
+    """呼叫护士工具返回可供患者端和护士端使用的结构化请求。"""
+    result = await execute_tool(
+        "request_nurse_assistance",
+        {
+            "requested_action": "measure_blood_pressure",
+            "reason": "需要护士到床旁测量血压",
+            "urgency": "urgent",
+        },
+    )
+    assert result["success"] is True
+    assert result["action_label"] == "测量血压"
+    assert result["urgency"] == "urgent"
+    assert result["status"] == "requested"

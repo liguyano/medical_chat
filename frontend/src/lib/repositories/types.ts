@@ -1,4 +1,7 @@
 import type {
+  SseEnvelope,
+} from '@/lib/api/contracts';
+import type {
   AssessmentScale,
   CareTask,
   ConsentProgress,
@@ -55,6 +58,7 @@ export interface CreateTaskInput {
 export interface DialogueSnapshot {
   session: InteractionSession;
   answers: StructuredAnswer[];
+  events: SseEnvelope[];
 }
 
 export interface SendMessageInput {
@@ -101,6 +105,10 @@ export interface CareRepository {
   requestHandoff(
     taskId: string,
     reason: string,
+    details?: {
+      requestedAction?: string;
+      urgency?: 'routine' | 'urgent';
+    },
     signal?: AbortSignal
   ): Promise<void>;
   resolveHandoff(taskId: string, signal?: AbortSignal): Promise<void>;

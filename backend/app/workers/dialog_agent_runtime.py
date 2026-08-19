@@ -96,16 +96,30 @@ class AppDialogEventSink:
                 )
             )
         elif event_type == EventType.TOOL_CALL.value:
+            tool_name = str(event.get("tool_name") or "")
+            tool_args = dict(event.get("tool_args") or {})
+            tool_result = event.get("tool_result")
             self.publisher.publish(
                 ToolCallEvent(
                     session_id=session_id,
                     task_id=event.get("task_id"),
                     message_id=event.get("message_id"),
                     turn_number=int(event.get("turn_number") or 0),
-                    tool_name=str(event.get("tool_name") or ""),
-                    tool_args=dict(event.get("tool_args") or {}),
-                    tool_result=event.get("tool_result"),
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    tool_result=tool_result,
                 )
+            )
+            from app.services.tool_interaction_service import publish_tool_result
+
+            publish_tool_result(
+                session_no=session_id,
+                task_id=event.get("task_id"),
+                message_no=event.get("message_id"),
+                tool_name=tool_name,
+                tool_args=tool_args,
+                tool_result=tool_result,
+                publisher=self.publisher,
             )
 
 

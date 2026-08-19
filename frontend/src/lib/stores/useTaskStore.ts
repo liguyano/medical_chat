@@ -29,7 +29,16 @@ interface TaskStore {
   saveQualityReview: (review: QualityReview) => void;
   clearQualityReview: (taskId: string) => void;
   saveConsent: (consent: ConsentProgress) => void;
-  requestHandoff: (taskId: string, reason: string) => void;
+  requestHandoff: (
+    taskId: string,
+    reason: string,
+    details?: {
+      requestId?: string;
+      requestedAction?: string;
+      actionLabel?: string;
+      urgency?: 'routine' | 'urgent';
+    }
+  ) => void;
   resolveHandoff: (taskId: string) => void;
   resetDemoData: () => void;
 }
@@ -162,11 +171,19 @@ export const useTaskStore = create<TaskStore>()(
           consents: { ...state.consents, [consent.taskId]: consent },
         })),
 
-      requestHandoff: (taskId, reason) =>
+      requestHandoff: (taskId, reason, details) =>
         set((state) => ({
           tasks: state.tasks.map((task) =>
             task.id === taskId
-              ? { ...task, handoffRequired: true, handoffReason: reason }
+              ? {
+                  ...task,
+                  handoffRequired: true,
+                  handoffReason: reason,
+                  handoffRequestId: details?.requestId,
+                  handoffRequestedAction: details?.requestedAction,
+                  handoffActionLabel: details?.actionLabel,
+                  handoffUrgency: details?.urgency,
+                }
               : task
           ),
         })),
@@ -175,7 +192,15 @@ export const useTaskStore = create<TaskStore>()(
         set((state) => ({
           tasks: state.tasks.map((task) =>
             task.id === taskId
-              ? { ...task, handoffRequired: false, handoffReason: undefined }
+              ? {
+                  ...task,
+                  handoffRequired: false,
+                  handoffReason: undefined,
+                  handoffRequestId: undefined,
+                  handoffRequestedAction: undefined,
+                  handoffActionLabel: undefined,
+                  handoffUrgency: undefined,
+                }
               : task
           ),
         })),

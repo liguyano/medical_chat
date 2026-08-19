@@ -17,6 +17,9 @@ htmlcov/
 .pytest_cache/
 celerybeat-schedule*
 backend/logs/
+frontend/logs/
+backend/storage/consent-signatures/*
+!backend/storage/consent-signatures/.gitkeep
 
 # 医疗资料
 docs/文档

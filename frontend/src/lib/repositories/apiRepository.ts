@@ -8,6 +8,7 @@ import type {
   MessageRatingListResponse,
   PatientLoginResponse,
   QualityReviewDto,
+  SseEnvelope,
   StaffLoginResponse,
 } from '@/lib/api/contracts';
 import { apiRequest } from '@/lib/api/httpClient';
@@ -174,7 +175,7 @@ export class ApiCareRepository implements CareRepository {
 
   async getDialogueSnapshot(task: CareTask, signal?: AbortSignal) {
     const sessionId = task.sessionId ?? task.id;
-    const [history, extraction] = await Promise.all([
+    const [history, extraction, events] = await Promise.all([
       apiRequest<DialogHistoryResponse>(
         `/api/dialog/${encodeURIComponent(sessionId)}/history?limit=100&offset=0`,
         { signal }
@@ -183,10 +184,15 @@ export class ApiCareRepository implements CareRepository {
         `/api/extraction/${encodeURIComponent(sessionId)}/fields`,
         { signal }
       ),
+      apiRequest<SseEnvelope[]>(
+        `/api/dialog/${encodeURIComponent(sessionId)}/events`,
+        { signal }
+      ),
     ]);
     return {
       session: mapDialogHistory(history, task),
       answers: extraction.fields.map(mapExtractedField),
+      events,
     };
   }
 
@@ -254,11 +260,20 @@ export class ApiCareRepository implements CareRepository {
   async requestHandoff(
     taskId: string,
     reason: string,
+    details?: {
+      requestedAction?: string;
+      urgency?: 'routine' | 'urgent';
+    },
     signal?: AbortSignal
   ) {
     await apiRequest<void>(`/api/tasks/${encodeURIComponent(taskId)}/handoff`, {
       method: 'POST',
-      body: { task_id: taskId, reason },
+      body: {
+        task_id: taskId,
+        reason,
+        requested_action: details?.requestedAction ?? 'other',
+        urgency: details?.urgency ?? 'routine',
+      },
       signal,
     });
   }
@@ -266,7 +281,7 @@ export class ApiCareRepository implements CareRepository {
   async resolveHandoff(taskId: string, signal?: AbortSignal) {
     await apiRequest<void>(
       `/api/tasks/${encodeURIComponent(taskId)}/handoff/resolve`,
-      { method: 'POST', signal }
+      { method: 'POST', body: {}, signal }
     );
   }
 
@@ -315,6 +330,8 @@ export class ApiCareRepository implements CareRepository {
         method: 'POST',
         body: {
           task_id: consent.taskId,
+          form_id: consent.formId ?? '',
+          document_version: consent.documentVersion,
           participant_name: consent.participantName,
           decision: consent.decision,
           signature_data: consent.signatureData,

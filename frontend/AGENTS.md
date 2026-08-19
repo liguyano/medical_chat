@@ -28,6 +28,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `/api/auth/staff/login` 并使用独立 HttpOnly Cookie；退出时同步调用后端清理会话。
 - `src/lib/api` 保存后端 DTO、HTTP Client 和领域模型映射。后端数字 ID 必须在映射边界转换为字符串。
 - 患者和护士的文本、任务状态、字段抽取、宣教与人工介入事件通过 `src/lib/transports/sseClient.ts` 接收，并由 `applyRealtimeEvent.ts` 幂等写入 Zustand Store。
+- `education_triggered` 必须渲染医学宣教原文卡片并按 `spoken_content` 自动播报；
+  `consent_triggered` 必须在对话内渲染强制条款、播放和签名组件；`handoff_requested`
+  必须同时更新患者呼叫状态和医护端全局提醒。页面刷新时通过对话事件快照接口恢复组件，
+  不能只依赖当次 SSE。
+- 医护端登录后通过 `/api/sse/nurse/alerts` 订阅责任护士全局提醒流，任意医护页面均应
+  显示患者姓名、床位、呼叫原因和请求的人工操作。
 - 患者发言次数不是评估进度。`answeredQuestionCount` 与任务进度只能由后端快照或
   `progress_updated`（必填、非派生结构化答案进度）更新。
 - AI 会话 `pending` 表示 Schedule Task-todo 与首问正在后台准备；该阶段患者输入保持禁用，

@@ -19,7 +19,7 @@ from app.schemas.dialog import (
     SendMessageResponse,
 )
 from app.schemas.response import ApiResponse, ok
-from app.services import dialog_service
+from app.services import dialog_service, tool_interaction_service
 
 router = APIRouter(prefix="/api/dialog", tags=["dialog"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -66,6 +66,30 @@ async def get_history(
             session_no,
             limit,
             offset,
+            patient_id=patient_id,
+        )
+    )
+
+
+@router.get(
+    "/{session_no}/events",
+    response_model=ApiResponse[list[dict]],
+    summary="获取对话工具交互事件",
+)
+async def get_interaction_events(
+    session_no: str,
+    db: DbSession,
+    actor: Annotated[
+        StaffAccount | tuple[Patient, PatientEncounter],
+        Depends(require_staff_or_patient),
+    ],
+) -> dict:
+    """恢复宣教、知情同意和人工介入组件状态。"""
+    patient_id = actor[0].id if isinstance(actor, tuple) else None
+    return ok(
+        tool_interaction_service.list_interaction_events(
+            db,
+            session_no,
             patient_id=patient_id,
         )
     )

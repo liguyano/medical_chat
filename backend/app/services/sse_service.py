@@ -31,6 +31,12 @@ _EVENT_NAME_MAP: dict[str, str] = {
     EventType.PROGRESS_UPDATED.value: "progress_updated",
     EventType.SESSION_END.value: "task_status_updated",
     EventType.AGENT_ERROR.value: "error",
+    EventType.EDUCATION_TRIGGERED.value: "education_triggered",
+    EventType.EDUCATION_STATUS_UPDATED.value: "education_status_updated",
+    EventType.CONSENT_TRIGGERED.value: "consent_triggered",
+    EventType.CONSENT_STATUS_UPDATED.value: "consent_status_updated",
+    EventType.HANDOFF_REQUESTED.value: "handoff_requested",
+    EventType.HANDOFF_RESOLVED.value: "handoff_resolved",
     # 兼容旧事件（后补）
     EventType.DIALOG_TEXT.value: "assistant_text_delta",
     EventType.DIALOG_AUDIO.value: "assistant_audio_delta",
@@ -169,6 +175,71 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "completed": bool(data.get("completed", False)),
             "remaining_question_ids": data.get("remaining_question_ids", []),
         }
+    elif event_type == EventType.EDUCATION_TRIGGERED.value:
+        return {
+            "material_id": data.get("material_id", ""),
+            "category": data.get("category", ""),
+            "level": int(data.get("level", 2)),
+            "document_version": data.get("document_version", ""),
+            "title": data.get("title", "医学宣教"),
+            "original_content": data.get("original_content", ""),
+            "patient_content": data.get("patient_content", ""),
+            "spoken_content": data.get("spoken_content", ""),
+            "source_name": data.get("source_name"),
+            "priority": data.get("priority", "medium"),
+            "requires_acknowledgement": bool(
+                data.get("requires_acknowledgement", True)
+            ),
+            "auto_play": bool(data.get("auto_play", True)),
+        }
+    elif event_type == EventType.EDUCATION_STATUS_UPDATED.value:
+        return {
+            "material_id": data.get("material_id", ""),
+            "status": data.get("status", ""),
+            "acknowledged": bool(data.get("acknowledged", False)),
+        }
+    elif event_type == EventType.CONSENT_TRIGGERED.value:
+        return {
+            "form_id": data.get("form_id", ""),
+            "form_type": data.get("form_type", ""),
+            "title": data.get("title", "知情同意确认"),
+            "document_version": data.get("document_version", ""),
+            "full_text": data.get("full_text", ""),
+            "clauses": data.get("clauses", []),
+            "status": data.get("status", "pending_signature"),
+            "requires_signature": bool(data.get("requires_signature", True)),
+            "auto_play": bool(data.get("auto_play", True)),
+        }
+    elif event_type == EventType.CONSENT_STATUS_UPDATED.value:
+        return {
+            "form_id": data.get("form_id", ""),
+            "status": data.get("status", ""),
+            "decision": data.get("decision", ""),
+            "signature_file_url": data.get("signature_file_url"),
+            "completed_at": data.get("completed_at"),
+        }
+    elif event_type == EventType.HANDOFF_REQUESTED.value:
+        return {
+            "request_id": data.get("request_id", ""),
+            "reason": data.get("reason", ""),
+            "requested_action": data.get("requested_action", "other"),
+            "action_label": data.get("action_label", "人工护理操作"),
+            "urgency": data.get("urgency", "routine"),
+            "priority": data.get("priority", "high"),
+            "title": data.get("title", "请求护士协助"),
+            "description": data.get("description", data.get("reason", "")),
+            "patient_name": data.get("patient_name", ""),
+            "bed_no": data.get("bed_no"),
+            "ward_name": data.get("ward_name"),
+            "status": data.get("status", "requested"),
+        }
+    elif event_type == EventType.HANDOFF_RESOLVED.value:
+        return {
+            "request_id": data.get("request_id"),
+            "status": data.get("status", "resolved"),
+            "resolved_by": data.get("resolved_by"),
+            "resolution": data.get("resolution"),
+        }
     elif event_type in (EventType.TOOL_CALL.value, EventType.CONSTRAINT.value):
         return {
             "message": data.get("constraint_prompt") or data.get("tool_name", ""),
@@ -247,8 +318,52 @@ async def stream_dialog_events(
                 message_id = raw_id.decode("utf-8") if isinstance(raw_id, bytes) else str(raw_id)
                 last_id = message_id
                 decoded = _decode_fields(fields)
-                if decoded.get("event_type") == EventType.DIALOG_TURN.value:
+                if decoded.get("event_type") in {
+                    EventType.DIALOG_TURN.value,
+                    EventType.TOOL_CALL.value,
+                    EventType.CONSTRAINT.value,
+                }:
                     continue
+                yield format_sse_event(message_id, fields)
+
+
+async def stream_nurse_events(
+    staff_id: int | str,
+    last_event_id: str | None = None,
+) -> AsyncGenerator[dict[str, str], None]:
+    """消费责任护士全局提醒流
+    作用：让医护端在任意页面实时收到所负责患者的呼叫和处理状态。
+    """
+    redis = get_async_redis()
+    stream_key = f"nurse_stream:{staff_id}"
+    last_id = last_event_id or "0-0"
+    while True:
+        try:
+            messages = await redis.xread(
+                {stream_key: last_id},
+                count=50,
+                block=HEARTBEAT_INTERVAL * 1000,
+            )
+        except asyncio.CancelledError:
+            raise
+        except RedisError as exc:
+            logger.error("SSE 读取护士提醒流失败: staff=%s -> %s", staff_id, exc)
+            yield {
+                "event": "error",
+                "data": json.dumps({"message": "护士提醒流读取失败"}),
+            }
+            return
+        if not messages:
+            yield {"event": "ping", "data": ""}
+            continue
+        for _, entries in messages:
+            for raw_id, fields in entries:
+                message_id = (
+                    raw_id.decode("utf-8")
+                    if isinstance(raw_id, bytes)
+                    else str(raw_id)
+                )
+                last_id = message_id
                 yield format_sse_event(message_id, fields)
 
 

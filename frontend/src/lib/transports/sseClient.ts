@@ -35,6 +35,7 @@ const EVENT_TYPES: SseEventType[] = [
   'education_triggered',
   'education_status_updated',
   'consent_triggered',
+  'consent_status_updated',
   'handoff_requested',
   'handoff_resolved',
   'task_status_updated',
@@ -198,4 +199,8 @@ export function createDialogueSsePath(sessionId: string): string {
 
 export function createMonitorSsePath(sessionId: string): string {
   return `/api/sse/monitor/${encodeURIComponent(sessionId)}`;
+}
+
+export function createNurseAlertsSsePath(): string {
+  return '/api/sse/nurse/alerts';
 }

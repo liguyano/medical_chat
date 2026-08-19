@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -117,7 +118,13 @@ class DialogAgent:
             full_response_text = ""
             response_failed = False
             for _ in range(MAX_TOOL_RESPONSE_ROUNDS):
+                text_before_round = full_response_text
+                buffer_for_required_tools = self._has_pending_required_tools(
+                    context
+                )
+                buffered_text_chunks: list[str] = []
                 followup_required = False
+                round_had_tool_call = False
                 async for event in self.engine.stream_response():
                     event_type = event.get("type")
                     if event_type == "user_transcript":
@@ -140,7 +147,9 @@ class DialogAgent:
                     elif event_type == "text":
                         text_chunk = str(event.get("content", ""))
                         full_response_text += text_chunk
-                        if self.text_delta_sink and text_chunk:
+                        if buffer_for_required_tools:
+                            buffered_text_chunks.append(text_chunk)
+                        elif self.text_delta_sink and text_chunk:
                             await self.text_delta_sink(
                                 text_chunk,
                                 {
@@ -151,6 +160,7 @@ class DialogAgent:
                     elif event_type == "audio":
                         context.setdefault("audio_chunks", []).append(event.get("data"))
                     elif event_type == "tool_call":
+                        round_had_tool_call = True
                         followup_required = (
                             await self._handle_tool_call(event, context) or followup_required
                         )
@@ -164,6 +174,39 @@ class DialogAgent:
                         full_response_text = GENERIC_ERROR_MESSAGE
                         response_failed = True
                         break
+                if not response_failed and not followup_required:
+                    fallback_applied = await self._execute_missing_required_tools(
+                        context
+                    )
+                    if fallback_applied:
+                        followup_required = True
+                        round_had_tool_call = True
+                if (
+                    buffer_for_required_tools
+                    and not round_had_tool_call
+                    and not followup_required
+                    and self.text_delta_sink
+                ):
+                    # 没有发生工具调用时才释放缓冲文本，保持普通响应可见。
+                    visible_text = text_before_round
+                    for text_chunk in buffered_text_chunks:
+                        visible_text += text_chunk
+                        await self.text_delta_sink(
+                            text_chunk,
+                            {
+                                **context,
+                                "full_response_text": visible_text,
+                            },
+                        )
+                if round_had_tool_call and (
+                    buffer_for_required_tools
+                    or self._is_tool_narration(
+                        full_response_text[len(text_before_round) :]
+                    )
+                ):
+                    # 工具调用同轮产生的“我要调用工具”等旁白不属于患者可见回答；
+                    # 工具失败时模型给出的真实解释仍然保留。
+                    full_response_text = text_before_round
                 if response_failed or not followup_required:
                     break
             else:
@@ -236,6 +279,121 @@ class DialogAgent:
             }
         )
         return bool(await self.engine.send_tool_result(call_id, result))
+
+    @staticmethod
+    def _is_tool_narration(text: str) -> bool:
+        """识别模型把工具调用过程误当成患者回答的旁白。"""
+        normalized = text.strip().replace(" ", "")
+        if not normalized:
+            return False
+        narration_markers = (
+            "我将调用工具",
+            "我来调用工具",
+            "正在调用工具",
+            "调用工具获取",
+            "已调用工具",
+            "工具调用中",
+        )
+        return any(marker in normalized for marker in narration_markers)
+
+    @staticmethod
+    def _has_pending_required_tools(context: dict[str, Any]) -> bool:
+        """判断关键词规则要求的工具是否尚未执行。"""
+        required = list(context.get("required_tool_calls") or [])
+        if not required:
+            return False
+        executed = {
+            (
+                str(item.get("name") or ""),
+                json.dumps(
+                    item.get("arguments") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            for item in context.get("tool_calls") or []
+        }
+        return any(
+            (
+                str(item.get("name") or ""),
+                json.dumps(
+                    item.get("arguments") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            not in executed
+            for item in required
+        )
+
+    async def _execute_missing_required_tools(
+        self,
+        context: dict[str, Any],
+    ) -> bool:
+        """执行模型漏掉的强制工具
+        作用：关键词规则要求工具但模型只输出文字时，服务端执行安全兜底，
+              把结构化结果追加为系统上下文，再让模型继续生成患者可见回答。
+        """
+        required = list(context.get("required_tool_calls") or [])
+        executed = {
+            (
+                str(item.get("name") or ""),
+                json.dumps(
+                    item.get("arguments") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            for item in context.get("tool_calls") or []
+        }
+        missing = [
+            item
+            for item in required
+            if (
+                str(item.get("name") or ""),
+                json.dumps(
+                    item.get("arguments") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            not in executed
+        ]
+        if not missing:
+            return False
+
+        fallback_results: list[dict[str, Any]] = []
+        for item in missing:
+            tool_name = str(item.get("name") or "")
+            arguments = dict(item.get("arguments") or {})
+            if not tool_name:
+                continue
+            try:
+                result = await self.tool_executor(tool_name, arguments)
+            except Exception:
+                logger.exception("[DialogAgent] 强制工具兜底执行失败: %s", tool_name)
+                result = {"success": False, "message": "工具执行失败"}
+            call = {
+                "call_id": str(item.get("call_id") or f"required-{tool_name}"),
+                "name": tool_name,
+                "arguments": arguments,
+                "result": result,
+                "fallback_executed": True,
+            }
+            context["tool_calls"].append(call)
+            fallback_results.append(call)
+
+        if not fallback_results:
+            return False
+        await self.engine.update_session(
+            instructions=(
+                "系统检测到你没有按要求发起原生工具调用，现已完成安全兜底执行。"
+                "请根据以下真实工具结果向患者自然说明，禁止再次输出工具名称、"
+                "JSON 或“正在调用工具”等旁白；材料和表单已由页面组件展示：\n"
+                + json.dumps(fallback_results, ensure_ascii=False)
+            )
+        )
+        return True
 
     async def _save_history(
         self,
