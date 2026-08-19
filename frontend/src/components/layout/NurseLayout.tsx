@@ -58,6 +58,7 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
     (state) => state.nurseAssistanceRequests
   );
   const tasks = useTaskStore((state) => state.tasks);
+  const setTasks = useTaskStore((state) => state.setTasks);
   const [dismissedRequests, setDismissedRequests] = useState<string[]>([]);
   const [resolvingRequests, setResolvingRequests] = useState<string[]>([]);
   const activeRequests = Object.values(nurseRequests)
@@ -81,7 +82,19 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
     const controller = new AbortController();
     void careRepository
       .getCurrentStaff(controller.signal)
-      .then((currentUser) => login(currentUser))
+      .then(async (currentUser) => {
+        login(currentUser);
+        try {
+          const latestTasks = await careRepository.listMyTasks(
+            controller.signal
+          );
+          setTasks(latestTasks);
+        } catch (error) {
+          if (!isRequestCancelled(error)) {
+            console.error('医护任务列表加载失败', error);
+          }
+        }
+      })
       .catch((error) => {
         if (!isRequestCancelled(error)) logout();
       })
@@ -89,7 +102,7 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
         if (!controller.signal.aborted) setSessionChecked(true);
       });
     return () => abortRequest(controller);
-  }, [hydrated, login, logout]);
+  }, [hydrated, login, logout, setTasks]);
 
   useEffect(() => {
     if (hydrated && sessionChecked && !isAuthenticated) {
