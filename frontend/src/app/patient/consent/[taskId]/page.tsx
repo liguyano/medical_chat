@@ -11,6 +11,8 @@ import { Progress } from '@/components/shared/Progress';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { careRepository } from '@/lib/repositories';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
+import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
 import type { ConsentClause, ConsentProgress } from '@/lib/types';
 import {
   CheckCircleIcon,
@@ -63,7 +65,6 @@ export default function PatientConsentPage() {
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const savedConsent = useTaskStore((state) => state.consents[taskId]);
   const saveConsent = useTaskStore((state) => state.saveConsent);
-  const requestHandoff = useTaskStore((state) => state.requestHandoff);
   const updateTask = useTaskStore((state) => state.updateTask);
   const [clauses, setClauses] = useState(savedConsent?.clauses ?? initialClauses);
   const [signatureData, setSignatureData] = useState(savedConsent?.signatureData);
@@ -127,9 +128,15 @@ export default function PatientConsentPage() {
     };
     setSubmitting(true);
     try {
-      await careRepository.requestHandoff(taskId, reason);
+      const response = await careRepository.requestHandoff(taskId, reason);
+      applyRealtimeEvent(
+        toHandoffSseEnvelope(response, {
+          taskId,
+          sessionId: task?.sessionId,
+          eventType: 'handoff_requested',
+        })
+      );
       await careRepository.submitConsent(progress);
-      requestHandoff(taskId, reason);
       setClauses(nextClauses);
       saveConsent(progress);
       setError('已通知护士进行人工解释，当前进度已保存。');

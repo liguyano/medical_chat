@@ -58,6 +58,7 @@ class EventPublishMiddleware(DialogMiddleware):
                         "event_type": "tool_call",
                         "session_id": self.session_id,
                         "task_id": context.get("task_id"),
+                        "message_id": context.get("message_id"),
                         "turn_number": turn_number,
                         "tool_name": str(tool_call.get("name", "")),
                         "tool_args": dict(tool_call.get("arguments") or {}),

@@ -110,8 +110,12 @@ export interface CareRepository {
       urgency?: 'routine' | 'urgent';
     },
     signal?: AbortSignal
-  ): Promise<void>;
-  resolveHandoff(taskId: string, signal?: AbortSignal): Promise<void>;
+  ): Promise<Record<string, unknown>>;
+  resolveHandoff(
+    taskId: string,
+    requestId?: string,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>>;
   submitMessageFeedback(
     feedback: MessageFeedback,
     signal?: AbortSignal

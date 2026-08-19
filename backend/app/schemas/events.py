@@ -5,7 +5,7 @@
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -222,6 +222,9 @@ class EducationTriggeredEvent(BaseEvent):
     priority: str = "medium"
     requires_acknowledgement: bool = True
     auto_play: bool = True
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    tool_result: dict[str, Any] | None = None
 
 
 class EducationStatusUpdatedEvent(BaseEvent):
@@ -248,6 +251,9 @@ class ConsentTriggeredEvent(BaseEvent):
     status: str = "pending_signature"
     requires_signature: bool = True
     auto_play: bool = True
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    tool_result: dict[str, Any] | None = None
 
 
 class ConsentStatusUpdatedEvent(BaseEvent):
@@ -279,6 +285,10 @@ class HandoffRequestedEvent(BaseEvent):
     bed_no: str | None = None
     ward_name: str | None = None
     status: str = "requested"
+    request_source: Literal["patient", "agent"] = "agent"
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    tool_result: dict[str, Any] | None = None
 
 
 class HandoffResolvedEvent(BaseEvent):
@@ -286,8 +296,14 @@ class HandoffResolvedEvent(BaseEvent):
 
     event_type: EventType = EventType.HANDOFF_RESOLVED
     request_id: str | None = None
+    request_ids: list[str] = Field(default_factory=list)
     status: str = "resolved"
     resolved_by: str | None = None
+    resolved_by_staff_id: str | None = None
+    resolved_by_staff_no: str | None = None
+    resolved_by_name: str | None = None
+    handled_at: datetime | None = None
+    remaining_pending: bool = False
     resolution: str | None = None
 
 

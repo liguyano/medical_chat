@@ -34,6 +34,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   不能只依赖当次 SSE。
 - 医护端登录后通过 `/api/sse/nurse/alerts` 订阅责任护士全局提醒流，任意医护页面均应
   显示患者姓名、床位、呼叫原因和请求的人工操作。
+- 患者主动呼叫与 AI 工具呼叫必须使用不同的来源标识和视觉卡片；呼叫历史、工具结果、
+  处理状态及护士工号/姓名/时间必须从会话事件快照恢复。医护监控的对话回放应把普通消息、
+  宣教/知情同意工具结果和呼叫工具结果按时间合并展示，不能只渲染 `interaction_message`。
 - 患者发言次数不是评估进度。`answeredQuestionCount` 与任务进度只能由后端快照或
   `progress_updated`（必填、非派生结构化答案进度）更新。
 - AI 会话 `pending` 表示 Schedule Task-todo 与首问正在后台准备；该阶段患者输入保持禁用，

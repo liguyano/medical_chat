@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
 import ChatBubble from '@/components/chat/ChatBubble';
+import HandoffHistoryCard from '@/components/chat/HandoffHistoryCard';
+import ToolResultHistoryCard from '@/components/chat/ToolResultHistoryCard';
 import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
@@ -19,7 +21,14 @@ import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import { createMonitorSsePath } from '@/lib/transports/sseClient';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
-import type { MessageFeedback } from '@/lib/types';
+import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
+import type {
+  ConsentRequest,
+  EducationCard,
+  InteractionEvent,
+  InteractionMessage,
+  MessageFeedback,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeftIcon,
@@ -50,10 +59,11 @@ export default function NurseMonitorDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const addTask = useTaskStore((state) => state.addTask);
-  const resolveHandoff = useTaskStore((state) => state.resolveHandoff);
   const session = useChatStore((state) => state.sessions[taskId]);
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
   const interactionEvents = useChatStore((state) => state.events);
+  const educationCards = useChatStore((state) => state.educationCards);
+  const consentRequests = useChatStore((state) => state.consentRequests);
   const answers = structuredAnswers[taskId] ?? [];
   const events = interactionEvents[taskId] ?? [];
   const feedback = useChatStore((state) => state.feedback);
@@ -62,6 +72,7 @@ export default function NurseMonitorDetailPage() {
   const markEventHandled = useChatStore((state) => state.markEventHandled);
   const reviewerId = useUserStore((state) => state.user?.id ?? 'N001');
   const ratingPanelRef = useRef<HTMLDivElement>(null);
+  const loadedSnapshotKeyRef = useRef<string | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [feedbackDrafts, setFeedbackDrafts] = useState<
     Record<string, MessageFeedbackDraft>
@@ -77,7 +88,9 @@ export default function NurseMonitorDetailPage() {
         const currentTask =
           task ?? (await careRepository.getTask(taskId, controller.signal));
         if (!task) addTask(currentTask);
-        if (!useChatStore.getState().sessions[taskId]) {
+        const snapshotKey = `${currentTask.id}:${currentTask.sessionId ?? ''}`;
+        if (loadedSnapshotKeyRef.current !== snapshotKey) {
+          loadedSnapshotKeyRef.current = snapshotKey;
           const snapshot = await careRepository.getDialogueSnapshot(
             currentTask,
             controller.signal
@@ -99,6 +112,7 @@ export default function NurseMonitorDetailPage() {
         );
         setActionError('');
       } catch (loadError) {
+        loadedSnapshotKeyRef.current = null;
         if (!controller.signal.aborted && !isRequestCancelled(loadError)) {
           setActionError(
             loadError instanceof Error
@@ -113,6 +127,80 @@ export default function NurseMonitorDetailPage() {
   }, [addTask, reviewerId, setFeedback, task, taskId]);
 
   const aiMessages = session?.messages.filter((message) => message.role === 'ai') ?? [];
+  const timeline = useMemo(() => {
+    const timelineEvents = interactionEvents[taskId] ?? [];
+    const timelineEducationMaterials = educationCards[taskId] ?? [];
+    const timelineConsentForms = consentRequests[taskId] ?? [];
+    const items: Array<
+      | {
+          kind: 'message';
+          id: string;
+          occurredAt: string;
+          message: InteractionMessage;
+        }
+      | {
+          kind: 'handoff';
+          id: string;
+          occurredAt: string;
+          event: InteractionEvent;
+        }
+      | {
+          kind: 'education';
+          id: string;
+          occurredAt: string;
+          item: EducationCard;
+        }
+      | {
+          kind: 'consent';
+          id: string;
+          occurredAt: string;
+          item: ConsentRequest;
+        }
+    > = [];
+    for (const message of session?.messages ?? []) {
+      items.push({
+        kind: 'message',
+        id: message.id,
+        occurredAt: message.occurredAt,
+        message,
+      });
+    }
+    for (const event of timelineEvents.filter(
+      (item) => item.eventType === 'handoff'
+    )) {
+      items.push({
+        kind: 'handoff',
+        id: event.id,
+        occurredAt: event.occurredAt,
+        event,
+      });
+    }
+    for (const item of timelineEducationMaterials) {
+      items.push({
+        kind: 'education',
+        id: `education-${item.id}`,
+        occurredAt: item.occurredAt,
+        item,
+      });
+    }
+    for (const item of timelineConsentForms) {
+      items.push({
+        kind: 'consent',
+        id: `consent-${item.id}`,
+        occurredAt: item.occurredAt,
+        item,
+      });
+    }
+    return items.sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt)
+    );
+  }, [
+    consentRequests,
+    educationCards,
+    interactionEvents,
+    session?.messages,
+    taskId,
+  ]);
   const resolvedSelectedMessageId =
     selectedMessageId && aiMessages.some((message) => message.id === selectedMessageId)
       ? selectedMessageId
@@ -235,8 +323,14 @@ export default function NurseMonitorDetailPage() {
 
   const handleResolveHandoff = async () => {
     try {
-      await careRepository.resolveHandoff(taskId);
-      resolveHandoff(taskId);
+      const response = await careRepository.resolveHandoff(taskId);
+      applyRealtimeEvent(
+        toHandoffSseEnvelope(response, {
+          taskId,
+          sessionId: session?.id,
+          eventType: 'handoff_resolved',
+        })
+      );
       setActionError('');
     } catch (handoffError) {
       setActionError(
@@ -405,8 +499,34 @@ export default function NurseMonitorDetailPage() {
               {Object.values(feedback).filter((item) => item.taskId === taskId).length} 条已评
             </Badge>
           </div>
-          {session?.messages.length ? (
-            session.messages.map((message) => {
+          {timeline.length ? (
+            timeline.map((item) => {
+              if (item.kind === 'handoff') {
+                return (
+                  <div key={item.id} className="mb-4">
+                    <HandoffHistoryCard event={item.event} />
+                  </div>
+                );
+              }
+              if (item.kind === 'education') {
+                return (
+                  <ToolResultHistoryCard
+                    key={item.id}
+                    kind="education"
+                    item={item.item}
+                  />
+                );
+              }
+              if (item.kind === 'consent') {
+                return (
+                  <ToolResultHistoryCard
+                    key={item.id}
+                    kind="consent"
+                    item={item.item}
+                  />
+                );
+              }
+              const message = item.message;
               const isAiMessage = message.role === 'ai';
               const isSelected =
                 isAiMessage && resolvedSelectedMessageId === message.id;

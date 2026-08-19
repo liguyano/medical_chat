@@ -109,6 +109,7 @@ def resolve_handoff(
             task_ref,
             req,
             staff_id=staff.id,
+            staff_no=staff.staff_no,
             staff_name=staff.staff_name,
         )
     )

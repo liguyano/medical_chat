@@ -266,22 +266,33 @@ export class ApiCareRepository implements CareRepository {
     },
     signal?: AbortSignal
   ) {
-    await apiRequest<void>(`/api/tasks/${encodeURIComponent(taskId)}/handoff`, {
-      method: 'POST',
-      body: {
-        task_id: taskId,
-        reason,
-        requested_action: details?.requestedAction ?? 'other',
-        urgency: details?.urgency ?? 'routine',
-      },
-      signal,
-    });
+    return apiRequest<Record<string, unknown>>(
+      `/api/tasks/${encodeURIComponent(taskId)}/handoff`,
+      {
+        method: 'POST',
+        body: {
+          task_id: taskId,
+          reason,
+          requested_action: details?.requestedAction ?? 'other',
+          urgency: details?.urgency ?? 'routine',
+        },
+        signal,
+      }
+    );
   }
 
-  async resolveHandoff(taskId: string, signal?: AbortSignal) {
-    await apiRequest<void>(
+  async resolveHandoff(
+    taskId: string,
+    requestId?: string,
+    signal?: AbortSignal
+  ) {
+    return apiRequest<Record<string, unknown>>(
       `/api/tasks/${encodeURIComponent(taskId)}/handoff/resolve`,
-      { method: 'POST', body: {}, signal }
+      {
+        method: 'POST',
+        body: requestId ? { request_id: requestId } : {},
+        signal,
+      }
     );
   }
 

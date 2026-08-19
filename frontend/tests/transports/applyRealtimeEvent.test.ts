@@ -218,4 +218,77 @@ describe('实时事件进度口径', () => {
     );
     expect(useChatStore.getState().streamingTaskId).toBeNull();
   });
+
+  it('区分患者主动呼叫与 AI 工具呼叫，并在处理事件后保留护士身份', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { useTaskStore } = await import('@/lib/stores/useTaskStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+    const task = useTaskStore.getState().tasks[0];
+    useTaskStore.setState({
+      tasks: [{ ...task, id: '109', handoffRequired: true }],
+    });
+
+    applyRealtimeEvent({
+      event_id: 'handoff-agent-1',
+      event_type: 'handoff_requested',
+      task_id: '109',
+      session_id: 'SESS-109',
+      occurred_at: '2026-08-19T11:00:00Z',
+      payload: {
+        request_id: 'NURSE-AGENT-1',
+        request_source: 'agent',
+        tool_name: 'request_nurse_assistance',
+        tool_args: { requested_action: 'measure_blood_pressure' },
+        tool_result: {
+          success: true,
+          request_id: 'NURSE-AGENT-1',
+        },
+        patient_name: '周海燕',
+        bed_no: '09-1',
+        reason: '需要测量血压',
+        action_label: '测量血压',
+        status: 'requested',
+      },
+    });
+    expect(
+      useChatStore.getState().nurseAssistanceRequests['NURSE-AGENT-1']
+        .requestSource
+    ).toBe('agent');
+    expect(
+      useChatStore.getState().events['109'][0].metadata?.toolName
+    ).toBe('request_nurse_assistance');
+
+    applyRealtimeEvent({
+      event_id: 'handoff-resolved-1',
+      event_type: 'handoff_resolved',
+      task_id: '109',
+      session_id: 'SESS-109',
+      occurred_at: '2026-08-19T11:05:00Z',
+      payload: {
+        request_id: 'NURSE-AGENT-1',
+        request_ids: ['NURSE-AGENT-1'],
+        resolved_by_staff_no: 'N001',
+        resolved_by_name: '李护士',
+        handled_at: '2026-08-19T11:05:00Z',
+        resolution: '已完成血压测量',
+        remaining_pending: false,
+      },
+    });
+    expect(
+      useChatStore.getState().nurseAssistanceRequests['NURSE-AGENT-1']
+        .status
+    ).toBe('resolved');
+    expect(
+      useChatStore.getState().events['109'][0].metadata?.resolvedByStaffNo
+    ).toBe('N001');
+    expect(useTaskStore.getState().tasks[0].handoffRequired).toBe(false);
+  });
 });

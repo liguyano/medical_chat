@@ -10,7 +10,10 @@ import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
 import { useChatStore } from '@/lib/stores/useChatStore';
+import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { createNurseAlertsSsePath } from '@/lib/transports/sseClient';
+import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
+import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import {
   HomeIcon,
   ClipboardDocumentListIcon,
@@ -19,7 +22,8 @@ import {
   StarIcon,
   Cog6ToothIcon,
   UserCircleIcon,
-  BellAlertIcon,
+  CpuChipIcon,
+  UserIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 
@@ -53,11 +57,15 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
   const nurseRequests = useChatStore(
     (state) => state.nurseAssistanceRequests
   );
+  const tasks = useTaskStore((state) => state.tasks);
   const [dismissedRequests, setDismissedRequests] = useState<string[]>([]);
+  const [resolvingRequests, setResolvingRequests] = useState<string[]>([]);
   const activeRequests = Object.values(nurseRequests)
     .filter(
       (request) =>
         request.status === 'requested' &&
+        tasks.find((task) => task.id === request.taskId)?.handoffRequired !==
+          false &&
         !dismissedRequests.includes(request.requestId)
     )
     .sort((left, right) =>
@@ -93,6 +101,28 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
     void careRepository.logoutStaff().catch(() => undefined);
     logout();
     router.push('/nurse/login');
+  };
+
+  const handleResolveRequest = async (
+    taskId: string,
+    requestId: string
+  ) => {
+    setResolvingRequests((current) => [...current, requestId]);
+    try {
+      const response = await careRepository.resolveHandoff(
+        taskId
+      );
+      applyRealtimeEvent(
+        toHandoffSseEnvelope(response, {
+          taskId,
+          eventType: 'handoff_resolved',
+        })
+      );
+    } finally {
+      setResolvingRequests((current) =>
+        current.filter((item) => item !== requestId)
+      );
+    }
   };
 
   if (!hydrated || !sessionChecked || !isAuthenticated) {
@@ -191,15 +221,42 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
           {activeRequests.slice(0, 3).map((request) => (
             <div
               key={request.requestId}
-              className="rounded-2xl border border-red-200 bg-white p-4 shadow-xl"
+              className={cn(
+                'rounded-2xl border bg-white p-4 shadow-xl',
+                request.requestSource === 'patient'
+                  ? 'border-amber-300'
+                  : 'border-violet-300'
+              )}
             >
               <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-red-100 p-2 text-red-700">
-                  <BellAlertIcon className="h-6 w-6" />
+                <div
+                  className={cn(
+                    'rounded-xl p-2',
+                    request.requestSource === 'patient'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-violet-100 text-violet-700'
+                  )}
+                >
+                  {request.requestSource === 'patient' ? (
+                    <UserIcon className="h-6 w-6" />
+                  ) : (
+                    <CpuChipIcon className="h-6 w-6" />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-red-800">患者呼叫护士</p>
+                    <p
+                      className={cn(
+                        'font-semibold',
+                        request.requestSource === 'patient'
+                          ? 'text-amber-800'
+                          : 'text-violet-800'
+                      )}
+                    >
+                      {request.requestSource === 'patient'
+                        ? '患者主动呼叫护士'
+                        : 'AI工具呼叫护士'}
+                    </p>
                     {request.urgency === 'urgent' && (
                       <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">
                         紧急
@@ -210,8 +267,16 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
                     {request.patientName || `任务 ${request.taskId}`}
                     {request.bedNo ? ` · ${request.bedNo}` : ''}
                   </p>
+                  {request.wardName && (
+                    <p className="mt-1 text-xs text-foreground-muted">
+                      {request.wardName}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm text-foreground-muted">
                     {request.actionLabel}：{request.reason}
+                  </p>
+                  <p className="mt-1 text-xs text-foreground-muted">
+                    {new Date(request.occurredAt).toLocaleString('zh-CN')}
                   </p>
                   <div className="mt-3 flex items-center gap-3">
                     <Link
@@ -220,6 +285,21 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
                     >
                       立即查看
                     </Link>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleResolveRequest(
+                          request.taskId,
+                          request.requestId
+                        )
+                      }
+                      disabled={resolvingRequests.includes(request.requestId)}
+                      className="text-sm font-medium text-emerald-700 disabled:opacity-50"
+                    >
+                      {resolvingRequests.includes(request.requestId)
+                        ? '处理中'
+                        : '标记已处理'}
+                    </button>
                     <span className="text-xs text-foreground-muted">
                       提醒流 {nurseAlertStatus === 'connected' ? '已连接' : '连接中'}
                     </span>

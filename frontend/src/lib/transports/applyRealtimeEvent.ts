@@ -276,6 +276,9 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         autoPlay: value(event.payload, 'auto_play', true),
         acknowledged: false,
         occurredAt: event.occurred_at,
+        toolName: value(event.payload, 'tool_name', undefined),
+        toolArgs: value(event.payload, 'tool_args', undefined),
+        toolResult: value(event.payload, 'tool_result', undefined),
       });
       chatStore.addEvent(event.task_id, {
         id: `EDUCATION-${materialId}`,
@@ -364,6 +367,9 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         ),
         autoPlay: value(event.payload, 'auto_play', true),
         occurredAt: event.occurred_at,
+        toolName: value(event.payload, 'tool_name', undefined),
+        toolArgs: value(event.payload, 'tool_args', undefined),
+        toolResult: value(event.payload, 'tool_result', undefined),
       });
       break;
     }
@@ -391,6 +397,53 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         'reason',
         '患者请求护士协助'
       );
+      const requestSource = value(
+        event.payload,
+        'request_source',
+        event.payload.tool_name ? 'agent' : 'patient'
+      ) as 'patient' | 'agent';
+      const resolved =
+        String(value(event.payload, 'status', 'requested')) === 'resolved' ||
+        String(value(event.payload, 'handled_status', 'pending')) ===
+          'resolved';
+      const metadata = {
+        requestId,
+        requestedAction: value(
+          event.payload,
+          'requested_action',
+          'other'
+        ),
+        actionLabel: value(
+          event.payload,
+          'action_label',
+          '人工护理操作'
+        ),
+        urgency: value(event.payload, 'urgency', 'routine'),
+        patientName: value(event.payload, 'patient_name', ''),
+        bedNo: value(event.payload, 'bed_no', ''),
+        wardName: value(event.payload, 'ward_name', ''),
+        requestSource,
+        toolName: value(event.payload, 'tool_name', undefined),
+        toolArgs: value(event.payload, 'tool_args', undefined),
+        toolResult: value(event.payload, 'tool_result', undefined),
+        handledAt: value(event.payload, 'handled_at', undefined),
+        resolvedByStaffId: value(
+          event.payload,
+          'resolved_by_staff_id',
+          undefined
+        ),
+        resolvedByStaffNo: value(
+          event.payload,
+          'resolved_by_staff_no',
+          undefined
+        ),
+        resolvedByName: value(
+          event.payload,
+          'resolved_by_name',
+          undefined
+        ),
+        resolution: value(event.payload, 'resolution', undefined),
+      };
       chatStore.addEvent(event.task_id, {
         id: `HANDOFF-${requestId}`,
         taskId: event.task_id,
@@ -403,44 +456,18 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           'priority',
           'high'
         ) as InteractionEvent['priority'],
-        handled: false,
+        handled: resolved,
         occurredAt: event.occurred_at,
-        metadata: {
-          requestId: value(event.payload, 'request_id', ''),
-          requestedAction: value(
-            event.payload,
-            'requested_action',
-            'other'
-          ),
-          actionLabel: value(
-            event.payload,
-            'action_label',
-            '人工护理操作'
-          ),
-          urgency: value(event.payload, 'urgency', 'routine'),
-          patientName: value(event.payload, 'patient_name', ''),
-          bedNo: value(event.payload, 'bed_no', ''),
-          wardName: value(event.payload, 'ward_name', ''),
-        },
+        metadata,
       });
-      taskStore.requestHandoff(event.task_id, reason, {
-        requestId: value(event.payload, 'request_id', ''),
-        requestedAction: value(
-          event.payload,
-          'requested_action',
-          'other'
-        ),
-        actionLabel: value(
-          event.payload,
-          'action_label',
-          '人工护理操作'
-        ),
-        urgency: value(
-          event.payload,
-          'urgency',
-          'routine'
-        ) as 'routine' | 'urgent',
-      });
+      if (!resolved) {
+        taskStore.requestHandoff(event.task_id, reason, {
+          requestId,
+          requestedAction: String(metadata.requestedAction),
+          actionLabel: String(metadata.actionLabel),
+          urgency: metadata.urgency as 'routine' | 'urgent',
+        });
+      }
       chatStore.upsertNurseAssistanceRequest({
         requestId,
         taskId: event.task_id,
@@ -463,24 +490,65 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           'urgency',
           'routine'
         ) as 'routine' | 'urgent',
-        status: 'requested',
+        status: resolved ? 'resolved' : 'requested',
         occurredAt: event.occurred_at,
+        requestSource,
+        toolName: value(event.payload, 'tool_name', undefined),
+        toolArgs: value(event.payload, 'tool_args', undefined),
+        toolResult: value(event.payload, 'tool_result', undefined),
+        handledAt: value(event.payload, 'handled_at', undefined),
+        resolvedByStaffId: value(
+          event.payload,
+          'resolved_by_staff_id',
+          undefined
+        ),
+        resolvedByStaffNo: value(
+          event.payload,
+          'resolved_by_staff_no',
+          undefined
+        ),
+        resolvedByName: value(
+          event.payload,
+          'resolved_by_name',
+          undefined
+        ),
+        resolution: value(event.payload, 'resolution', undefined),
       });
       break;
     }
     case 'handoff_resolved': {
-      taskStore.resolveHandoff(event.task_id);
+      const requestIds = Array.isArray(event.payload.request_ids)
+        ? event.payload.request_ids.map(String)
+        : [];
       const requestId = value(event.payload, 'request_id', '');
-      if (requestId) {
-        chatStore.resolveNurseAssistanceRequest(requestId);
-      } else {
-        for (const request of Object.values(
-          chatStore.nurseAssistanceRequests
-        )) {
-          if (request.taskId === event.task_id) {
-            chatStore.resolveNurseAssistanceRequest(request.requestId);
-          }
-        }
+      if (requestId && !requestIds.includes(requestId)) {
+        requestIds.push(requestId);
+      }
+      chatStore.resolveHandoffEvents(event.task_id, requestIds, {
+        resolvedByStaffId: value(
+          event.payload,
+          'resolved_by_staff_id',
+          undefined
+        ),
+        resolvedByStaffNo: value(
+          event.payload,
+          'resolved_by_staff_no',
+          undefined
+        ),
+        resolvedByName: value(
+          event.payload,
+          'resolved_by_name',
+          value(event.payload, 'resolved_by', undefined)
+        ),
+        handledAt: value(
+          event.payload,
+          'handled_at',
+          event.occurred_at
+        ),
+        resolution: value(event.payload, 'resolution', undefined),
+      });
+      if (!value(event.payload, 'remaining_pending', false)) {
+        taskStore.resolveHandoff(event.task_id);
       }
       break;
     }

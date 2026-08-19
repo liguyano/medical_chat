@@ -7,6 +7,7 @@ import ChatBubble from '@/components/chat/ChatBubble';
 import ChatInput from '@/components/chat/ChatInput';
 import ConsentInteractionCard from '@/components/chat/ConsentInteractionCard';
 import EducationMaterialCard from '@/components/chat/EducationMaterialCard';
+import HandoffHistoryCard from '@/components/chat/HandoffHistoryCard';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
@@ -24,6 +25,7 @@ import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { createDialogueSsePath } from '@/lib/transports/sseClient';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
+import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
 import {
   VoiceSocketClient,
   type VoiceConnectionState,
@@ -203,7 +205,6 @@ export default function PatientDialoguePage() {
   const loadedSnapshotKeyRef = useRef<string | null>(null);
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const updateTask = useTaskStore((state) => state.updateTask);
-  const requestHandoff = useTaskStore((state) => state.requestHandoff);
   const session = useChatStore((state) => state.sessions[taskId]);
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
   const interactionEvents = useChatStore((state) => state.events);
@@ -501,7 +502,15 @@ export default function PatientDialoguePage() {
   const askNurse = async () => {
     const reason = '患者在AI对话评估中主动请求护士协助';
     try {
-      await careRepository.requestHandoff(taskId, reason);
+      const response = await careRepository.requestHandoff(taskId, reason);
+      applyRealtimeEvent(
+        toHandoffSseEnvelope(response, {
+          taskId,
+          sessionId: session?.id,
+          eventType: 'handoff_requested',
+        })
+      );
+      setConnectionError('');
     } catch (handoffError) {
       setConnectionError(
         handoffError instanceof Error
@@ -510,17 +519,6 @@ export default function PatientDialoguePage() {
       );
       return;
     }
-    requestHandoff(taskId, reason);
-    addEvent(taskId, {
-      id: `EVENT-${Date.now()}`,
-      taskId,
-      eventType: 'handoff',
-      title: '患者请求人工协助',
-      description: reason,
-      priority: 'high',
-      handled: false,
-      occurredAt: new Date().toISOString(),
-    });
   };
 
   const handleConsentSubmit = async (
@@ -528,12 +526,14 @@ export default function PatientDialoguePage() {
   ) => {
     if (progress.decision === 'needs_explanation') {
       const reason = '患者对知情同意内容需要护士人工解释';
-      await careRepository.requestHandoff(taskId, reason);
-      requestHandoff(taskId, reason, {
-        actionLabel: '解释知情同意条款',
-        requestedAction: 'other',
-        urgency: 'routine',
-      });
+      const response = await careRepository.requestHandoff(taskId, reason);
+      applyRealtimeEvent(
+        toHandoffSseEnvelope(response, {
+          taskId,
+          sessionId: session?.id,
+          eventType: 'handoff_requested',
+        })
+      );
     }
     await careRepository.submitConsent(progress);
     saveConsent(progress);
@@ -725,6 +725,14 @@ export default function PatientDialoguePage() {
                 ))}
 
               {events
+                .filter((event) => event.eventType === 'handoff')
+                .map((event) => (
+                  <div key={event.id} className="mb-4">
+                    <HandoffHistoryCard event={event} />
+                  </div>
+                ))}
+
+              {events
                 .filter(
                   (event) =>
                     event.eventType !== 'education' &&
@@ -753,20 +761,6 @@ export default function PatientDialoguePage() {
                   </button>
                 </div>
                 ))}
-              {task.handoffRequired && (
-                <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4">
-                  <div className="flex items-center gap-2 font-medium text-red-800">
-                    <UserPlusIcon className="h-5 w-5" />
-                    护士正在赶来处理
-                  </div>
-                  <p className="mt-1 text-sm text-red-700">
-                    {task.handoffActionLabel
-                      ? `请求操作：${task.handoffActionLabel}。`
-                      : ''}
-                    {task.handoffReason}
-                  </p>
-                </div>
-              )}
               {answers.length > 0 && (
                 <details className="lg:hidden rounded-2xl border border-border bg-surface p-4 mb-4">
                   <summary className="font-medium cursor-pointer">查看已记录信息（{answers.length}项）</summary>

@@ -260,10 +260,39 @@ export class MockCareRepository implements CareRepository {
     signal?: AbortSignal
   ) {
     await wait(signal);
+    return {
+      event_id: `HANDOFF-${Date.now()}`,
+      event_type: 'handoff_requested',
+      task_id: _taskId,
+      request_id: `NURSE-${Date.now()}`,
+      reason: _reason,
+      requested_action: _details?.requestedAction ?? 'other',
+      action_label: '人工护理协助',
+      urgency: _details?.urgency ?? 'routine',
+      request_source: 'patient',
+      status: 'requested',
+      timestamp: new Date().toISOString(),
+    };
   }
 
-  async resolveHandoff(_taskId: string, signal?: AbortSignal) {
+  async resolveHandoff(
+    _taskId: string,
+    _requestId?: string,
+    signal?: AbortSignal
+  ) {
     await wait(signal);
+    return {
+      event_id: `HANDOFF-RESOLVED-${Date.now()}`,
+      event_type: 'handoff_resolved',
+      task_id: _taskId,
+      request_id: _requestId,
+      request_ids: _requestId ? [_requestId] : [],
+      status: 'resolved',
+      resolved_by_name: '演示护士',
+      handled_at: new Date().toISOString(),
+      remaining_pending: false,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async submitMessageFeedback(

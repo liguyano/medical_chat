@@ -202,6 +202,11 @@ from medagent.configs.agent_config import get_agent_config
 - 宣教材料在患者端保留原文、通俗文本与播报文本三个快照；知情同意条款在对话内确认和
   签名，签名图片保存到 `backend/storage/consent-signatures`，禁止把 data URL 直接写入
   PostgreSQL。呼叫医护同时写入会话流与 `nurse_stream:{staff_id}` 全局提醒流。
+  呼叫请求必须永久保留在 `interaction_event`：事件 payload 需区分
+  `request_source=patient|agent`，Agent 呼叫还需保存 `tool_name`、`tool_args`、
+  `tool_result`；护士处理时更新原请求事件的处理状态，并记录处理护士 ID、工号、姓名、
+  时间和处理说明，同时发布包含 `request_ids` 的 `handoff_resolved` 事件。历史事件接口
+  是患者端和医护监控端刷新恢复呼叫记录的唯一事实来源，不能只依赖实时 Redis Stream。
 - `dialog_agent` 在 `agent_models` 中详写绑定两类模型：`language`（OpenAI 兼容文本降级）
   与 `voice`（豆包实时语音，`type: voice`）。豆包真实语音上线前必须用真实 App ID、
   Resource ID、API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。

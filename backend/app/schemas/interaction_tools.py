@@ -31,6 +31,7 @@ class HandoffResolveRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    request_id: str | None = Field(default=None, max_length=128)
     resolution: str | None = Field(default=None, max_length=1000)
 
 

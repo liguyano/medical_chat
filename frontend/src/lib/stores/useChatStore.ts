@@ -50,6 +50,17 @@ interface ChatStore {
   ) => void;
   upsertNurseAssistanceRequest: (request: NurseAssistanceRequest) => void;
   resolveNurseAssistanceRequest: (requestId: string) => void;
+  resolveHandoffEvents: (
+    taskId: string,
+    requestIds: string[],
+    details: {
+      resolvedByStaffId?: string;
+      resolvedByStaffNo?: string;
+      resolvedByName?: string;
+      handledAt?: string;
+      resolution?: string;
+    }
+  ) => void;
   markEventHandled: (taskId: string, eventId: string) => void;
   setFeedback: (taskId: string, feedback: MessageFeedback[]) => void;
   saveFeedback: (feedback: MessageFeedback) => void;
@@ -288,6 +299,45 @@ export const useChatStore = create<ChatStore>()(
               ...state.nurseAssistanceRequests,
               [requestId]: { ...existing, status: 'resolved' },
             },
+          };
+        }),
+
+      resolveHandoffEvents: (taskId, requestIds, details) =>
+        set((state) => {
+          const ids = new Set(requestIds.map(String));
+          return {
+            events: {
+              ...state.events,
+              [taskId]: (state.events[taskId] ?? []).map((event) => {
+                if (event.eventType !== 'handoff') return event;
+                const requestId = String(event.metadata?.requestId ?? '');
+                if (ids.size > 0 && !ids.has(requestId)) return event;
+                return {
+                  ...event,
+                  handled: true,
+                  metadata: {
+                    ...event.metadata,
+                    ...details,
+                  },
+                };
+              }),
+            },
+            nurseAssistanceRequests: Object.fromEntries(
+              Object.entries(state.nurseAssistanceRequests).map(
+                ([requestId, request]) =>
+                  request.taskId === taskId &&
+                  (ids.size === 0 || ids.has(requestId))
+                    ? [
+                        requestId,
+                        {
+                          ...request,
+                          status: 'resolved',
+                          ...details,
+                        },
+                      ]
+                    : [requestId, request]
+              )
+            ),
           };
         }),
 

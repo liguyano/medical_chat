@@ -296,6 +296,9 @@ export interface EducationCard {
   autoPlay: boolean;
   acknowledged: boolean;
   occurredAt: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  toolResult?: Record<string, unknown>;
 }
 
 // 知情同意条款
@@ -343,6 +346,9 @@ export interface ConsentRequest {
   requiresSignature: boolean;
   autoPlay: boolean;
   occurredAt: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  toolResult?: Record<string, unknown>;
 }
 
 export interface NurseAssistanceRequest {
@@ -357,6 +363,15 @@ export interface NurseAssistanceRequest {
   urgency: 'routine' | 'urgent';
   status: 'requested' | 'resolved';
   occurredAt: string;
+  requestSource: 'patient' | 'agent';
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  toolResult?: Record<string, unknown>;
+  handledAt?: string;
+  resolvedByStaffId?: string;
+  resolvedByStaffNo?: string;
+  resolvedByName?: string;
+  resolution?: string;
 }
 
 export interface MessageFeedback {

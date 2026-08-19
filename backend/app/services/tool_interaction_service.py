@@ -156,6 +156,18 @@ def _handoff_event(
         bed_no=encounter.bed_no if encounter else None,
         ward_name=encounter.ward_name if encounter else None,
         status=str(result.get("status") or "requested"),
+        request_source=str(result.get("request_source") or "agent"),
+        tool_name=(
+            str(result["tool_name"]) if result.get("tool_name") else None
+        ),
+        tool_args=(
+            dict(result["tool_args"]) if isinstance(result.get("tool_args"), dict) else None
+        ),
+        tool_result=(
+            dict(result["tool_result"])
+            if isinstance(result.get("tool_result"), dict)
+            else None
+        ),
     )
 
 
@@ -175,6 +187,9 @@ def _domain_event_from_result(
         "session_id": session.session_no,
         "task_id": task.id,
         "message_id": message_no,
+        "tool_name": tool_name,
+        "tool_args": dict(result.get("tool_args") or {}),
+        "tool_result": dict(result.get("tool_result") or result),
     }
     if tool_name == "get_education_material":
         return EducationTriggeredEvent(
@@ -243,6 +258,10 @@ def publish_tool_result(
             task_id or session_no,
         )
         result = dict(tool_result)
+        result.setdefault("request_source", "agent")
+        result.setdefault("tool_name", tool_name)
+        result.setdefault("tool_args", dict(tool_args))
+        result.setdefault("tool_result", dict(tool_result))
         domain_event = _domain_event_from_result(
             task=task,
             session=session,
@@ -308,6 +327,7 @@ def _new_handoff_result(request: HandoffRequest) -> dict[str, Any]:
         "title": f"需要护士协助{action_label}",
         "description": request.reason.strip(),
         "status": "requested",
+        "request_source": "patient",
     }
 
 
@@ -348,7 +368,46 @@ def request_handoff(
     publisher.publish(event)
     if task.assigned_nurse_id is not None:
         NurseEventPublisher(task.assigned_nurse_id, publisher.redis).publish(event)
-    return result
+    return event.model_dump(mode="json")
+
+
+def _resolve_pending_handoff_rows(
+    rows: list[InteractionEventModel],
+    *,
+    request_id: str | None,
+    staff_id: int,
+    staff_no: str,
+    staff_name: str,
+    handled_at: datetime,
+    resolution: str | None,
+) -> list[str]:
+    """更新呼叫请求的永久处理快照，并返回本次处理的请求编号。"""
+    request_ids: list[str] = []
+    for row in rows:
+        row_request_id = str((row.event_payload or {}).get("request_id") or "")
+        if row.handled_status == "resolved":
+            continue
+        if request_id is not None and row_request_id != request_id:
+            continue
+        if row_request_id:
+            request_ids.append(row_request_id)
+        row.handled_status = "resolved"
+        row.handled_by = str(staff_id)
+        row.handled_at = handled_at
+        row.updator = str(staff_id)
+        payload = dict(row.event_payload or {})
+        payload.update(
+            {
+                "status": "resolved",
+                "resolved_by_staff_id": str(staff_id),
+                "resolved_by_staff_no": staff_no,
+                "resolved_by_name": staff_name,
+                "handled_at": handled_at.isoformat(),
+                "resolution": resolution,
+            }
+        )
+        row.event_payload = payload
+    return request_ids
 
 
 def resolve_handoff(
@@ -357,38 +416,64 @@ def resolve_handoff(
     request: HandoffResolveRequest,
     *,
     staff_id: int,
+    staff_no: str,
     staff_name: str,
 ) -> dict[str, Any]:
-    """医护处理人工介入请求并通知患者端。"""
+    """医护处理当前任务全部未完成呼叫，并通知患者端。"""
     task, session, _, _ = _load_task_context(db, task_ref)
-    latest = db.scalar(
-        select(InteractionEventModel)
-        .where(
-            InteractionEventModel.interaction_session_id == session.id,
-            InteractionEventModel.event_type
-            == HandoffRequestedEvent.model_fields["event_type"].default.value,
-            InteractionEventModel.deleted == 0,
-        )
-        .order_by(InteractionEventModel.id.desc())
+    requested_rows = list(
+        db.scalars(
+            select(InteractionEventModel)
+            .where(
+                InteractionEventModel.interaction_session_id == session.id,
+                InteractionEventModel.event_type
+                == HandoffRequestedEvent.model_fields["event_type"].default.value,
+                InteractionEventModel.deleted == 0,
+            )
+            .order_by(InteractionEventModel.id.asc())
+        ).all()
     )
-    request_id = None
-    if latest is not None:
-        latest.handled_status = "resolved"
-        latest.handled_by = str(staff_id)
-        latest.handled_at = datetime.now(UTC)
-        latest.updator = str(staff_id)
-        request_id = str((latest.event_payload or {}).get("request_id") or "") or None
+    handled_at = datetime.now(UTC)
+    request_ids = _resolve_pending_handoff_rows(
+        requested_rows,
+        request_id=request.request_id,
+        staff_id=staff_id,
+        staff_no=staff_no,
+        staff_name=staff_name,
+        handled_at=handled_at,
+        resolution=request.resolution,
+    )
+    remaining_pending = any(
+        row.handled_status != "resolved" for row in requested_rows
+    )
+    session.handoff_required = remaining_pending
+    session.handoff_reason = (
+        next(
+            (
+                str((row.event_payload or {}).get("reason") or "")
+                for row in requested_rows
+                if row.handled_status != "resolved"
+            ),
+            None,
+        )
+        if remaining_pending
+        else None
+    )
+    task.need_manual_intervention = remaining_pending
+    task.intervention_reason = session.handoff_reason
 
-    session.handoff_required = False
-    session.handoff_reason = None
-    task.need_manual_intervention = False
-    task.intervention_reason = None
     event = HandoffResolvedEvent(
         event_id=f"HANDOFF-RESOLVED-{uuid.uuid4().hex.upper()}",
         session_id=session.session_no,
         task_id=task.id,
-        request_id=request_id,
+        request_id=request_ids[-1] if request_ids else request.request_id,
+        request_ids=request_ids,
         resolved_by=staff_name,
+        resolved_by_staff_id=str(staff_id),
+        resolved_by_staff_no=staff_no,
+        resolved_by_name=staff_name,
+        handled_at=handled_at,
+        remaining_pending=remaining_pending,
         resolution=request.resolution,
     )
     _persist_event(
@@ -405,11 +490,7 @@ def resolve_handoff(
     publisher.publish(event)
     if task.assigned_nurse_id is not None:
         NurseEventPublisher(task.assigned_nurse_id, publisher.redis).publish(event)
-    return {
-        "request_id": request_id,
-        "status": "resolved",
-        "resolved_by": staff_name,
-    }
+    return event.model_dump(mode="json")
 
 
 def _save_signature_file(signature_data: str) -> tuple[str, bytes]:
@@ -517,6 +598,19 @@ def submit_consent(
     return payload
 
 
+def _interaction_event_payload(row: InteractionEventModel) -> dict[str, Any]:
+    """组装历史事件 payload，并保留事件自身已持久化的处理时间。"""
+    payload = dict(row.event_payload or {})
+    payload["handled_status"] = row.handled_status
+    payload["handled_by"] = row.handled_by
+    payload["handled_at"] = (
+        row.handled_at.isoformat()
+        if row.handled_at
+        else payload.get("handled_at")
+    )
+    return payload
+
+
 def list_interaction_events(
     db: Session,
     session_no: str,
@@ -567,7 +661,7 @@ def list_interaction_events(
                 str(row.message_id) if row.message_id is not None else None
             ),
             "occurred_at": row.create_time.isoformat(),
-            "payload": row.event_payload or {},
+            "payload": _interaction_event_payload(row),
         }
         for row in rows
     ]

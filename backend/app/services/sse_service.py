@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 # 心跳间隔（秒）：空闲时定期发送 ping 事件保活
 HEARTBEAT_INTERVAL = 30
 
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    """兼容 Redis Stream 中字符串化的布尔值。"""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
 # 事件类型 -> SSE event 名称映射（对齐前端 SseEventType）
 _EVENT_NAME_MAP: dict[str, str] = {
     # 核心事件（第一期）
@@ -191,6 +200,9 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
                 data.get("requires_acknowledgement", True)
             ),
             "auto_play": bool(data.get("auto_play", True)),
+            "tool_name": data.get("tool_name"),
+            "tool_args": data.get("tool_args"),
+            "tool_result": data.get("tool_result"),
         }
     elif event_type == EventType.EDUCATION_STATUS_UPDATED.value:
         return {
@@ -209,6 +221,9 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "status": data.get("status", "pending_signature"),
             "requires_signature": bool(data.get("requires_signature", True)),
             "auto_play": bool(data.get("auto_play", True)),
+            "tool_name": data.get("tool_name"),
+            "tool_args": data.get("tool_args"),
+            "tool_result": data.get("tool_result"),
         }
     elif event_type == EventType.CONSENT_STATUS_UPDATED.value:
         return {
@@ -232,12 +247,28 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "bed_no": data.get("bed_no"),
             "ward_name": data.get("ward_name"),
             "status": data.get("status", "requested"),
+            "request_source": data.get("request_source", "agent"),
+            "tool_name": data.get("tool_name"),
+            "tool_args": data.get("tool_args"),
+            "tool_result": data.get("tool_result"),
+            "handled_status": data.get("handled_status"),
+            "handled_by": data.get("handled_by"),
+            "handled_at": data.get("handled_at"),
         }
     elif event_type == EventType.HANDOFF_RESOLVED.value:
         return {
             "request_id": data.get("request_id"),
+            "request_ids": data.get("request_ids", []),
             "status": data.get("status", "resolved"),
             "resolved_by": data.get("resolved_by"),
+            "resolved_by_staff_id": data.get("resolved_by_staff_id"),
+            "resolved_by_staff_no": data.get("resolved_by_staff_no"),
+            "resolved_by_name": data.get("resolved_by_name"),
+            "handled_at": data.get("handled_at"),
+            "remaining_pending": _as_bool(
+                data.get("remaining_pending"),
+                False,
+            ),
             "resolution": data.get("resolution"),
         }
     elif event_type in (EventType.TOOL_CALL.value, EventType.CONSTRAINT.value):
