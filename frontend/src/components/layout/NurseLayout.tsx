@@ -29,6 +29,7 @@ import {
 
 interface NurseLayoutProps {
   children: ReactNode;
+  wide?: boolean;
 }
 
 const navigation = [
@@ -42,7 +43,10 @@ const navigation = [
 
 const subscribeToHydration = () => () => undefined;
 
-export default function NurseLayout({ children }: NurseLayoutProps) {
+export default function NurseLayout({
+  children,
+  wide = false,
+}: NurseLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, login, logout, isAuthenticated } = useUserStore();
@@ -150,7 +154,12 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
     <div className="min-h-screen bg-background">
       {/* 顶部导航栏 */}
       <nav className="sticky top-0 z-50 bg-surface/80 backdrop-blur-md border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div
+          className={cn(
+            'mx-auto w-full px-4 sm:px-6 lg:px-8',
+            wide ? 'max-w-[1920px]' : 'max-w-7xl'
+          )}
+        >
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center space-x-8">
@@ -202,7 +211,7 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
         </div>
       </nav>
 
-      <div className="xl:hidden overflow-x-auto border-b border-border bg-surface">
+      <div className="scrollbar-soft xl:hidden overflow-x-auto border-b border-border bg-surface">
         <div className="flex min-w-max px-3 py-2 gap-1">
           {navigation.map((item) => {
             const isActive = pathname.startsWith(item.href);
@@ -336,7 +345,14 @@ export default function NurseLayout({ children }: NurseLayoutProps) {
           ))}
         </aside>
       )}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
+      <main
+        className={cn(
+          'mx-auto w-full px-4 py-8 sm:px-6 lg:px-8',
+          wide ? 'max-w-[1920px]' : 'max-w-7xl'
+        )}
+      >
+        {children}
+      </main>
     </div>
   );
 }

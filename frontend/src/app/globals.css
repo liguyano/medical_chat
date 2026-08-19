@@ -60,6 +60,35 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.scrollbar-soft {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground-muted) 42%, transparent) transparent;
+  scrollbar-gutter: stable;
+}
+
+.scrollbar-soft::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-soft::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-soft::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground-muted) 38%, transparent);
+  background-clip: padding-box;
+  transition: background 160ms ease;
+}
+
+.scrollbar-soft:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 62%, var(--foreground-muted));
+  background-clip: padding-box;
+}
+
 h1, h2 {
   font-family: var(--font-serif);
   font-weight: 500;
