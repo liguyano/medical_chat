@@ -68,6 +68,38 @@ describe('staff authentication repository', () => {
     expect(user.username).toBe('N001');
   });
 
+  it('API 模式从医护任务接口读取历史任务', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse([
+        {
+          task_id: 109,
+          task_no: 'TASK-HISTORY-109',
+          session_id: 'SESS-HISTORY-109',
+          patient_id: 1,
+          encounter_id: 2,
+          patient_name: '周海燕',
+          bed_no: '09-1',
+          collection_mode: 'ai_dialogue',
+          task_status: 'pending_review',
+          created_at: '2026-08-19T10:00:00Z',
+        },
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const tasks = await new ApiCareRepository().listMyTasks();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/tasks'),
+      expect.objectContaining({ credentials: 'include' })
+    );
+    expect(tasks[0]).toMatchObject({
+      id: '109',
+      taskNo: 'TASK-HISTORY-109',
+      patientName: '周海燕',
+    });
+  });
+
   it('Mock 模式支持多组演示医护账号并拒绝错误密码', async () => {
     const repository = new MockCareRepository();
 

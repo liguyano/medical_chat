@@ -238,4 +238,5 @@ from medagent.configs.agent_config import get_agent_config
 - `assessment_answer_option.option_code_snapshot` 仅用于审计和选项关联，禁止作为患者端或医护端用户可见答案。
 - 抽取历史接口和 `extraction_updated` 必须同时返回选项编码、`selected_option_labels`、`selected_option_values` 与统一 `display_value`；页面优先展示量表标签快照，保留可信度和来源消息 ID。
 - 任务详情需要返回监控页患者摘要所需的住院号、性别、年龄、入院时间和在院状态，禁止前端使用假数据补齐。
+- 医护端登录后的任务列表必须通过 `GET /api/tasks` 按当前 `staff_account.id` 查询 `care_task.assigned_nurse_id`，不能复用患者任务接口或只依赖浏览器本地缓存。
 

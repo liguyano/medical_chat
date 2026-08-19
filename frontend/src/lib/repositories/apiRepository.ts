@@ -139,7 +139,7 @@ export class ApiCareRepository implements CareRepository {
 
   async listMyTasks(signal?: AbortSignal) {
     const response = await apiRequest<BackendTaskDto[]>(
-      '/api/patients/me/tasks',
+      '/api/tasks',
       { signal }
     );
     return response.map(mapTaskDto);

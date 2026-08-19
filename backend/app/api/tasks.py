@@ -46,6 +46,19 @@ def create_task(
 
 
 @router.get(
+    "",
+    response_model=ApiResponse[list[BackendTaskDto]],
+    summary="查询当前医护负责的全部任务",
+)
+def list_staff_tasks(
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """返回当前登录医护负责的历史与进行中任务。"""
+    return ok(task_service.list_staff_tasks(db, staff_id=staff.id))
+
+
+@router.get(
     "/{task_ref}",
     response_model=ApiResponse[BackendTaskDto],
     summary="获取任务详情",
