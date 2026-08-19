@@ -19,6 +19,7 @@ interface TaskStore {
   consents: Record<string, ConsentProgress>;
   setTasks: (tasks: CareTask[]) => void;
   addTask: (task: CareTask) => void;
+  upsertTask: (task: CareTask) => void;
   setCurrentTask: (task: CareTask | null) => void;
   updateTask: (taskId: string, updates: Partial<CareTask>) => void;
   updateTaskStatus: (taskId: string, status: CareTask['taskStatus']) => void;
@@ -64,6 +65,15 @@ export const useTaskStore = create<TaskStore>()(
         set((state) => ({
           tasks: [task, ...state.tasks],
           currentTask: task,
+        })),
+
+      upsertTask: (task) =>
+        set((state) => ({
+          tasks: state.tasks.some((item) => item.id === task.id)
+            ? state.tasks.map((item) => (item.id === task.id ? task : item))
+            : [task, ...state.tasks],
+          currentTask:
+            state.currentTask?.id === task.id ? task : state.currentTask,
         })),
 
       setCurrentTask: (task) => set({ currentTask: task }),

@@ -228,6 +228,29 @@ class ExtractionAgentRunner:
                 }
                 for answer in result.extracted_answers:
                     question = question_by_id[answer.question_id]
+                    selected_definitions = {
+                        option.option_code: option
+                        for option in question.options
+                    }
+                    selected_labels = [
+                        selected_definitions[code].option_label
+                        for code in answer.selected_option_codes
+                        if code in selected_definitions
+                    ]
+                    selected_values = [
+                        str(selected_definitions[code].option_value)
+                        for code in answer.selected_option_codes
+                        if code in selected_definitions
+                    ]
+                    display_value = (
+                        "、".join(selected_labels)
+                        if selected_labels
+                        else (
+                            str(answer.answer_value)
+                            if answer.answer_value is not None
+                            else None
+                        )
+                    )
                     changed_fields[str(answer.question_id)] = {
                         "question_id": answer.question_id,
                         "question_code": answer.question_code,
@@ -253,6 +276,9 @@ class ExtractionAgentRunner:
                             else None
                         ),
                         "selected_options": answer.selected_option_codes,
+                        "selected_option_labels": selected_labels or None,
+                        "selected_option_values": selected_values or None,
+                        "display_value": display_value,
                         "source_message_ids": answer.source_message_ids,
                         "confidence": answer.extraction_confidence,
                         "corrected": False,

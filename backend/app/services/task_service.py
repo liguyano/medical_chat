@@ -26,7 +26,12 @@ from app.models.assessment_template import (
 from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
-from app.schemas.task import BackendTaskDto, CreateTaskRequest, CreateTaskResponse
+from app.schemas.task import (
+    BackendTaskDto,
+    CreateTaskRequest,
+    CreateTaskResponse,
+    TaskScaleProgressDto,
+)
 from app.services.assessment_progress_service import (
     valid_assessment_answer_condition,
 )
@@ -49,6 +54,24 @@ def _calculate_age(birthday: date | None, today: date | None = None) -> int | No
         - birthday.year
         - ((current.month, current.day) < (birthday.month, birthday.day))
     )
+
+
+def _resolve_scale_progress_status(
+    *,
+    total: int,
+    answered: int,
+    task_status: str,
+    collecting_assigned: bool,
+) -> str:
+    """计算单张目标量表状态。"""
+    if (
+        (total > 0 and answered >= total)
+        or task_status in {"completed", "pending_review"}
+    ):
+        return "completed"
+    if task_status == "in_progress" and not collecting_assigned:
+        return "collecting"
+    return "pending"
 
 
 def _load_selected_versions(
@@ -298,6 +321,57 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
             or 0
         )
 
+    scale_progress: list[TaskScaleProgressDto] = []
+    collecting_assigned = False
+    for instance, scale, version in scale_rows:
+        scale_total = int(
+            db.scalar(
+                select(func.count(AssessmentQuestion.id)).where(
+                    AssessmentQuestion.scale_version_id == version.id,
+                    AssessmentQuestion.required.is_(True),
+                    AssessmentQuestion.derived.is_(False),
+                    AssessmentQuestion.deleted == 0,
+                )
+            )
+            or 0
+        )
+        scale_answered = 0
+        if session is not None:
+            scale_answered = int(
+                db.scalar(
+                    select(func.count(func.distinct(AssessmentAnswer.question_id)))
+                    .join(
+                        AssessmentSubmission,
+                        AssessmentSubmission.id == AssessmentAnswer.submission_id,
+                    )
+                    .where(
+                        AssessmentSubmission.assessment_instance_id == instance.id,
+                        AssessmentSubmission.interaction_session_id == session.id,
+                        AssessmentSubmission.deleted == 0,
+                        AssessmentAnswer.deleted == 0,
+                        valid_assessment_answer_condition(),
+                    )
+                )
+                or 0
+            )
+        scale_status = _resolve_scale_progress_status(
+            total=scale_total,
+            answered=scale_answered,
+            task_status=task.task_status,
+            collecting_assigned=collecting_assigned,
+        )
+        if scale_status == "collecting":
+            collecting_assigned = True
+        scale_progress.append(
+            TaskScaleProgressDto(
+                scale_id=scale.id,
+                scale_name=scale.scale_name,
+                answered_question_count=scale_answered,
+                total_question_count=scale_total,
+                status=scale_status,
+            )
+        )
+
     versions = list(dict.fromkeys(version.version_code for _, _, version in scale_rows))
     return BackendTaskDto(
         id=task.id,
@@ -308,15 +382,21 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
         encounter_id=task.encounter_id,
         encounter_no=encounter.encounter_no if encounter else "",
         patient_name=patient.patient_name if patient else "",
+        inpatient_no=encounter.inpatient_no if encounter else None,
         bed_no=encounter.bed_no if encounter else None,
         department=encounter.department_name if encounter else None,
         ward_name=encounter.ward_name if encounter else None,
+        sex=patient.sex if patient else None,
+        age=_calculate_age(patient.birthday) if patient else None,
+        admission_time=encounter.admission_time.isoformat() if encounter else None,
+        encounter_status=encounter.encounter_status if encounter else None,
         task_type=task.task_type,
         collection_mode=task.collection_mode or "traditional_form",
         task_status=task.task_status,
         assigned_nurse_id=task.assigned_nurse_id,
         scale_ids=[scale.id for _, scale, _ in scale_rows],
         scale_names=[scale.scale_name for _, scale, _ in scale_rows],
+        scale_progress=scale_progress,
         scale_version=",".join(versions) if versions else None,
         participant_type=session.participant_type if session else None,
         assessment_scene=scale_rows[0][0].assessment_scene if scale_rows else None,

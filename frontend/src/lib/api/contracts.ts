@@ -75,6 +75,14 @@ export interface AssessmentScaleDto {
   description?: string;
 }
 
+export interface TaskScaleProgressDto {
+  scale_id: ApiId;
+  scale_name: string;
+  answered_question_count: number;
+  total_question_count: number;
+  status: 'pending' | 'collecting' | 'completed';
+}
+
 export interface BackendTaskDto {
   id?: ApiId;
   task_id?: ApiId;
@@ -84,9 +92,14 @@ export interface BackendTaskDto {
   encounter_id: ApiId;
   encounter_no?: string;
   patient_name?: string;
+  inpatient_no?: string;
   bed_no?: string;
   department?: string;
   ward_name?: string;
+  sex?: string;
+  age?: number;
+  admission_time?: string;
+  encounter_status?: string;
   task_type?: string;
   collection_mode: CollectionMode;
   task_status: TaskStatus;
@@ -95,6 +108,7 @@ export interface BackendTaskDto {
   assigned_nurse_name?: string;
   scale_ids?: ApiId[];
   scale_names?: string[];
+  scale_progress?: TaskScaleProgressDto[];
   scale_version?: string;
   participant_type?: ParticipantType;
   participant_name?: string;
@@ -183,6 +197,9 @@ export interface ExtractedFieldDto {
   answer_number?: number;
   answer_boolean?: boolean;
   selected_options?: string[];
+  selected_option_labels?: string[];
+  selected_option_values?: string[];
+  display_value?: string;
   source_message_ids?: string[];
   confidence?: number;
   corrected?: boolean;

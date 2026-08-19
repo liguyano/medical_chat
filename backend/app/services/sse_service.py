@@ -405,10 +405,18 @@ def _max_stream_id(left: str, right: str) -> str:
     """比较 Redis Stream ID，避免快照回放后重复消费旧增量。"""
     try:
         left_pair = tuple(int(part) for part in left.split("-", 1))
+    except (AttributeError, TypeError, ValueError):
+        left_pair = None
+    try:
         right_pair = tuple(int(part) for part in right.split("-", 1))
-        return left if left_pair >= right_pair else right
-    except (TypeError, ValueError):
-        return left or right
+    except (AttributeError, TypeError, ValueError):
+        right_pair = None
+
+    if left_pair is None:
+        return right if right_pair is not None else "0-0"
+    if right_pair is None:
+        return left
+    return left if left_pair >= right_pair else right
 
 
 def _format_snapshot_event(snapshot: dict[str, Any]) -> dict[str, str] | None:

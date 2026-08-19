@@ -49,6 +49,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 语音或网络失败时保留文字输入，并在 UI 显示 Mock/API、SSE 和语音连接状态。
 - 前端单元测试位于 `frontend/tests/`，使用 Vitest；涉及适配器变更时至少覆盖 DTO 映射、事件解析和传输边界。
 - 护士监控页的逐条 AI 质评通过 `CareRepository` 调用 `/api/rating`，整体质量评价通过 `/api/quality-reviews`；Mock 模式继续使用 Zustand sessionStorage，不得把本地保存描述为后端已入库。
+- 结构化答案的 `selectedOptions` 是内部选项编码，只用于审计；患者端和医护端必须通过 `displayValue` / `selectedOptionLabels` 展示目标量表真实值，禁止把 `option_3` 等编码直接暴露给用户。
+- API 模式进入医护监控详情页时必须刷新最新任务详情，使用后端住院号、床位、科室、性别年龄、入院时间和在院状态构造顶部患者摘要，不能复用 sessionStorage 中的旧任务快照。
 
 ## 常用检查命令
 
