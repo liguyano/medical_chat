@@ -249,7 +249,7 @@ export default function NurseMonitorDetailPage() {
   };
 
   if (!task) {
-    return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
+    return <NurseLayout wide><Card padding="lg">任务不存在</Card></NurseLayout>;
   }
   const progressStatus =
     task.taskStatus === 'pending_review'
@@ -365,7 +365,7 @@ export default function NurseMonitorDetailPage() {
   };
 
   return (
-    <NurseLayout>
+    <NurseLayout wide>
       <Link
         href="/nurse/monitor"
         className="mb-3 inline-flex items-center gap-2 text-sm text-foreground-muted"
@@ -419,8 +419,8 @@ export default function NurseMonitorDetailPage() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(280px,0.95fr)_minmax(0,1.7fr)_minmax(320px,1fr)] gap-4 min-h-[70vh]">
-        <div className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1">
+      <div className="grid min-h-[70vh] grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.95fr)_minmax(0,2fr)_minmax(360px,1.05fr)]">
+        <div className="scrollbar-soft min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1">
           <Card padding="md">
             <div className="flex items-center gap-2 mb-3">
               <ClipboardDocumentListIcon className="h-5 w-5 text-primary" />
@@ -506,7 +506,7 @@ export default function NurseMonitorDetailPage() {
 
           <Card padding="sm">
             <h2 className="font-semibold mb-3">结构化答案</h2>
-            <div className="space-y-2 max-h-72 overflow-y-auto">
+            <div className="scrollbar-soft space-y-2 max-h-72 overflow-y-auto">
               {answers.map((answer) => (
                 <div key={answer.questionId} className="rounded-xl bg-surface-secondary p-3">
                   <div className="flex justify-between gap-2">
@@ -526,7 +526,7 @@ export default function NurseMonitorDetailPage() {
 
           <Card padding="sm">
             <h2 className="mb-1.5 font-semibold">风险与宣教事件</h2>
-            <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            <div className="scrollbar-soft max-h-48 space-y-1 overflow-y-auto pr-1">
               {events.map((event) => (
                 <button
                   key={event.id}
@@ -566,7 +566,7 @@ export default function NurseMonitorDetailPage() {
           )}
         </div>
 
-        <Card padding="sm" className="overflow-y-auto max-h-[72vh]">
+        <Card padding="sm" className="scrollbar-soft overflow-y-auto max-h-[72vh]">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="font-semibold">对话回放</h2>
@@ -767,7 +767,7 @@ export default function NurseMonitorDetailPage() {
 
         <div
           ref={ratingPanelRef}
-          className="space-y-4 scroll-mt-24 xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1"
+          className="scrollbar-soft space-y-4 scroll-mt-24 xl:sticky xl:top-24 xl:self-start xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1"
         >
           <Card padding="md" className="border-primary/30">
             <div className="flex items-start justify-between gap-3 mb-4">
