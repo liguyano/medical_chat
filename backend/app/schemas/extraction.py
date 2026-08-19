@@ -21,6 +21,15 @@ class ExtractedFieldDto(BaseModel):
     selected_options: list[str] | None = Field(
         default=None, description="选中选项编码列表"
     )
+    selected_option_labels: list[str] | None = Field(
+        default=None, description="选中选项的量表显示值（标签）"
+    )
+    selected_option_values: list[str] | None = Field(
+        default=None, description="选中选项的量表真实值"
+    )
+    display_value: str | None = Field(
+        default=None, description="面向患者和医护展示的真实答案值"
+    )
     source_message_ids: list[str] | None = Field(
         default=None, description="来源消息ID列表"
     )

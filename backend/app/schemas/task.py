@@ -38,6 +38,16 @@ class CreateTaskRequest(BaseModel):
     task_source: str = Field(default="manual", description="任务来源")
 
 
+class TaskScaleProgressDto(BaseModel):
+    """任务目标量表进度。"""
+
+    scale_id: int
+    scale_name: str
+    answered_question_count: int = 0
+    total_question_count: int = 0
+    status: Literal["pending", "collecting", "completed"]
+
+
 class BackendTaskDto(BaseModel):
     """任务详情响应
     作用：返回页面展示和实时会话所需的完整任务信息。
@@ -51,9 +61,14 @@ class BackendTaskDto(BaseModel):
     encounter_id: int
     encounter_no: str
     patient_name: str
+    inpatient_no: str | None = None
     bed_no: str | None = None
     department: str | None = None
     ward_name: str | None = None
+    sex: str | None = None
+    age: int | None = None
+    admission_time: str | None = None
+    encounter_status: str | None = None
     task_type: str
     collection_mode: Literal["traditional_form", "ai_dialogue"]
     task_status: str
@@ -61,6 +76,7 @@ class BackendTaskDto(BaseModel):
     assigned_nurse_name: str | None = None
     scale_ids: list[int] = Field(default_factory=list)
     scale_names: list[str] = Field(default_factory=list)
+    scale_progress: list[TaskScaleProgressDto] = Field(default_factory=list)
     scale_version: str | None = None
     participant_type: str | None = None
     assessment_scene: str | None = None

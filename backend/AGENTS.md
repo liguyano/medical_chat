@@ -233,3 +233,9 @@ from medagent.configs.agent_config import get_agent_config
 - `POST /api/quality-reviews` 与 `GET /api/quality-reviews/{task_id}` 负责整次 AI 对话和 AI 评估结果的维度评价。
 - 整体评价使用 `quality_review_template`、`quality_review_dimension`、`quality_review`、`quality_review_score`，维度不得硬编码为运行表字段；AI 评估评价的 `target_id` 必须指向 `assessment_submission.id`。
 
+## 结构化答案展示边界
+
+- `assessment_answer_option.option_code_snapshot` 仅用于审计和选项关联，禁止作为患者端或医护端用户可见答案。
+- 抽取历史接口和 `extraction_updated` 必须同时返回选项编码、`selected_option_labels`、`selected_option_values` 与统一 `display_value`；页面优先展示量表标签快照，保留可信度和来源消息 ID。
+- 任务详情需要返回监控页患者摘要所需的住院号、性别、年龄、入院时间和在院状态，禁止前端使用假数据补齐。
+

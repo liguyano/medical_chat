@@ -16,11 +16,30 @@ from app.models.assessment_execution import (
     AssessmentAnswerOption,
     AssessmentSubmission,
 )
-from app.models.assessment_template import AssessmentQuestion
+from app.models.assessment_template import AssessmentOption, AssessmentQuestion
 from app.models.interaction import InteractionSession
 from app.schemas.extraction import ExtractedFieldDto, ExtractedFieldsResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _build_display_value(
+    *,
+    answer_text: str | None,
+    answer_number: object | None,
+    answer_boolean: bool | None,
+    selected_labels: list[str] | None,
+) -> str | None:
+    """构造结构化答案的用户可见值，避免暴露 option code。"""
+    if selected_labels:
+        return "、".join(selected_labels)
+    if answer_text is not None:
+        return str(answer_text)
+    if answer_number is not None:
+        return str(answer_number)
+    if answer_boolean is not None:
+        return "是" if answer_boolean else "否"
+    return None
 
 
 def get_extracted_fields(
@@ -87,11 +106,19 @@ def get_extracted_fields(
 
     answer_ids = [answer.id for answer, _ in answer_rows]
     option_codes_by_answer: dict[int, list[str]] = defaultdict(list)
+    option_labels_by_answer: dict[int, list[str]] = defaultdict(list)
+    option_values_by_answer: dict[int, list[str]] = defaultdict(list)
     if answer_ids:
         option_rows = db.execute(
             select(
                 AssessmentAnswerOption.assessment_answer_id,
                 AssessmentAnswerOption.option_code_snapshot,
+                AssessmentAnswerOption.option_label_snapshot,
+                AssessmentOption.option_value,
+            )
+            .outerjoin(
+                AssessmentOption,
+                AssessmentOption.id == AssessmentAnswerOption.option_id,
             )
             .where(
                 AssessmentAnswerOption.assessment_answer_id.in_(answer_ids),
@@ -100,12 +127,24 @@ def get_extracted_fields(
             )
             .order_by(AssessmentAnswerOption.id.asc())
         ).all()
-        for answer_id, option_code in option_rows:
+        for answer_id, option_code, option_label, option_value in option_rows:
             option_codes_by_answer[answer_id].append(option_code)
+            option_labels_by_answer[answer_id].append(option_label)
+            option_values_by_answer[answer_id].append(
+                str(option_value) if option_value is not None else option_label
+            )
 
     fields = []
     for answer, question in answer_rows:
         selected_codes = option_codes_by_answer.get(answer.id) or None
+        selected_labels = option_labels_by_answer.get(answer.id) or None
+        selected_values = option_values_by_answer.get(answer.id) or None
+        display_value = _build_display_value(
+            answer_text=answer.answer_text,
+            answer_number=answer.answer_number,
+            answer_boolean=answer.answer_boolean,
+            selected_labels=selected_labels,
+        )
         source_ids = (
             [str(message_id) for message_id in answer.source_message_ids]
             if answer.source_message_ids
@@ -122,6 +161,9 @@ def get_extracted_fields(
                 answer_number=answer.answer_number,
                 answer_boolean=answer.answer_boolean,
                 selected_options=selected_codes,
+                selected_option_labels=selected_labels,
+                selected_option_values=selected_values,
+                display_value=display_value,
                 source_message_ids=source_ids,
                 confidence=answer.extraction_confidence,
                 corrected=False,  # 第一期无护士修正功能，默认 False
