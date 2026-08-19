@@ -19,6 +19,7 @@ interface ConsentInteractionCardProps {
   request: ConsentRequest;
   participantName: string;
   onSubmit: (progress: ConsentProgress) => Promise<void>;
+  readOnly?: boolean;
 }
 
 function statusLabel(request: ConsentRequest): string {
@@ -32,6 +33,7 @@ export default function ConsentInteractionCard({
   request,
   participantName,
   onSubmit,
+  readOnly = false,
 }: ConsentInteractionCardProps) {
   const autoPlayedRef = useRef(false);
   const [clauses, setClauses] = useState(request.clauses);
@@ -56,7 +58,7 @@ export default function ConsentInteractionCard({
   };
 
   useEffect(() => {
-    if (!request.autoPlay || autoPlayedRef.current) return;
+    if (readOnly || !request.autoPlay || autoPlayedRef.current) return;
     autoPlayedRef.current = true;
     speak(request.fullText);
     return () => {
@@ -69,7 +71,7 @@ export default function ConsentInteractionCard({
     };
     // 同一表单仅自动播报一次。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.formId]);
+  }, [readOnly, request.formId]);
 
   const updateClause = (
     clauseId: string,
@@ -125,7 +127,7 @@ export default function ConsentInteractionCard({
     }
   };
 
-  if (request.status !== 'pending_signature') {
+  if (readOnly || request.status !== 'pending_signature') {
     return (
       <section
         className={`mb-4 overflow-hidden rounded-2xl border p-4 ${

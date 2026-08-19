@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeftIcon,
@@ -29,6 +29,11 @@ export default function PatientLayout({
   const router = useRouter();
   const pathname = usePathname();
 
+  useEffect(() => {
+    document.documentElement.classList.add('patient-scrollbar');
+    return () => document.documentElement.classList.remove('patient-scrollbar');
+  }, []);
+
   const handleBack = () => {
     if (onBack) {
       onBack();
@@ -38,7 +43,7 @@ export default function PatientLayout({
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background scrollbar-soft">
       {/* 顶部标题栏（移动端优化） */}
       {(showBack || title) && (
         <header className="sticky top-0 z-50 bg-surface/90 backdrop-blur-md border-b border-border">

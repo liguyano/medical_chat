@@ -23,6 +23,7 @@ import {
   buildDialogueSnapshotKey,
   shouldLoadDialogueSnapshot,
 } from '@/lib/dialogue/sessionRecovery';
+import { isPatientTaskReadOnly } from '@/lib/patient/taskGroups';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { createDialogueSsePath } from '@/lib/transports/sseClient';
@@ -209,6 +210,7 @@ export default function PatientDialoguePage() {
   const voiceClientRef = useRef<VoiceSocketClient | undefined>(undefined);
   const loadedSnapshotKeyRef = useRef<string | null>(null);
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
+  const readOnly = isPatientTaskReadOnly(task);
   const updateTask = useTaskStore((state) => state.updateTask);
   const session = useChatStore((state) => state.sessions[taskId]);
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
@@ -309,9 +311,13 @@ export default function PatientDialoguePage() {
       setSession(taskId, nextSession);
       updateTask(taskId, {
         sessionId,
-        taskStatus: 'in_progress',
-        currentStage: 'connect',
-        progress: { current: 0, total: totalQuestions },
+        ...(readOnly
+          ? {}
+          : {
+              taskStatus: 'in_progress' as const,
+              currentStage: 'connect' as const,
+              progress: { current: 0, total: totalQuestions },
+            }),
       });
       return;
     }
@@ -333,15 +339,19 @@ export default function PatientDialoguePage() {
         setConnectionError('');
         updateTask(taskId, {
           sessionId: snapshot.session.id,
-          taskStatus: 'in_progress',
-          currentStage: snapshot.session.currentCicareStage,
-          progress: {
-            current: snapshot.session.answeredQuestionCount ?? 0,
-            total:
-              snapshot.session.totalQuestionCount ??
-              currentTask.progress?.total ??
-              totalQuestions,
-          },
+          ...(readOnly
+            ? {}
+            : {
+                taskStatus: 'in_progress' as const,
+                currentStage: snapshot.session.currentCicareStage,
+                progress: {
+                  current: snapshot.session.answeredQuestionCount ?? 0,
+                  total:
+                    snapshot.session.totalQuestionCount ??
+                    currentTask.progress?.total ??
+                    totalQuestions,
+                },
+              }),
         });
       })
       .catch((loadError) => {
@@ -356,6 +366,7 @@ export default function PatientDialoguePage() {
     return () => abortRequest(controller);
   }, [
     dialogueSnapshotKey,
+    readOnly,
     setSession,
     taskId,
     updateTask,
@@ -368,7 +379,7 @@ export default function PatientDialoguePage() {
       : undefined;
   const { status: streamStatus, error: streamError } = useRealtimeStream({
     path: streamPath,
-    enabled: Boolean(task),
+    enabled: Boolean(task) && !readOnly,
   });
 
   useEffect(
@@ -380,8 +391,9 @@ export default function PatientDialoguePage() {
   );
 
   useEffect(() => {
+    if (readOnly) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [session?.messages.length]);
+  }, [readOnly, session?.messages.length]);
 
   const patientAnswerCount = useMemo(
     () => session?.messages.filter((message) => message.role === 'patient').length ?? 0,
@@ -390,11 +402,13 @@ export default function PatientDialoguePage() {
   const completed = session?.sessionStatus === 'completed';
   const preparing = session?.sessionStatus === 'pending';
   const awaitingReply =
+    !readOnly &&
     !completed &&
     session?.messages.at(-1)?.role === 'patient' &&
     runtimeConfig.dataMode === 'api';
   const isStreaming =
-    preparing || streamingTaskId === taskId || isSending || awaitingReply;
+    !readOnly &&
+    (preparing || streamingTaskId === taskId || isSending || awaitingReply);
   const displayedTotalQuestions =
     runtimeConfig.dataMode === 'api'
       ? session?.totalQuestionCount ?? task?.progress?.total ?? totalQuestions
@@ -430,7 +444,7 @@ export default function PatientDialoguePage() {
 
   const handleSendMessage = async (content: string) => {
     const currentSession = useChatStore.getState().sessions[taskId];
-    if (!currentSession || isPaused || isStreaming || completed) return;
+    if (!currentSession || readOnly || isPaused || isStreaming || completed) return;
     const messageId = `MSG-${Date.now()}-PATIENT`;
     const patientMessage: InteractionMessage = {
       id: messageId,
@@ -703,8 +717,10 @@ export default function PatientDialoguePage() {
             <div className="flex-1">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <SparklesIcon className="w-5 h-5 text-primary" />
-                {completed
-                  ? '评估已完成'
+                {readOnly
+                  ? '历史对话记录'
+                  : completed
+                    ? '评估已完成'
                   : isPaused
                     ? '评估已暂停'
                     : isStreaming
@@ -718,16 +734,20 @@ export default function PatientDialoguePage() {
                 className="mt-2"
               />
             </div>
-            <IntegrationStatus
-              streamStatus={streamStatus}
-              voiceState={
-                runtimeConfig.dataMode === 'mock' ? voiceState : undefined
-              }
-            />
+            {readOnly ? (
+              <Badge variant="default" size="sm">只读</Badge>
+            ) : (
+              <IntegrationStatus
+                streamStatus={streamStatus}
+                voiceState={
+                  runtimeConfig.dataMode === 'mock' ? voiceState : undefined
+                }
+              />
+            )}
             <Badge variant={isStreaming ? 'info' : 'primary'} size="sm">
               {session?.answeredQuestionCount ?? 0}/{displayedTotalQuestions}
             </Badge>
-            {runtimeConfig.dataMode === 'mock' && (
+            {runtimeConfig.dataMode === 'mock' && !readOnly && (
               <Button
                 variant="outline"
                 size="sm"
@@ -742,7 +762,7 @@ export default function PatientDialoguePage() {
 
         <div className="flex-1 overflow-hidden">
           <div className="max-w-6xl mx-auto h-full grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="overflow-y-auto p-4">
+            <div className="scrollbar-soft overflow-y-auto p-4">
               {historyTimeline.map((item) => {
                 if (item.kind === 'message') {
                   return (
@@ -759,6 +779,7 @@ export default function PatientDialoguePage() {
                     <EducationMaterialCard
                       key={item.id}
                       card={item.item}
+                      readOnly={readOnly}
                       onAcknowledge={() =>
                         handleEducationAcknowledge(
                           item.item.id,
@@ -774,6 +795,7 @@ export default function PatientDialoguePage() {
                       key={item.id}
                       request={item.item}
                       participantName={task.participantName ?? task.patientName}
+                      readOnly={readOnly}
                       onSubmit={handleConsentSubmit}
                     />
                   );
@@ -799,17 +821,23 @@ export default function PatientDialoguePage() {
                       {item.event.title}
                     </div>
                     <p className="text-sm mt-1">{item.event.description}</p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        useChatStore
-                          .getState()
-                          .markEventHandled(taskId, item.event.id)
-                      }
-                      className="mt-2 text-xs text-primary underline"
-                    >
-                      {item.event.handled ? '已了解' : '我已了解'}
-                    </button>
+                    {readOnly ? (
+                      <p className="mt-2 text-xs text-foreground-muted">
+                        {item.event.handled ? '患者已了解' : '历史风险记录'}
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          useChatStore
+                            .getState()
+                            .markEventHandled(taskId, item.event.id)
+                        }
+                        className="mt-2 text-xs text-primary underline"
+                      >
+                        {item.event.handled ? '已了解' : '我已了解'}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -826,21 +854,23 @@ export default function PatientDialoguePage() {
                               {getStructuredAnswerDisplayValue(answer)}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingAnswerId(answer.questionId);
-                              setCorrection(getStructuredAnswerDisplayValue(answer));
-                            }}
-                            className="text-primary"
-                            aria-label={`纠正${answer.questionText}`}
-                          >
-                            <PencilSquareIcon className="w-4 h-4" />
-                          </button>
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingAnswerId(answer.questionId);
+                                setCorrection(getStructuredAnswerDisplayValue(answer));
+                              }}
+                              className="text-primary"
+                              aria-label={`纠正${answer.questionText}`}
+                            >
+                              <PencilSquareIcon className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
-                    {editingAnswerId && (
+                    {!readOnly && editingAnswerId && (
                       <div className="rounded-xl bg-primary-tint p-3">
                         <textarea
                           value={correction}
@@ -859,9 +889,13 @@ export default function PatientDialoguePage() {
               <div ref={messagesEndRef} />
             </div>
 
-            <aside className="hidden lg:block border-l border-border bg-surface-secondary p-4 overflow-y-auto">
+            <aside className="scrollbar-soft hidden overflow-y-auto border-l border-border bg-surface-secondary p-4 lg:block">
               <h2 className="text-lg font-sans font-semibold mb-1">已记录信息</h2>
-              <p className="text-xs text-foreground-muted mb-4">以下内容仍需护士确认，您可以随时纠正。</p>
+              <p className="text-xs text-foreground-muted mb-4">
+                {readOnly
+                  ? '以下为本次评估已记录的信息，仅供查看。'
+                  : '以下内容仍需护士确认，您可以随时纠正。'}
+              </p>
               <div className="space-y-3">
                 {answers.length === 0 ? (
                   <p className="text-sm text-foreground-muted">回答后将在此显示结构化信息。</p>
@@ -879,23 +913,25 @@ export default function PatientDialoguePage() {
                             {answer.corrected && ' · 已更正'}
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingAnswerId(answer.questionId);
-                            setCorrection(getStructuredAnswerDisplayValue(answer));
-                          }}
-                          className="text-primary"
-                          aria-label={`纠正${answer.questionText}`}
-                        >
-                          <PencilSquareIcon className="w-4 h-4" />
-                        </button>
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAnswerId(answer.questionId);
+                              setCorrection(getStructuredAnswerDisplayValue(answer));
+                            }}
+                            className="text-primary"
+                            aria-label={`纠正${answer.questionText}`}
+                          >
+                            <PencilSquareIcon className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </Card>
                   ))
                 )}
               </div>
-              {editingAnswerId && (
+              {!readOnly && editingAnswerId && (
                 <div className="mt-4 rounded-2xl border border-primary/20 bg-primary-tint p-4">
                   <label className="text-sm font-medium">纠正记录</label>
                   <textarea
@@ -918,7 +954,21 @@ export default function PatientDialoguePage() {
 
         <div className="border-t border-border bg-surface">
           <div className="max-w-6xl mx-auto">
-            {completed ? (
+            {readOnly ? (
+              <div className="flex items-center gap-3 p-4">
+                <CheckCircleIcon className="h-6 w-6 text-primary" />
+                <div className="flex-1">
+                  <p className="font-medium">本次评估已提交，当前为只读查看</p>
+                  <p className="text-xs text-foreground-muted">如需补充或修改，请联系责任护士。</p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => router.push(`/patient/tasks/${taskId}`)}
+                >
+                  返回任务
+                </Button>
+              </div>
+            ) : completed ? (
               <div className="p-4 flex items-center gap-3">
                 <CheckCircleIcon className="w-6 h-6 text-success" />
                 <div className="flex-1">

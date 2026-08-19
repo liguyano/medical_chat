@@ -13,11 +13,13 @@ import {
 interface EducationMaterialCardProps {
   card: EducationCard;
   onAcknowledge: () => Promise<void> | void;
+  readOnly?: boolean;
 }
 
 export default function EducationMaterialCard({
   card,
   onAcknowledge,
+  readOnly = false,
 }: EducationMaterialCardProps) {
   const autoPlayedRef = useRef(false);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -64,7 +66,7 @@ export default function EducationMaterialCard({
   };
 
   useEffect(() => {
-    if (!card.autoPlay || autoPlayedRef.current) return;
+    if (readOnly || !card.autoPlay || autoPlayedRef.current) return;
     autoPlayedRef.current = true;
     play();
     return () => {
@@ -78,7 +80,7 @@ export default function EducationMaterialCard({
     };
     // 同一材料只自动播报一次，手动重播由按钮触发。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id]);
+  }, [card.id, readOnly]);
 
   return (
     <section
@@ -141,7 +143,7 @@ export default function EducationMaterialCard({
             当前浏览器未能自动播报，请直接阅读宣教原文。
           </p>
         )}
-        {card.requiresAcknowledgement && (
+        {card.requiresAcknowledgement && !readOnly && (
           <Button
             type="button"
             className="w-full"

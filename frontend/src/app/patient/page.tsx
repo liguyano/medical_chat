@@ -12,6 +12,7 @@ import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import { mockPatients } from '@/lib/mock/data';
+import { patientDemoAccounts } from '@/lib/patient/demoAccounts';
 import {
   FaceSmileIcon,
   QrCodeIcon,
@@ -247,19 +248,23 @@ function PatientVerifyContent() {
                 {apiMode ? 'API 联调演示身份' : '快速填充演示身份'}
               </p>
               {apiMode ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => {
-                    setIdCardNo('110101196801180043');
-                    setPhone('13800000004');
-                    setError('');
-                  }}
-                >
-                  填充陈建军演示身份
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  {patientDemoAccounts.map((account) => (
+                    <Button
+                      key={account.idCardNo}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setIdCardNo(account.idCardNo);
+                        setPhone(account.phone);
+                        setError('');
+                      }}
+                    >
+                      填充{account.name}
+                    </Button>
+                  ))}
+                </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => fillDemo('ai')}>
