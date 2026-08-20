@@ -4,7 +4,15 @@ import {
   mockScales,
   mockTasks,
 } from '@/lib/mock/data';
-import type { CareTask, InteractionSession, User } from '@/lib/types';
+import type {
+  AssessmentScaleConfigDetail,
+  AssessmentScaleConfigSummary,
+  CareTask,
+  EducationMaterialConfig,
+  InteractionRuleConfig,
+  InteractionSession,
+  User,
+} from '@/lib/types';
 import type {
   CareRepository,
   CreateTaskInput,
@@ -16,6 +24,123 @@ import type {
 } from '@/lib/repositories/types';
 
 const MOCK_DELAY_MS = 180;
+
+const mockEducationMaterials: EducationMaterialConfig[] = [
+  {
+    id: '1',
+    versionId: '1',
+    unitId: '1',
+    category: 'tobacco',
+    title: '住院期间戒烟与烟草危害宣教',
+    documentVersion: '1.0',
+    originalContent: '吸烟会增加心脑血管和呼吸系统疾病风险，住院病区属于无烟环境。',
+    patientContent: '住院期间请不要吸烟，如烟瘾明显请告诉护士。',
+    spokenContent: '跟您提醒一下，住院期间请不要吸烟，如有不适请及时告诉护士。',
+    sourceName: '系统内置演示材料',
+    priority: 'medium',
+    requiresAcknowledgement: true,
+    autoPlay: true,
+    enabled: true,
+  },
+  {
+    id: '2',
+    versionId: '2',
+    unitId: '2',
+    category: 'allergy',
+    title: '药物过敏安全宣教',
+    documentVersion: '1.0',
+    originalContent: '已知或疑似药物过敏者，应主动说明具体药物及既往反应。',
+    patientContent: '每次用药前，请主动告诉医生和护士您对什么药过敏。',
+    spokenContent: '请记住，每次用药前都要主动说明具体对什么药过敏。',
+    sourceName: '系统内置演示材料',
+    priority: 'high',
+    requiresAcknowledgement: true,
+    autoPlay: true,
+    enabled: true,
+  },
+];
+
+const mockInteractionRules: InteractionRuleConfig[] = [
+  {
+    id: '1',
+    ruleCode: 'allergy_risk',
+    ruleName: '药物过敏特征',
+    scopeType: 'global',
+    keywords: ['过敏', '青霉素'],
+    patterns: ['对.+过敏'],
+    actionType: 'constraint_prompt',
+    prompt: '追问具体过敏药物和既往反应，并调用药物过敏宣教材料。',
+    tags: ['过敏', '高风险'],
+    priority: 100,
+    enabled: true,
+  },
+  {
+    id: '2',
+    ruleCode: 'smoking_risk',
+    ruleName: '吸烟特征',
+    scopeType: 'global',
+    keywords: ['吸烟', '抽烟'],
+    patterns: ['每天.*支'],
+    actionType: 'constraint_prompt',
+    prompt: '追问吸烟量和年限，并调用戒烟宣教材料。',
+    tags: ['烟草'],
+    priority: 60,
+    enabled: true,
+  },
+];
+
+const mockScaleSummaries: AssessmentScaleConfigSummary[] = mockScales.map(
+  (scale) => ({
+    id: scale.id,
+    scaleCode: scale.scaleCode,
+    scaleName: scale.scaleName,
+    scaleType: scale.scaleType,
+    clinicalPurpose: scale.description,
+    status: 'published',
+    versionId: scale.id,
+    versionCode: '1.0',
+    versionName: '演示版本',
+    publishStatus: 'published',
+    sectionCount: 1,
+    questionCount: 3,
+    optionCount: 6,
+    ruleCount: 1,
+    actionCount: 1,
+  })
+);
+
+const mockScaleDetails: AssessmentScaleConfigDetail[] = mockScales.map(
+  (scale, index) => ({
+    id: Number(scale.id),
+    scale_code: scale.scaleCode,
+    scale_name: scale.scaleName,
+    scale_type: scale.scaleType,
+    clinical_purpose: scale.description,
+    applicable_scope: { departments: ['全院'] },
+    source_file: 'Demo 内置量表',
+    status: 'published',
+    version_id: Number(scale.id),
+    version_code: '1.0',
+    version_name: '演示版本',
+    publish_status: 'published',
+    scale_snapshot: {},
+    sections: [
+      {
+        id: index * 100 + 1,
+        parent_section_id: null,
+        section_code: `${scale.scaleCode}_MAIN`,
+        section_name: '主要评估项',
+        section_description: scale.description,
+        display_condition: null,
+        sort_no: 1,
+      },
+    ],
+    questions: [],
+    options: [],
+    rules: [],
+    actions: [],
+  })
+);
 
 const MOCK_STAFF_USERS: Record<
   string,
@@ -164,6 +289,107 @@ export class MockCareRepository implements CareRepository {
   async listScales(signal?: AbortSignal) {
     await wait(signal);
     return mockScales;
+  }
+
+  async listEducationMaterials(signal?: AbortSignal) {
+    await wait(signal);
+    return structuredClone(mockEducationMaterials);
+  }
+
+  async updateEducationMaterial(
+    materialId: string,
+    input: Parameters<CareRepository['updateEducationMaterial']>[1],
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    const index = mockEducationMaterials.findIndex(
+      (item) => item.id === materialId
+    );
+    if (index < 0) throw new Error('宣教材料不存在');
+    mockEducationMaterials[index] = {
+      ...mockEducationMaterials[index],
+      ...input,
+    };
+    return structuredClone(mockEducationMaterials[index]);
+  }
+
+  async listInteractionRules(signal?: AbortSignal) {
+    await wait(signal);
+    return structuredClone(mockInteractionRules);
+  }
+
+  async updateInteractionRule(
+    ruleId: string,
+    input: Parameters<CareRepository['updateInteractionRule']>[1],
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    const index = mockInteractionRules.findIndex((item) => item.id === ruleId);
+    if (index < 0) throw new Error('拦截规则不存在');
+    mockInteractionRules[index] = {
+      ...mockInteractionRules[index],
+      ...input,
+    };
+    return structuredClone(mockInteractionRules[index]);
+  }
+
+  async testInteractionRules(text: string, signal?: AbortSignal) {
+    await wait(signal);
+    return mockInteractionRules
+      .filter((rule) => rule.enabled)
+      .flatMap((rule) => {
+        const matchedTerms = [
+          ...rule.keywords.filter((keyword) => text.includes(keyword)),
+          ...rule.patterns.flatMap((pattern) => {
+            try {
+              return text.match(new RegExp(pattern))?.slice(0, 1) ?? [];
+            } catch {
+              return [];
+            }
+          }),
+        ];
+        return matchedTerms.length
+          ? [
+              {
+                ruleCode: rule.ruleCode,
+                ruleName: rule.ruleName,
+                matchedTerms,
+                actionType: rule.actionType,
+                prompt: rule.prompt,
+                priority: rule.priority,
+              },
+            ]
+          : [];
+      })
+      .sort((left, right) => right.priority - left.priority);
+  }
+
+  async listScaleConfigs(signal?: AbortSignal) {
+    await wait(signal);
+    return structuredClone(mockScaleSummaries);
+  }
+
+  async getScaleConfig(scaleId: string, signal?: AbortSignal) {
+    await wait(signal);
+    const detail = mockScaleDetails.find(
+      (item) => String(item.id) === scaleId
+    );
+    if (!detail) throw new Error('评估量表不存在');
+    return structuredClone(detail);
+  }
+
+  async updateScaleConfig(
+    scaleId: string,
+    input: Parameters<CareRepository['updateScaleConfig']>[1],
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    const index = mockScaleDetails.findIndex(
+      (item) => String(item.id) === scaleId
+    );
+    if (index < 0) throw new Error('评估量表不存在');
+    mockScaleDetails[index] = structuredClone(input);
+    return structuredClone(mockScaleDetails[index]);
   }
 
   async loginPatient(_input: PatientLoginInput, signal?: AbortSignal) {

@@ -13,6 +13,13 @@ import type {
   PrototypeAnswerValue,
   StructuredAnswer,
   AssessmentReview,
+  AssessmentScaleConfigDetail,
+  AssessmentScaleConfigSummary,
+  EducationMaterialConfig,
+  EducationMaterialUpdate,
+  InteractionRuleConfig,
+  InteractionRuleMatch,
+  InteractionRuleUpdate,
   User,
 } from '@/lib/types';
 
@@ -72,6 +79,36 @@ export interface SendMessageInput {
 export interface CareRepository {
   listInHospitalPatients(signal?: AbortSignal): Promise<PatientWithEncounter[]>;
   listScales(signal?: AbortSignal): Promise<AssessmentScale[]>;
+  listEducationMaterials(
+    signal?: AbortSignal
+  ): Promise<EducationMaterialConfig[]>;
+  updateEducationMaterial(
+    materialId: string,
+    input: EducationMaterialUpdate,
+    signal?: AbortSignal
+  ): Promise<EducationMaterialConfig>;
+  listInteractionRules(signal?: AbortSignal): Promise<InteractionRuleConfig[]>;
+  updateInteractionRule(
+    ruleId: string,
+    input: InteractionRuleUpdate,
+    signal?: AbortSignal
+  ): Promise<InteractionRuleConfig>;
+  testInteractionRules(
+    text: string,
+    signal?: AbortSignal
+  ): Promise<InteractionRuleMatch[]>;
+  listScaleConfigs(
+    signal?: AbortSignal
+  ): Promise<AssessmentScaleConfigSummary[]>;
+  getScaleConfig(
+    scaleId: string,
+    signal?: AbortSignal
+  ): Promise<AssessmentScaleConfigDetail>;
+  updateScaleConfig(
+    scaleId: string,
+    input: AssessmentScaleConfigDetail,
+    signal?: AbortSignal
+  ): Promise<AssessmentScaleConfigDetail>;
   loginPatient(
     input: PatientLoginInput,
     signal?: AbortSignal

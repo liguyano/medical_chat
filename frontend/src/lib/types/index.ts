@@ -2,6 +2,8 @@
 // 基础类型定义（基于 DDL 结构）
 // ============================================================
 
+export * from './systemConfig';
+
 // 用户角色
 export type UserRole = 'nurse' | 'patient';
 

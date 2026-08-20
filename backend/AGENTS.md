@@ -38,15 +38,16 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `docs/后端详细设计方案.md` 的表结构章节仅保留指针，不再作为数据库依据。
 - 智能体运行态存 Redis（TTL），不映射为独立 `agent_states` 表。
 
-当前 ORM 已落地 27 张表，按领域分组：
+当前 ORM 已落地 30 张表，按领域分组：
 - `app/models/staff_account.py` — 医护端登录账号 `staff_account`
 - `app/models/patient_task.py` — `patient` / `patient_encounter` / `care_task`
 - `app/models/assessment_template.py` — 量表配置 7 表
 - `app/models/interaction.py` — AI 对话 6 表
 - `app/models/assessment_execution.py` — 评估执行 6 表
 - `app/models/quality_review.py` — AI 整体质量评价 4 表
+- `app/models/education.py` — 宣教方案、版本与内容单元 3 表
 - Alembic 初始迁移：`26533d4669bd_initial_domain_model_batch_a.py`
-- 当前迁移头：`20260818_staff_accounts.py`
+- 当前迁移头：`20260820_demo_config_center.py`
 
 
 ## 项目架构
@@ -253,4 +254,15 @@ from medagent.configs.agent_config import get_agent_config
 - 抽取历史接口和 `extraction_updated` 必须同时返回选项编码、`selected_option_labels`、`selected_option_values` 与统一 `display_value`；页面优先展示量表标签快照，保留可信度和来源消息 ID。
 - 任务详情需要返回监控页患者摘要所需的住院号、性别、年龄、入院时间和在院状态，禁止前端使用假数据补齐。
 - 医护端登录后的任务列表必须通过 `GET /api/tasks` 按当前 `staff_account.id` 查询 `care_task.assigned_nurse_id`，不能复用患者任务接口或只依赖浏览器本地缓存。
+
+## Demo 系统配置中心
+
+- `/api/system-config` 只允许已登录医护访问，提供宣教材料、交互拦截规则和评估量表的
+  查看与直接更新；本 Demo 不建设草稿、审批、发布和操作审计流程。
+- 宣教材料使用 `education_program`、`education_program_version`、`education_unit`，
+  文本 Dialog 与实时语音工具统一通过 App 层执行器读取当前启用材料并保留事件快照。
+- `interaction_rule` 保存后立即生效。为避免 API 与 Celery Worker 的进程内缓存漂移，
+  每条患者文本匹配前重新加载当前数据库规则。
+- 量表配置接口返回主档、当前版本、分组、题目、选项、规则和护理措施；Demo 编辑只允许
+  更新已有记录，必须保持全部 ID 集合和量表内部关联完整。
 

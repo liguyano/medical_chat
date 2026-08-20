@@ -102,6 +102,7 @@ def create_app() -> FastAPI:
         quality,
         scales,
         sse,
+        system_config,
         tasks,
         voice_dialog,
     )
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(sse.router)
     app.include_router(patients.router)
     app.include_router(scales.router)
+    app.include_router(system_config.router)
     app.include_router(extraction.router)
     app.include_router(quality.router)
     app.include_router(consent.router)
