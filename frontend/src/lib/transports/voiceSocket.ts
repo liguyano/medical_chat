@@ -57,17 +57,21 @@ class MicrophonePcmCapture {
   }
 
   async stop(): Promise<void> {
-    if (this.processor) {
-      this.processor.onaudioprocess = null;
-      this.processor.disconnect();
-    }
-    this.source?.disconnect();
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
-    await this.context?.close();
+    const processor = this.processor;
+    const source = this.source;
+    const stream = this.stream;
+    const context = this.context;
     this.processor = undefined;
     this.source = undefined;
     this.stream = undefined;
     this.context = undefined;
+    if (processor) {
+      processor.onaudioprocess = null;
+      processor.disconnect();
+    }
+    source?.disconnect();
+    for (const track of stream?.getTracks() ?? []) track.stop();
+    await context?.close();
   }
 }
 
@@ -76,6 +80,11 @@ export class VoiceSocketClient {
   private capture = new MicrophonePcmCapture();
   private player = new Pcm16AudioPlayer();
   private state: VoiceConnectionState = 'idle';
+  private closingPromise?: Promise<void>;
+  private intentionalClose = false;
+  private responsePending = false;
+  private responseWaiters = new Set<() => void>();
+  private messageChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: VoiceSocketOptions) {}
 
@@ -87,7 +96,21 @@ export class VoiceSocketClient {
 
   private setState(state: VoiceConnectionState) {
     this.state = state;
+    if (state === 'thinking' || state === 'speaking') {
+      this.responsePending = true;
+    }
     this.options.onStateChange?.(state);
+  }
+
+  private completePendingResponse(): void {
+    this.responsePending = false;
+    for (const resolve of this.responseWaiters) resolve();
+    this.responseWaiters.clear();
+  }
+
+  private waitForPendingResponse(): Promise<void> {
+    if (!this.responsePending) return Promise.resolve();
+    return new Promise((resolve) => this.responseWaiters.add(resolve));
   }
 
   private sendControl(message: VoiceClientMessage): void {
@@ -123,14 +146,22 @@ export class VoiceSocketClient {
     }
 
     this.socket.onmessage = (event) => {
-      void this.handleMessage(event.data);
+      this.messageChain = this.messageChain
+        .then(() => this.handleMessage(event.data))
+        .catch((error) => {
+          this.options.onError?.(
+            error instanceof Error ? error.message : '语音消息处理失败'
+          );
+          this.setState('text_fallback');
+        });
     };
     this.socket.onclose = () => {
-      if (this.state !== 'closed') this.setState('text_fallback');
+      if (this.intentionalClose || this.state === 'closed') return;
+      void this.cleanupAfterUnexpectedClose();
     };
     this.socket.onerror = () => {
       this.options.onError?.('语音网络异常，已切换为文字输入');
-      this.setState('text_fallback');
+      void this.cleanupAfterUnexpectedClose();
     };
 
     this.sendControl({
@@ -170,12 +201,16 @@ export class VoiceSocketClient {
       this.setState(message.state);
     } else if (message.type === 'speech_started') {
       this.player.interrupt();
+      this.completePendingResponse();
       this.setState('listening');
     } else if (message.type === 'speech_stopped') {
       this.setState('transcribing');
     } else if (message.type === 'interrupted') {
       this.player.interrupt();
+      this.completePendingResponse();
       this.setState('listening');
+    } else if (message.type === 'response_completed') {
+      this.completePendingResponse();
     } else if (message.type === 'audio') {
       this.setState('speaking');
       await this.player.enqueue(
@@ -183,11 +218,47 @@ export class VoiceSocketClient {
         message.sample_rate
       );
     } else if (message.type === 'error') {
+      this.completePendingResponse();
       this.options.onError?.(message.message);
-      this.setState('text_fallback');
+      await this.cleanupAfterUnexpectedClose();
     } else if (message.type === 'closed') {
-      this.setState('closed');
+      this.completePendingResponse();
+      await this.finishLocalClose({ waitForPlayback: true, notifyServer: false });
     }
+  }
+
+  private async cleanupAfterUnexpectedClose(): Promise<void> {
+    this.intentionalClose = true;
+    this.completePendingResponse();
+    await this.capture.stop();
+    this.player.interrupt();
+    this.socket?.close();
+    this.socket = undefined;
+    await this.player.close();
+    this.setState('text_fallback');
+  }
+
+  private finishLocalClose(options: {
+    waitForPlayback: boolean;
+    notifyServer: boolean;
+  }): Promise<void> {
+    this.closingPromise ??= (async () => {
+      this.intentionalClose = true;
+      await this.capture.stop();
+      if (options.waitForPlayback) {
+        await this.waitForPendingResponse();
+        await this.player.waitForIdle();
+      } else {
+        this.completePendingResponse();
+        this.player.interrupt();
+      }
+      if (options.notifyServer) this.sendControl({ type: 'close' });
+      this.socket?.close();
+      this.socket = undefined;
+      await this.player.close();
+      this.setState('closed');
+    })();
+    return this.closingPromise;
   }
 
   async commit(): Promise<void> {
@@ -223,11 +294,16 @@ export class VoiceSocketClient {
   }
 
   async close(): Promise<void> {
-    await this.capture.stop();
-    this.player.interrupt();
-    this.sendControl({ type: 'close' });
-    this.socket?.close();
-    await this.player.close();
-    this.setState('closed');
+    await this.finishLocalClose({
+      waitForPlayback: false,
+      notifyServer: true,
+    });
+  }
+
+  async finishAndCloseAfterPlayback(): Promise<void> {
+    await this.finishLocalClose({
+      waitForPlayback: true,
+      notifyServer: true,
+    });
   }
 }

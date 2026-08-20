@@ -2,6 +2,8 @@ export class Pcm16AudioPlayer {
   private context?: AudioContext;
   private nextStartTime = 0;
   private sources = new Set<AudioBufferSourceNode>();
+  private idleWaiters = new Set<() => void>();
+  private activityVersion = 0;
 
   private ensureContext(): AudioContext {
     this.context ??= new AudioContext();
@@ -21,10 +23,39 @@ export class Pcm16AudioPlayer {
     source.buffer = audioBuffer;
     source.connect(context.destination);
     const startAt = Math.max(context.currentTime, this.nextStartTime);
+    source.onended = () => {
+      this.sources.delete(source);
+      this.notifyIdle();
+    };
+    this.activityVersion += 1;
+    this.sources.add(source);
     source.start(startAt);
     this.nextStartTime = startAt + audioBuffer.duration;
-    this.sources.add(source);
-    source.onended = () => this.sources.delete(source);
+  }
+
+  private notifyIdle(): void {
+    if (this.sources.size > 0) return;
+    this.nextStartTime = this.context?.currentTime ?? 0;
+    for (const resolve of this.idleWaiters) resolve();
+    this.idleWaiters.clear();
+  }
+
+  private waitUntilSourcesEnd(): Promise<void> {
+    if (this.sources.size === 0) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.add(resolve));
+  }
+
+  async waitForIdle(quietWindowMs = 300): Promise<void> {
+    while (true) {
+      await this.waitUntilSourcesEnd();
+      const quietVersion = this.activityVersion;
+      if (quietWindowMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, quietWindowMs));
+      }
+      if (this.sources.size === 0 && this.activityVersion === quietVersion) {
+        return;
+      }
+    }
   }
 
   interrupt(): void {
@@ -37,6 +68,7 @@ export class Pcm16AudioPlayer {
     }
     this.sources.clear();
     this.nextStartTime = this.context?.currentTime ?? 0;
+    this.notifyIdle();
   }
 
   async close(): Promise<void> {

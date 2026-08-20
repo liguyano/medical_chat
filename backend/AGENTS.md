@@ -218,8 +218,11 @@ from medagent.configs.agent_config import get_agent_config
   `dialog_stream:{session_id}`，患者端与医护端通过 SSE 断线续读。实时音频帧不写入
   Redis，持久化音频保存为受保护 API 可读取的 WAV 文件；语音模式只派发
   Schedule/Extraction，禁止再次派发文本 Dialog Agent，避免产生重复 AI 问句；
-  Extraction 确认结构化进度完整后直接调用统一完成服务并发布 `SessionEndEvent`，
-  不再借用文本 Dialog Exit 完成语音会话。
+  Extraction 确认结构化进度完整后登记语音完成待处理状态；Voice Gateway 收到最后一轮
+  可见 `response.done` 后，二者通过 Redis 完成屏障和幂等锁统一调用完成服务并发布
+  `SessionEndEvent`，不再借用文本 Dialog Exit 完成语音会话。Function Calling 的中间
+  `response.done` 不得触发任务完成。Gateway 在发布任务结束状态前必须先通过患者
+  WebSocket 发送 `response_completed`，作为浏览器等待最后音频排空的顺序屏障。
 
 ## 患者端身份边界
 

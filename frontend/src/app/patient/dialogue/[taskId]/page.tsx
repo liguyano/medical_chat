@@ -49,6 +49,7 @@ import {
   PencilSquareIcon,
   PauseIcon,
   PlayIcon,
+  SpeakerXMarkIcon,
   SparklesIcon,
   UserPlusIcon,
 } from '@heroicons/react/24/outline';
@@ -252,6 +253,8 @@ export default function PatientDialoguePage() {
   const [voiceState, setVoiceState] =
     useState<VoiceConnectionState>('idle');
   const [inputMode, setInputMode] = useState<'text' | 'voice'>('text');
+  const [voiceCompletionReadyTaskId, setVoiceCompletionReadyTaskId] =
+    useState<string | null>(null);
   const [editingAnswerId, setEditingAnswerId] = useState<string | null>(null);
   const [correction, setCorrection] = useState('');
 
@@ -400,7 +403,13 @@ export default function PatientDialoguePage() {
     () => session?.messages.filter((message) => message.role === 'patient').length ?? 0,
     [session?.messages]
   );
-  const completed = session?.sessionStatus === 'completed';
+  const backendCompleted = session?.sessionStatus === 'completed';
+  const completingVoice =
+    backendCompleted &&
+    runtimeConfig.dataMode === 'api' &&
+    inputMode === 'voice' &&
+    voiceCompletionReadyTaskId !== taskId;
+  const completed = backendCompleted && !completingVoice;
   const preparing = session?.sessionStatus === 'pending';
   const awaitingReply =
     !readOnly &&
@@ -414,6 +423,31 @@ export default function PatientDialoguePage() {
     runtimeConfig.dataMode === 'api'
       ? session?.totalQuestionCount ?? task?.progress?.total ?? totalQuestions
       : totalQuestions;
+
+  useEffect(() => {
+    if (
+      !backendCompleted ||
+      runtimeConfig.dataMode !== 'api' ||
+      inputMode !== 'voice'
+    ) {
+      return;
+    }
+    let active = true;
+    void (async () => {
+      try {
+        await voiceClientRef.current?.finishAndCloseAfterPlayback();
+      } finally {
+        if (!active) return;
+        voiceClientRef.current = undefined;
+        setIsRecording(false);
+        setVoiceState('closed');
+        setVoiceCompletionReadyTaskId(taskId);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [backendCompleted, inputMode, taskId]);
 
   const streamAssistantMessage = async (result: ScriptResult) => {
     if (!session) return;
@@ -693,6 +727,17 @@ export default function PatientDialoguePage() {
     setInputMode(mode);
   };
 
+  const closeVoice = async () => {
+    try {
+      await voiceClientRef.current?.close();
+    } finally {
+      voiceClientRef.current = undefined;
+      setIsRecording(false);
+      setVoiceState('closed');
+      setInputMode('text');
+    }
+  };
+
   const stopVoice = async () => {
     setIsRecording(false);
     if (runtimeConfig.dataMode === 'mock') {
@@ -746,7 +791,9 @@ export default function PatientDialoguePage() {
                   ? '历史对话记录'
                   : completed
                     ? '评估已完成'
-                  : isPaused
+                    : completingVoice
+                      ? '正在完成最后一条回复'
+                    : isPaused
                     ? '评估已暂停'
                     : isStreaming
                       ? 'AI正在生成回复'
@@ -1025,6 +1072,11 @@ export default function PatientDialoguePage() {
                           ? '语音模式：点击麦克风开启连续实时对话'
                           : '文字模式：输入并发送您的回答'}
                     </p>
+                    {completingVoice && (
+                      <p className="shrink-0 text-xs text-primary">
+                        正在等待最后一段语音播报完成……
+                      </p>
+                    )}
                     <div
                       className="flex shrink-0 rounded-lg border border-border p-0.5"
                       role="group"
@@ -1035,7 +1087,7 @@ export default function PatientDialoguePage() {
                           key={mode}
                           type="button"
                           onClick={() => void changeInputMode(mode)}
-                          disabled={isRecording || isStreaming}
+                          disabled={isRecording || isStreaming || completingVoice}
                           aria-pressed={inputMode === mode}
                           className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
                             inputMode === mode
@@ -1047,6 +1099,21 @@ export default function PatientDialoguePage() {
                         </button>
                       ))}
                     </div>
+                    {inputMode === 'voice' &&
+                      voiceState !== 'idle' &&
+                      voiceState !== 'closed' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void closeVoice()}
+                          disabled={completingVoice}
+                          className="shrink-0 text-danger"
+                          title="关闭实时语音并保留文字输入"
+                        >
+                          <SpeakerXMarkIcon className="mr-1 h-4 w-4" />
+                          关闭语音
+                        </Button>
+                      )}
                   </div>
                   <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
                     <UserPlusIcon className="w-4 h-4" />
@@ -1069,7 +1136,9 @@ export default function PatientDialoguePage() {
                         : '输入您的回答...'
                   }
                   disabled={
-                    isPaused || (inputMode === 'text' && isStreaming)
+                    isPaused ||
+                    completingVoice ||
+                    (inputMode === 'text' && isStreaming)
                   }
                   isRecording={isRecording}
                   recordingLabel="实时语音已开启，停顿后系统会自动回复"

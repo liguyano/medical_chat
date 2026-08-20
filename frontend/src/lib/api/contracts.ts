@@ -327,6 +327,7 @@ export type VoiceServerMessage =
   | { type: 'speech_started' }
   | { type: 'speech_stopped' }
   | { type: 'interrupted' }
+  | { type: 'response_completed'; response_id?: string }
   | {
       type: 'state';
       state:

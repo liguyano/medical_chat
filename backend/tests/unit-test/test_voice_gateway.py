@@ -50,8 +50,31 @@ class FakeWebSocket:
 
 
 class FakeRedis:
-    def get(self, _key: str):
-        return None
+    def __init__(self) -> None:
+        self.values: dict[str, object] = {}
+        self.locks: dict[str, str] = {}
+
+    def get(self, key: str):
+        return self.values.get(key)
+
+    def set(self, key: str, value: object, ex: int | None = None) -> bool:
+        self.values[key] = value
+        return True
+
+    def exists(self, key: str) -> int:
+        return int(key in self.values)
+
+    def acquire_lock(self, key: str, token: str, ttl: int = 30) -> bool:
+        if key in self.locks:
+            return False
+        self.locks[key] = token
+        return True
+
+    def release_lock(self, key: str, token: str) -> bool:
+        if self.locks.get(key) != token:
+            return False
+        del self.locks[key]
+        return True
 
 
 def make_session(tmp_path: Path) -> VoiceSession:
@@ -255,6 +278,11 @@ async def test_response_ids_keep_mixed_tool_response_until_each_response_finishe
         AsyncMock(return_value={"success": True}),
     )
     monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    completed_response = Mock(return_value=False)
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        completed_response,
+    )
 
     await gateway._handle_event(
         session,
@@ -315,6 +343,7 @@ async def test_response_ids_keep_mixed_tool_response_until_each_response_finishe
         if isinstance(event, DialogMessageEvent)
     ]
     assert len(completed_events) == 2
+    completed_response.assert_called_once()
     assert not any(
         isinstance(event, DialogMessageEvent) and not event.content
         for event in session.publisher.events
@@ -362,3 +391,173 @@ async def test_cancelled_response_residual_audio_is_not_recreated_as_new_message
 
     assert session.current_generation is None
     assert not session.publisher.events
+
+
+@pytest.mark.asyncio
+async def test_function_call_intermediate_response_done_does_not_finish_assessment(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Function Calling 中间响应完成时必须等待工具后的最终语音回复。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+
+    class FakeHistory:
+        async def save_message(self, _session_no: str, **kwargs):
+            return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "execute_tool",
+        AsyncMock(return_value={"success": True}),
+    )
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    completed_response = Mock(return_value=False)
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        completed_response,
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_tool"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.function_call_arguments.done",
+            "response_id": "resp_tool",
+            "call_id": "call-1",
+            "name": "request_nurse_assistance",
+            "arguments": "{}",
+        },
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_tool", "status": "completed"},
+        },
+    )
+
+    completed_response.assert_not_called()
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_final"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "resp_final",
+            "delta": "护士已经收到您的请求。",
+        },
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_final", "status": "completed"},
+        },
+    )
+
+    completed_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_empty_response_done_does_not_finish_assessment(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """没有患者可见文字或音频的 response.done 不得触发任务完成。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+    completed_response = Mock(return_value=False)
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        completed_response,
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_empty"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_empty", "status": "completed"},
+        },
+    )
+
+    completed_response.assert_not_called()
+    assert session.current_generation is None
+
+
+@pytest.mark.asyncio
+async def test_visible_response_broadcasts_completion_marker_before_finalize(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """最后音频入队后先向患者端发送响应完成标记，再触发任务完成协调。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    websocket = FakeWebSocket()
+    session.connected_clients.add(websocket)
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+
+    class FakeHistory:
+        async def save_message(self, _session_no: str, **kwargs):
+            return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
+    finalized = Mock(return_value=False)
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        finalized,
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_final"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "resp_final",
+            "delta": "本次评估已经完成。",
+        },
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_final", "status": "completed"},
+        },
+    )
+
+    marker_index = websocket.messages.index(
+        {"type": "response_completed", "response_id": "resp_final"}
+    )
+    listening_index = websocket.messages.index(
+        {"type": "state", "state": "listening"}
+    )
+    assert marker_index < listening_index
+    finalized.assert_called_once()

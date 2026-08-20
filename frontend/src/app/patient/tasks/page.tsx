@@ -97,7 +97,7 @@ export default function PatientTasksPage() {
 
     const controller = new AbortController();
     void careRepository
-      .listMyTasks(controller.signal)
+      .listPatientTasks(controller.signal)
       .then((nextTasks) => {
         setTasks(nextTasks);
         setLoadError('');

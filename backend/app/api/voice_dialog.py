@@ -122,6 +122,7 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
             elif message_type == "resume":
                 await websocket.send_json({"type": "state", "state": "listening"})
             elif message_type == "close":
+                await voice_gateway.close(session_no)
                 break
             else:
                 await websocket.send_json(
