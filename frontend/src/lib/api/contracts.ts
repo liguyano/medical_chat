@@ -75,6 +75,65 @@ export interface AssessmentScaleDto {
   description?: string;
 }
 
+export interface EducationMaterialConfigDto {
+  id: ApiId;
+  version_id: ApiId;
+  unit_id: ApiId;
+  category: string;
+  title: string;
+  document_version: string;
+  original_content: string;
+  patient_content: string;
+  spoken_content: string;
+  source_name?: string | null;
+  priority: 'low' | 'medium' | 'high';
+  requires_acknowledgement: boolean;
+  auto_play: boolean;
+  enabled: boolean;
+}
+
+export interface InteractionRuleConfigDto {
+  id: ApiId;
+  rule_code: string;
+  rule_name: string;
+  scope_type: string;
+  scope_id?: ApiId | null;
+  keywords: string[];
+  patterns: string[];
+  action_type: string;
+  prompt: string;
+  tags: string[];
+  priority: number;
+  enabled: boolean;
+}
+
+export interface InteractionRuleMatchDto {
+  rule_code: string;
+  rule_name: string;
+  matched_terms: string[];
+  action_type: string;
+  prompt: string;
+  priority: number;
+}
+
+export interface AssessmentScaleConfigSummaryDto {
+  id: ApiId;
+  scale_code: string;
+  scale_name: string;
+  scale_type: string;
+  clinical_purpose?: string | null;
+  status: string;
+  version_id: ApiId;
+  version_code: string;
+  version_name: string;
+  publish_status: string;
+  section_count: number;
+  question_count: number;
+  option_count: number;
+  rule_count: number;
+  action_count: number;
+}
+
 export interface TaskScaleProgressDto {
   scale_id: ApiId;
   scale_name: string;

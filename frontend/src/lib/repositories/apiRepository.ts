@@ -3,11 +3,15 @@ import type {
   BackendTaskDto,
   CreateTaskResponse,
   DialogHistoryResponse,
+  EducationMaterialConfigDto,
   ExtractedFieldsResponse,
   InHospitalPatientDto,
+  InteractionRuleConfigDto,
+  InteractionRuleMatchDto,
   MessageRatingListResponse,
   PatientLoginResponse,
   QualityReviewDto,
+  AssessmentScaleConfigSummaryDto,
   SseEnvelope,
   StaffLoginResponse,
 } from '@/lib/api/contracts';
@@ -25,7 +29,14 @@ import {
   mapTaskDto,
   toReviewerId,
 } from '@/lib/api/mappers';
-import type { AssessmentScale, CareTask } from '@/lib/types';
+import type {
+  AssessmentScale,
+  AssessmentScaleConfigSummary,
+  CareTask,
+  EducationMaterialConfig,
+  InteractionRuleConfig,
+  InteractionRuleMatch,
+} from '@/lib/types';
 import type {
   CareRepository,
   CreateTaskInput,
@@ -33,6 +44,84 @@ import type {
   PatientWithEncounter,
   StaffLoginInput,
 } from '@/lib/repositories/types';
+
+function mapEducationMaterial(
+  item: EducationMaterialConfigDto
+): EducationMaterialConfig {
+  return {
+    id: String(item.id),
+    versionId: String(item.version_id),
+    unitId: String(item.unit_id),
+    category: item.category,
+    title: item.title,
+    documentVersion: item.document_version,
+    originalContent: item.original_content,
+    patientContent: item.patient_content,
+    spokenContent: item.spoken_content,
+    sourceName: item.source_name ?? undefined,
+    priority: item.priority,
+    requiresAcknowledgement: item.requires_acknowledgement,
+    autoPlay: item.auto_play,
+    enabled: item.enabled,
+  };
+}
+
+function mapInteractionRule(
+  item: InteractionRuleConfigDto
+): InteractionRuleConfig {
+  return {
+    id: String(item.id),
+    ruleCode: item.rule_code,
+    ruleName: item.rule_name,
+    scopeType: item.scope_type,
+    scopeId:
+      item.scope_id === null || item.scope_id === undefined
+        ? undefined
+        : String(item.scope_id),
+    keywords: item.keywords,
+    patterns: item.patterns,
+    actionType: item.action_type,
+    prompt: item.prompt,
+    tags: item.tags,
+    priority: item.priority,
+    enabled: item.enabled,
+  };
+}
+
+function mapInteractionRuleMatch(
+  item: InteractionRuleMatchDto
+): InteractionRuleMatch {
+  return {
+    ruleCode: item.rule_code,
+    ruleName: item.rule_name,
+    matchedTerms: item.matched_terms,
+    actionType: item.action_type,
+    prompt: item.prompt,
+    priority: item.priority,
+  };
+}
+
+function mapScaleConfigSummary(
+  item: AssessmentScaleConfigSummaryDto
+): AssessmentScaleConfigSummary {
+  return {
+    id: String(item.id),
+    scaleCode: item.scale_code,
+    scaleName: item.scale_name,
+    scaleType: item.scale_type,
+    clinicalPurpose: item.clinical_purpose ?? undefined,
+    status: item.status,
+    versionId: String(item.version_id),
+    versionCode: item.version_code,
+    versionName: item.version_name,
+    publishStatus: item.publish_status,
+    sectionCount: item.section_count,
+    questionCount: item.question_count,
+    optionCount: item.option_count,
+    ruleCount: item.rule_count,
+    actionCount: item.action_count,
+  };
+}
 
 function buildTaskFallback(
   input: CreateTaskInput,
@@ -90,6 +179,112 @@ export class ApiCareRepository implements CareRepository {
       signal,
     });
     return response.map(mapAssessmentScale);
+  }
+
+  async listEducationMaterials(signal?: AbortSignal) {
+    const response = await apiRequest<EducationMaterialConfigDto[]>(
+      '/api/system-config/education-materials',
+      { signal }
+    );
+    return response.map(mapEducationMaterial);
+  }
+
+  async updateEducationMaterial(
+    materialId: string,
+    input: Parameters<CareRepository['updateEducationMaterial']>[1],
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<EducationMaterialConfigDto>(
+      `/api/system-config/education-materials/${encodeURIComponent(materialId)}`,
+      {
+        method: 'PUT',
+        body: {
+          title: input.title,
+          document_version: input.documentVersion,
+          original_content: input.originalContent,
+          patient_content: input.patientContent,
+          spoken_content: input.spokenContent,
+          source_name: input.sourceName || null,
+          priority: input.priority,
+          requires_acknowledgement: input.requiresAcknowledgement,
+          auto_play: input.autoPlay,
+          enabled: input.enabled,
+        },
+        signal,
+      }
+    );
+    return mapEducationMaterial(response);
+  }
+
+  async listInteractionRules(signal?: AbortSignal) {
+    const response = await apiRequest<InteractionRuleConfigDto[]>(
+      '/api/system-config/interaction-rules',
+      { signal }
+    );
+    return response.map(mapInteractionRule);
+  }
+
+  async updateInteractionRule(
+    ruleId: string,
+    input: Parameters<CareRepository['updateInteractionRule']>[1],
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<InteractionRuleConfigDto>(
+      `/api/system-config/interaction-rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: 'PUT',
+        body: {
+          rule_name: input.ruleName,
+          scope_type: input.scopeType,
+          scope_id: input.scopeId ? Number(input.scopeId) : null,
+          keywords: input.keywords,
+          patterns: input.patterns,
+          action_type: input.actionType,
+          prompt: input.prompt,
+          tags: input.tags,
+          priority: input.priority,
+          enabled: input.enabled,
+        },
+        signal,
+      }
+    );
+    return mapInteractionRule(response);
+  }
+
+  async testInteractionRules(text: string, signal?: AbortSignal) {
+    const response = await apiRequest<InteractionRuleMatchDto[]>(
+      '/api/system-config/interaction-rules/test',
+      { method: 'POST', body: { text }, signal }
+    );
+    return response.map(mapInteractionRuleMatch);
+  }
+
+  async listScaleConfigs(signal?: AbortSignal) {
+    const response = await apiRequest<AssessmentScaleConfigSummaryDto[]>(
+      '/api/system-config/scales',
+      { signal }
+    );
+    return response.map(mapScaleConfigSummary);
+  }
+
+  async getScaleConfig(scaleId: string, signal?: AbortSignal) {
+    return apiRequest<
+      Awaited<ReturnType<CareRepository['getScaleConfig']>>
+    >(`/api/system-config/scales/${encodeURIComponent(scaleId)}`, { signal });
+  }
+
+  async updateScaleConfig(
+    scaleId: string,
+    input: Parameters<CareRepository['updateScaleConfig']>[1],
+    signal?: AbortSignal
+  ) {
+    return apiRequest<
+      Awaited<ReturnType<CareRepository['updateScaleConfig']>>
+    >(`/api/system-config/scales/${encodeURIComponent(scaleId)}`, {
+      method: 'PUT',
+      body: input,
+      signal,
+    });
   }
 
   async loginPatient(input: PatientLoginInput, signal?: AbortSignal) {

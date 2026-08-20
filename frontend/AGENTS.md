@@ -65,6 +65,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - API 模式患者登录及患者任务页刷新必须调用
   `CareRepository.listPatientTasks()` → `/api/patients/me/tasks`，只依赖患者 HttpOnly
   Cookie；患者端禁止调用医护专用 `/api/tasks`，也不得依赖旧浏览器的医护登录缓存。
+- `/nurse/config` 通过 `CareRepository` 管理宣教材料、拦截特征字典和评估量表：
+  宣教与规则使用结构化表单，量表使用完整 JSON 查看和编辑。API 与 Mock 模式必须保持
+  同一接口，页面须等待医护身份就绪后再加载配置，保存后直接生效。
 
 ## 常用检查命令
 
