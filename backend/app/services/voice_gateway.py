@@ -871,6 +871,7 @@ class VoiceGateway:
                     if generation
                     else session.input_turn_no
                 ),
+                call_id=call_id,
                 tool_name=name,
                 tool_args=arguments,
                 tool_result=result,
@@ -887,6 +888,7 @@ class VoiceGateway:
             tool_name=name,
             tool_args=arguments,
             tool_result=result,
+            source_invocation_id=call_id,
             publisher=session.publisher,
         )
         await session.client.send_tool_result(call_id, result)

@@ -31,6 +31,18 @@ class Patient(BusinessBaseMixin, Base):
     birthday: Mapped[date | None] = mapped_column(Date, nullable=True, comment="出生日期")
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="联系方式")
     id_card_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True, comment="加密后的身份证号")
+    emergency_contact_name: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, comment="紧急联系人姓名"
+    )
+    emergency_contact_relation: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, comment="紧急联系人关系"
+    )
+    emergency_contact_phone: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="紧急联系人电话"
+    )
+    address: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, comment="常住地址"
+    )
 
     __table_args__ = (
         Index("idx_patient_name", "patient_name"),
@@ -59,6 +71,18 @@ class PatientEncounter(BusinessBaseMixin, Base):
     discharge_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="出院时间")
     diagnosis_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="诊断快照")
     encounter_status: Mapped[str] = mapped_column(String(32), nullable=False, comment="住院状态")
+    admission_source: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, comment="入院来源"
+    )
+    nursing_level: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, comment="护理级别"
+    )
+    insurance_type: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="医保或费用类别"
+    )
+    allergy_summary: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="过敏史安全摘要"
+    )
 
     __table_args__ = (
         Index("idx_patient_encounter_patient", "patient_id", "deleted"),

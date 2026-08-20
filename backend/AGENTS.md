@@ -48,7 +48,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `app/models/education.py` — 宣教方案、版本与内容单元 3 表
 - `app/models/nursing_plan.py` — 患者画像快照、护理计划与计划明细 3 表
 - Alembic 初始迁移：`26533d4669bd_initial_domain_model_batch_a.py`
-- 当前迁移头：`20260820_patient_profile_nursing_plan.py`
+- 当前迁移头：`20260820_patient_management_event_idempotency.py`
 
 
 ## 项目架构
@@ -235,6 +235,26 @@ from medagent.configs.agent_config import get_agent_config
 - 身份证号以加密形式保存，API 不返回身份证号或密文。
 - 患者登录会话保存在 Redis，并通过 HttpOnly Cookie 识别当前患者。
 - 任务编号只用于任务审计与定位，不作为患者登录凭据。
+
+## 医护端患者管理边界
+
+- `/api/patients` 由已登录医护使用，提供患者列表筛选、患者主档与当前住院记录的一体化
+  新增、详情和编辑；身份证只接收明文输入后加密保存，响应仅返回脱敏值。
+- 患者编辑更新主档与指定住院记录，不回写已经生成的评估答案、对话记录和历史业务事件
+  快照；住院号、HIS ID 和身份证号需保持唯一。
+- 医护列表和详情需返回当前住院记录的护理级别、过敏摘要、入院来源、医保类别及护理任务
+  摘要，前端不得用演示静态数据补齐真实接口结果。
+
+## 工具调用事件身份
+
+- Agent 工具事件必须透传供应商原始 `call_id`，持久化时使用
+  `source_invocation_id=agent:{call_id}`；同一 `call_id` 的重复交付复用原领域事件，不再次
+  发布，不同 `call_id` 即使工具名和参数相同也必须分别保留。
+- 患者主动呼叫使用前端生成的 `client_invocation_id`，持久化时使用
+  `source_invocation_id=patient:{client_invocation_id}`，使 HTTP 返回、SSE 和数据库快照
+  共享同一业务身份。
+- 仅允许历史接口对缺少来源编号、明确非 Agent、内容相同且一秒内相邻的旧患者呼叫做
+  展示兼容合并；禁止按工具名或参数合并 Agent 调用。
 
 ## 医护端身份边界
 

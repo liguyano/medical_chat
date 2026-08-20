@@ -60,6 +60,7 @@ class EventPublishMiddleware(DialogMiddleware):
                         "task_id": context.get("task_id"),
                         "message_id": context.get("message_id"),
                         "turn_number": turn_number,
+                        "call_id": str(tool_call.get("call_id", "")) or None,
                         "tool_name": str(tool_call.get("name", "")),
                         "tool_args": dict(tool_call.get("arguments") or {}),
                         "tool_result": tool_call.get("result"),

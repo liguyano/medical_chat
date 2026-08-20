@@ -34,12 +34,33 @@ def encrypt_id_card(id_card: str, secret: str) -> str:
     return _fernet(secret).encrypt(normalized.encode("utf-8")).decode("ascii")
 
 
+def decrypt_id_card(ciphertext: str | None, secret: str) -> str | None:
+    """解密身份证号
+    作用：仅供服务端校验和生成脱敏展示值，不得直接通过 API 返回。
+    """
+    if not ciphertext:
+        return None
+    try:
+        return _fernet(secret).decrypt(ciphertext.encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, UnicodeError):
+        return None
+
+
+def mask_id_card(ciphertext: str | None, secret: str) -> str | None:
+    """返回身份证号脱敏值。"""
+    value = decrypt_id_card(ciphertext, secret)
+    if not value:
+        return None
+    if len(value) <= 8:
+        return f"{value[:2]}***{value[-2:]}"
+    return f"{value[:4]}**********{value[-4:]}"
+
+
 def verify_id_card(id_card: str, ciphertext: str | None, secret: str) -> bool:
     """校验身份证号与已保存密文是否匹配。"""
     if not ciphertext:
         return False
-    try:
-        decrypted = _fernet(secret).decrypt(ciphertext.encode("ascii")).decode("utf-8")
-    except (InvalidToken, ValueError, UnicodeError):
+    decrypted = decrypt_id_card(ciphertext, secret)
+    if decrypted is None:
         return False
     return hmac.compare_digest(normalize_id_card(id_card), decrypted)

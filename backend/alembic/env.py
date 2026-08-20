@@ -25,6 +25,10 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 target_metadata = Base.metadata
+AUTOGENERATE_PLUGINS = [
+    "alembic.autogenerate.*",
+    "~alembic.autogenerate.comments",
+]
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -50,6 +54,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        autogenerate_plugins=AUTOGENERATE_PLUGINS,
     )
 
     with context.begin_transaction():
@@ -71,7 +76,10 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            # Demo 项目不为纯注释差异生成迁移，结构、类型和约束仍参与检查。
+            autogenerate_plugins=AUTOGENERATE_PLUGINS,
         )
 
         with context.begin_transaction():
