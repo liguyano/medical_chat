@@ -100,17 +100,37 @@ models:
     supports_vision: false
     supports_reasoning_effort: false
 
-  # 语音模型（豆包实时语音 WebSocket 全双工协议）
+  # 语音模型（Qwen Audio/Omni Realtime WebSocket 全双工协议）
   - name: dialog_agent_voice
     type: voice
-    display_name: 豆包实时语音
-    model: doubao-voice-v1
-    websocket_url: wss://openspeech.bytedance.com/api/v1/tts/ws_binary
-    api_key: $DOUBAO_API_KEY
+    display_name: Qwen Audio Realtime
+    provider: qwen_audio_realtime
+    model: qwen-audio-3.0-realtime-flash
+    # 将 {WorkspaceId} 替换为阿里云百炼工作空间 ID。
+    websocket_url: wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime
+    api_key: $DASHSCOPE_API_KEY
     timeout: 60.0
-    reconnect_attempts: 3
-    voice: zh_female_qingxin
-    audio_format: pcm
+    voice: longanqian
+    audio_format: pcm_s16le
+    input_sample_rate: 16000
+    output_sample_rate: 24000
+    turn_detection: server_vad
+    vad_threshold: 0.1
+    silence_duration_ms: 900
+    max_history_turns: 50
+
+  # 如需保留豆包适配，可复制以下配置并把 dialog_agent.voice 绑定到该模型。
+  # - name: doubao_dialog_voice
+  #   type: voice
+  #   display_name: 豆包实时语音
+  #   provider: doubao
+  #   model: doubao-voice-v1
+  #   websocket_url: wss://openspeech.bytedance.com/api/v1/tts/ws_binary
+  #   api_key: $DOUBAO_API_KEY
+  #   timeout: 60.0
+  #   reconnect_attempts: 3
+  #   voice: zh_female_qingxin
+  #   audio_format: pcm
 
 # 智能体模型绑定（先注册模型、再为智能体指定模型）
 # 简写：agent: model_name（默认作为语言模型绑定）
@@ -121,7 +141,7 @@ agent_models:
 
   dialog_agent:
     language: qwen-plus       # 文本降级引擎
-    voice: dialog_agent_voice # 豆包实时语音引擎
+    voice: dialog_agent_voice # Qwen Audio Realtime 语音引擎
 
   extraction_agent:
     language: qwen-plus

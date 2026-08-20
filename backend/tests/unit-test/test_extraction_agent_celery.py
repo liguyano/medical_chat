@@ -58,3 +58,59 @@ def test_completed_progress_dispatches_dialog_completion(monkeypatch):
     assert result["assessment_completed"] is True
     completion_delay.assert_called_once()
     assert completion_delay.call_args.args[2]["finalize"] is True
+
+
+def test_completed_voice_progress_finalizes_session_without_text_dialog(
+    monkeypatch,
+):
+    """语音模式完成后发布会话结束事件，不再启动文本 Dialog Exit。"""
+    from medagent import providers
+
+    from app import configs, utils
+    from app.celery_app import runtime, tasks
+
+    model_config = ModelConfig(
+        name="qwen",
+        display_name="qwen",
+        model="qwen",
+        api_base="https://example.com/v1",
+        api_key="key",
+    )
+    monkeypatch.setattr(
+        configs.app_config,
+        "get_app_config",
+        lambda: SimpleNamespace(get_agent_model_config=lambda _: model_config),
+    )
+    monkeypatch.setattr(providers, "create_chat_model", Mock(return_value=object()))
+    monkeypatch.setattr(runtime, "ensure_worker_runtime", Mock())
+    monkeypatch.setattr(utils.redis_client, "get_redis", Mock(return_value=object()))
+    runner = SimpleNamespace(
+        run=AsyncMock(
+            return_value={
+                "status": "turn_completed",
+                "assessment_completed": True,
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "app.workers.extraction_agent_runner.ExtractionAgentRunner",
+        Mock(return_value=runner),
+    )
+    monkeypatch.setattr(tasks.dialog_agent_worker, "delay", Mock())
+    finalize = Mock()
+    monkeypatch.setattr(tasks, "_finalize_voice_assessment", finalize)
+
+    result = extraction_agent_worker.run(
+        "SESS-VOICE",
+        {
+            "task_id": 7,
+            "scale_codes": ["scale"],
+            "interaction_mode": "voice",
+            "source_message_id": "PATIENT-VOICE-1",
+            "patient_info": {"name": "患者"},
+        },
+    )
+
+    assert result["assessment_completed"] is True
+    finalize.assert_called_once_with(session_id="SESS-VOICE", task_id=7)
+    tasks.dialog_agent_worker.delay.assert_not_called()

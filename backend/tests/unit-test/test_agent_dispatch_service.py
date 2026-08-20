@@ -70,3 +70,30 @@ def test_background_dispatch_failure_does_not_block_dialog(monkeypatch):
     )
 
     dialog_delay.assert_called_once()
+
+
+def test_voice_dispatch_skips_text_dialog_agent(monkeypatch):
+    """语音模型已经生成 AI 回复，语音轮次不得再次派发文本 Dialog。"""
+    import app.services.agent_dispatch_service as service
+    from app.celery_app import tasks
+
+    dialog_delay = Mock()
+    schedule_delay = Mock()
+    extraction_delay = Mock()
+    monkeypatch.setattr(tasks.dialog_agent_worker, "delay", dialog_delay)
+    monkeypatch.setattr(tasks.schedule_agent_worker, "delay", schedule_delay)
+    monkeypatch.setattr(tasks.extraction_agent_worker, "delay", extraction_delay)
+
+    service.dispatch_voice_answer_workers(
+        "SESS-VOICE",
+        task_id=1,
+        scale_codes=["scale"],
+        source_message_id="PATIENT-VOICE-1",
+        source_event_id=None,
+        patient_info={"name": "患者"},
+    )
+
+    dialog_delay.assert_not_called()
+    schedule_delay.assert_called_once()
+    extraction_delay.assert_called_once()
+    assert schedule_delay.call_args.args[0] == "SESS-VOICE"

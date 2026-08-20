@@ -105,9 +105,35 @@ function buildMessage(
       role === 'ai' ? 'question' : 'answer'
     ) as InteractionMessage['intentType'],
     contentText: value(payload, 'content_text', value(payload, 'text', '')),
+    audioUrl:
+      typeof payload.audio_url === 'string' ? payload.audio_url : undefined,
     occurredAt: event.occurred_at,
     isStreaming: streaming,
   };
+}
+
+function applyAudioEvent(event: SseEnvelope): void {
+  const role =
+    String(event.payload.role ?? '') === 'patient' ? 'patient' : 'ai';
+  const session = ensureSession(event);
+  const audioUrl = String(event.payload.audio_url ?? '');
+  if (!audioUrl) return;
+  if (!currentSession(event.task_id)) {
+    useChatStore.getState().setSession(event.task_id, session);
+  }
+  const existing = currentSession(event.task_id)?.messages.find(
+    (item) => item.id === event.message_id
+  );
+  const message = buildMessage(event, role, false);
+  useChatStore.getState().upsertMessage(event.task_id, {
+    ...message,
+    id: event.message_id ?? message.id,
+    messageNo: event.message_id ?? message.messageNo,
+    turnNo: value(event.payload, 'turn_no', existing?.turnNo ?? message.turnNo),
+    contentText: existing?.contentText ?? message.contentText,
+    audioUrl,
+    isStreaming: existing?.isStreaming ?? false,
+  });
 }
 
 function appendDelta(event: SseEnvelope, role: InteractionMessage['role']) {
@@ -130,6 +156,7 @@ function appendDelta(event: SseEnvelope, role: InteractionMessage['role']) {
         : existing?.contentText === delta
           ? existing.contentText
           : `${existing?.contentText ?? ''}${delta}`,
+    audioUrl: message.audioUrl || existing?.audioUrl,
   });
   if (role === 'ai') store.setStreaming(isFinal ? null : event.task_id);
 }
@@ -184,9 +211,19 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       break;
     case 'user_transcript_completed': {
       const message = buildMessage(event, 'patient', false);
-      chatStore.upsertMessage(event.task_id, message);
+      const existing = currentSession(event.task_id)?.messages.find(
+        (item) => item.id === message.id
+      );
+      chatStore.upsertMessage(event.task_id, {
+        ...message,
+        audioUrl: message.audioUrl || existing?.audioUrl,
+      });
       break;
     }
+    case 'patient_audio_delta':
+    case 'assistant_audio_delta':
+      applyAudioEvent(event);
+      break;
     case 'assistant_message_started': {
       if (!currentSession(event.task_id)) {
         chatStore.setSession(event.task_id, session);
@@ -212,6 +249,7 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       chatStore.upsertMessage(event.task_id, {
         ...message,
         contentText: message.contentText || existing?.contentText || '',
+        audioUrl: message.audioUrl || existing?.audioUrl,
         isStreaming: false,
       });
       const completedSession = currentSession(event.task_id) ?? session;
@@ -617,7 +655,6 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       chatStore.setStreaming(null);
       break;
     case 'heartbeat':
-    case 'assistant_audio_delta':
       break;
   }
 }

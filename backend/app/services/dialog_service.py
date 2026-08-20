@@ -119,6 +119,7 @@ async def send_message(
     if existing is not None:
         from app.services.agent_dispatch_service import dispatch_answer_workers
 
+        # 构造 Agent 所需患者信息和任务配置
         dispatch_answer_workers(
             db,
             session,
@@ -168,7 +169,11 @@ async def send_message(
         db.refresh(message)
 
         matches = get_keyword_matcher().match(req.content)
+
+        # 发布对话事件到Redis Stream
         publisher = DialogEventPublisher(session_id=req.session_id)
+
+        # 发布关键词命中的问诊约束
         _publish_constraint(publisher, session, task, matches)
         answer_event_id = publisher.publish(
             PatientAnswerEvent(
@@ -294,6 +299,9 @@ async def get_history(
                 role_type=message.role_type,
                 message_type=message.message_type,
                 content_text=message.content_text,
+                audio_url=message.audio_url,
+                asr_text=message.asr_text,
+                tts_text=message.tts_text,
                 occurred_at=message.occurred_at,
             )
             for message in messages

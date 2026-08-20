@@ -47,6 +47,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `active`。`streamingTaskId` 等瞬时传输状态不得跨页面恢复为正在生成。
 - 患者实时语音仅通过 `src/lib/transports/voiceSocket.ts` 连接后端 WebSocket；浏览器音频必须量化为 16kHz 单声道 PCM16，不得直接发送 Float32 底层字节。
 - 语音或网络失败时保留文字输入，并在 UI 显示 Mock/API、SSE 和语音连接状态。
+- API 模式语音页面使用 Qwen Realtime 的后端网关；患者/AI 音频完成索引通过
+  `applyRealtimeEvent.ts` 绑定到 `InteractionMessage.audioUrl`，统一由 `ChatBubble`
+  的受保护 WAV 播放控件回放，医护监控页与患者页共享该事件适配逻辑。
 - 前端单元测试位于 `frontend/tests/`，使用 Vitest；涉及适配器变更时至少覆盖 DTO 映射、事件解析和传输边界。
 - 护士监控页的逐条 AI 质评通过 `CareRepository` 调用 `/api/rating`，整体质量评价通过 `/api/quality-reviews`；Mock 模式继续使用 Zustand sessionStorage，不得把本地保存描述为后端已入库。
 - 结构化答案的 `selectedOptions` 是内部选项编码，只用于审计；患者端和医护端必须通过 `displayValue` / `selectedOptionLabels` 展示目标量表真实值，禁止把 `option_3` 等编码直接暴露给用户。

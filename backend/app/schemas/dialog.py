@@ -41,6 +41,9 @@ class MessageItem(BaseModel):
     role_type: str
     message_type: str
     content_text: str | None = None
+    audio_url: str | None = None
+    asr_text: str | None = None
+    tts_text: str | None = None
     occurred_at: datetime | None = None
 
 

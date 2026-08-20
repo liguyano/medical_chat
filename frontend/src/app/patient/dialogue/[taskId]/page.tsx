@@ -251,6 +251,7 @@ export default function PatientDialoguePage() {
   const [connectionError, setConnectionError] = useState('');
   const [voiceState, setVoiceState] =
     useState<VoiceConnectionState>('idle');
+  const [inputMode, setInputMode] = useState<'text' | 'voice'>('text');
   const [editingAnswerId, setEditingAnswerId] = useState<string | null>(null);
   const [correction, setCorrection] = useState('');
 
@@ -619,10 +620,10 @@ export default function PatientDialoguePage() {
     try {
       if (nextPaused) {
         await careRepository.pauseDialogue(current.id);
-        voiceClientRef.current?.pause();
+        await voiceClientRef.current?.pause();
       } else {
         await careRepository.resumeDialogue(current.id);
-        voiceClientRef.current?.resume();
+        await voiceClientRef.current?.resume();
       }
       setIsPaused(nextPaused);
       setSession(taskId, {
@@ -649,13 +650,25 @@ export default function PatientDialoguePage() {
       setConnectionError('会话尚未准备完成，请稍后重试');
       return;
     }
+    if (
+      voiceClientRef.current &&
+      voiceState === 'paused'
+    ) {
+      await voiceClientRef.current.resume();
+      return;
+    }
     await voiceClientRef.current?.close();
     const client = new VoiceSocketClient({
       taskId,
       sessionId: currentSession.id,
       onStateChange: (state) => {
         setVoiceState(state);
-        setIsRecording(state === 'listening');
+        setIsRecording(
+          state === 'listening' ||
+            state === 'transcribing' ||
+            state === 'thinking' ||
+            state === 'speaking'
+        );
       },
       onError: setConnectionError,
     });
@@ -668,6 +681,18 @@ export default function PatientDialoguePage() {
     }
   };
 
+  const changeInputMode = async (mode: 'text' | 'voice') => {
+    if (mode === inputMode) return;
+    if (mode === 'text') {
+      await voiceClientRef.current?.close();
+      voiceClientRef.current = undefined;
+      setIsRecording(false);
+      setVoiceState('idle');
+    }
+    setConnectionError('');
+    setInputMode(mode);
+  };
+
   const stopVoice = async () => {
     setIsRecording(false);
     if (runtimeConfig.dataMode === 'mock') {
@@ -677,13 +702,13 @@ export default function PatientDialoguePage() {
       return;
     }
     try {
-      await voiceClientRef.current?.commit();
+      await voiceClientRef.current?.pause();
     } catch (voiceError) {
       setVoiceState('text_fallback');
       setConnectionError(
         voiceError instanceof Error
           ? voiceError.message
-          : '语音提交失败，已切换文字输入'
+          : '语音暂停失败，已切换文字输入'
       );
     }
   };
@@ -740,7 +765,7 @@ export default function PatientDialoguePage() {
               <IntegrationStatus
                 streamStatus={streamStatus}
                 voiceState={
-                  runtimeConfig.dataMode === 'mock' ? voiceState : undefined
+                  inputMode === 'voice' ? voiceState : undefined
                 }
               />
             )}
@@ -989,14 +1014,40 @@ export default function PatientDialoguePage() {
               </div>
             ) : (
               <>
-                <div className="px-4 pt-3 flex items-center justify-between">
-                  <p className="text-xs text-foreground-muted">
-                    {isRecording
-                      ? '正在聆听，请说出您的回答'
-                      : runtimeConfig.dataMode === 'api'
-                        ? '请输入文字回答'
-                        : '支持文字与语音模拟输入'}
-                  </p>
+                <div className="px-4 pt-3 flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="text-xs text-foreground-muted">
+                      {isRecording
+                        ? voiceState === 'speaking'
+                          ? 'AI 正在播报，您可以直接说话打断'
+                          : '实时语音已开启，系统会自动识别您的停顿'
+                        : inputMode === 'voice'
+                          ? '语音模式：点击麦克风开启连续实时对话'
+                          : '文字模式：输入并发送您的回答'}
+                    </p>
+                    <div
+                      className="flex shrink-0 rounded-lg border border-border p-0.5"
+                      role="group"
+                      aria-label="对话输入模式"
+                    >
+                      {(['text', 'voice'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => void changeInputMode(mode)}
+                          disabled={isRecording || isStreaming}
+                          aria-pressed={inputMode === mode}
+                          className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                            inputMode === mode
+                              ? 'bg-primary text-white'
+                              : 'text-foreground-muted hover:bg-surface-secondary'
+                          }`}
+                        >
+                          {mode === 'text' ? '文字' : '语音'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
                     <UserPlusIcon className="w-4 h-4" />
                     找护士
@@ -1005,18 +1056,23 @@ export default function PatientDialoguePage() {
                 <ChatInput
                   onSend={handleSendMessage}
                   onVoiceStart={
-                    runtimeConfig.dataMode === 'mock'
-                      ? () => void startVoice()
-                      : undefined
+                    inputMode === 'voice' ? () => void startVoice() : undefined
                   }
                   onVoiceStop={
-                    runtimeConfig.dataMode === 'mock'
-                      ? () => void stopVoice()
-                      : undefined
+                    inputMode === 'voice' ? () => void stopVoice() : undefined
                   }
-                  placeholder={isPaused ? '评估已暂停' : '输入您的回答...'}
-                  disabled={isPaused || isStreaming}
+                  placeholder={
+                    isPaused
+                      ? '评估已暂停'
+                      : inputMode === 'voice'
+                        ? '语音模式下请点击麦克风回答'
+                        : '输入您的回答...'
+                  }
+                  disabled={
+                    isPaused || (inputMode === 'text' && isStreaming)
+                  }
                   isRecording={isRecording}
+                  recordingLabel="实时语音已开启，停顿后系统会自动回复"
                 />
               </>
             )}

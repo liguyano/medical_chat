@@ -170,3 +170,44 @@ def dispatch_answer_workers(
                 session.session_no,
                 source_message_id,
             )
+
+
+def dispatch_voice_answer_workers(
+    session_no: str,
+    *,
+    task_id: int,
+    scale_codes: list[str],
+    source_message_id: str,
+    source_event_id: str | None,
+    patient_info: dict,
+) -> None:
+    """仅派发语音模式的 Schedule / Extraction。
+
+    语音模型已经由 Voice Gateway 完成当前轮回复，不能再派发
+    `dialog_agent_worker`，否则会产生第二条 AI 问句。文本模式入口
+    `dispatch_answer_workers` 保持原行为不变。
+    """
+    from app.celery_app.tasks import extraction_agent_worker, schedule_agent_worker
+
+    turn_config = {
+        "task_id": task_id,
+        "scale_codes": scale_codes,
+        "patient_info": patient_info,
+        "source_message_id": source_message_id,
+        "source_event_id": source_event_id,
+        "check_interval": 1,
+        "interaction_mode": "voice",
+    }
+    for agent_name, task in (
+        ("schedule", schedule_agent_worker),
+        ("extraction", extraction_agent_worker),
+    ):
+        try:
+            task.delay(session_no, turn_config)
+        except Exception:
+            logger.exception(
+                "语音模式后台 %s 任务派发失败，不阻塞语音响应: session=%s message=%s",
+                agent_name,
+                session_no,
+                source_message_id,
+            )

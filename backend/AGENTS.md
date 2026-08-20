@@ -212,6 +212,14 @@ from medagent.configs.agent_config import get_agent_config
 - `dialog_agent` 在 `agent_models` 中详写绑定两类模型：`language`（OpenAI 兼容文本降级）
   与 `voice`（豆包实时语音，`type: voice`）。豆包真实语音上线前必须用真实 App ID、
   Resource ID、API Key 和匹配事件协议的 endpoint 完成 E2E，禁止以 Fake WebSocket 代替。
+- 实时语音一期新增 Qwen Audio/Omni Realtime 并行链路：患者只连接
+  `/api/ws/dialog/{session_no}/voice`，后端 `VoiceGateway` 托管供应商 WebSocket；
+  语音转写、AI 文本、工具、Schedule/Extraction 结果和音频索引仍写入
+  `dialog_stream:{session_id}`，患者端与医护端通过 SSE 断线续读。实时音频帧不写入
+  Redis，持久化音频保存为受保护 API 可读取的 WAV 文件；语音模式只派发
+  Schedule/Extraction，禁止再次派发文本 Dialog Agent，避免产生重复 AI 问句；
+  Extraction 确认结构化进度完整后直接调用统一完成服务并发布 `SessionEndEvent`，
+  不再借用文本 Dialog Exit 完成语音会话。
 
 ## 患者端身份边界
 

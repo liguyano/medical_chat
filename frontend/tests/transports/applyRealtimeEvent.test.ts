@@ -6,6 +6,154 @@ describe('实时事件进度口径', () => {
     vi.unstubAllGlobals();
   });
 
+  it('把患者和AI音频索引绑定到同一条历史消息', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+    useChatStore.setState({
+      sessions: {
+        voice: {
+          id: 'SESS-VOICE',
+          sessionNo: 'SESS-VOICE',
+          taskId: 'voice',
+          patientId: '1',
+          encounterId: '1',
+          interactionType: 'assessment',
+          channelType: 'voice',
+          sessionStatus: 'active',
+          currentCicareStage: 'ask',
+          messages: [],
+        },
+      },
+    });
+
+    applyRealtimeEvent({
+      event_id: 'audio-patient-1',
+      event_type: 'patient_audio_delta',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-PATIENT-1',
+      occurred_at: '2026-08-19T10:00:00Z',
+      payload: {
+        role: 'patient',
+        audio_url: '/api/dialog/SESS-VOICE/audio/MSG-PATIENT-1/patient.wav',
+        turn_no: 2,
+      },
+    });
+    applyRealtimeEvent({
+      event_id: 'audio-ai-1',
+      event_type: 'assistant_audio_delta',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-AI-1',
+      occurred_at: '2026-08-19T10:00:01Z',
+      payload: {
+        role: 'assistant',
+        audio_url: '/api/dialog/SESS-VOICE/audio/GEN-1/assistant.wav',
+        turn_no: 3,
+      },
+    });
+    applyRealtimeEvent({
+      event_id: 'transcript-1',
+      event_type: 'user_transcript_completed',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-PATIENT-1',
+      occurred_at: '2026-08-19T10:00:00Z',
+      payload: { content_text: '我有一点头晕', turn_no: 2 },
+    });
+    applyRealtimeEvent({
+      event_id: 'message-ai-1',
+      event_type: 'assistant_message_completed',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-AI-1',
+      occurred_at: '2026-08-19T10:00:02Z',
+      payload: { content_text: '请先坐下休息', turn_no: 3 },
+    });
+
+    const messages = useChatStore.getState().sessions.voice.messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.role).toBe('patient');
+    expect(messages[0]?.contentText).toBe('我有一点头晕');
+    expect(messages[0]?.audioUrl).toContain('patient.wav');
+    expect(messages[1]?.role).toBe('ai');
+    expect(messages[1]?.contentText).toBe('请先坐下休息');
+    expect(messages[1]?.audioUrl).toContain('assistant.wav');
+  });
+
+  it('AI音频索引先于文本增量到达时仍保留可播放地址', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+    useChatStore.setState({
+      sessions: {
+        voice: {
+          id: 'SESS-VOICE',
+          sessionNo: 'SESS-VOICE',
+          taskId: 'voice',
+          patientId: '1',
+          encounterId: '1',
+          interactionType: 'assessment',
+          channelType: 'voice',
+          sessionStatus: 'active',
+          currentCicareStage: 'ask',
+          messages: [],
+        },
+      },
+    });
+
+    applyRealtimeEvent({
+      event_id: 'started-ai-2',
+      event_type: 'assistant_message_started',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-AI-2',
+      occurred_at: '2026-08-20T10:00:00Z',
+      payload: { turn_no: 3, generation_id: 'GEN-2' },
+    });
+    applyRealtimeEvent({
+      event_id: 'audio-ai-2',
+      event_type: 'assistant_audio_delta',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-AI-2',
+      occurred_at: '2026-08-20T10:00:01Z',
+      payload: {
+        role: 'assistant',
+        audio_url: '/api/dialog/SESS-VOICE/audio/GEN-2/segment-000000.wav',
+        turn_no: 3,
+      },
+    });
+    applyRealtimeEvent({
+      event_id: 'text-ai-2',
+      event_type: 'assistant_text_delta',
+      task_id: 'voice',
+      session_id: 'SESS-VOICE',
+      message_id: 'MSG-AI-2',
+      occurred_at: '2026-08-20T10:00:01Z',
+      payload: { delta: '请继续说。', turn_no: 3 },
+    });
+
+    const message = useChatStore.getState().sessions.voice.messages[0];
+    expect(message.contentText).toBe('请继续说。');
+    expect(message.audioUrl).toContain('segment-000000.wav');
+  });
+
   it('患者发言不推进评估进度，只有progress_updated可以推进', async () => {
     const values = new Map<string, string>();
     vi.stubGlobal('sessionStorage', {

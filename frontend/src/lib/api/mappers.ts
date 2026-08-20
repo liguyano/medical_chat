@@ -175,7 +175,7 @@ export function mapDialogMessage(dto: DialogMessageDto): InteractionMessage {
     role,
     cicareStage: dto.cicare_stage as InteractionMessage['cicareStage'],
     intentType: dto.intent_type as InteractionMessage['intentType'],
-    contentText: dto.content_text ?? '',
+    contentText: dto.content_text ?? dto.asr_text ?? dto.tts_text ?? '',
     audioUrl: dto.audio_url,
     occurredAt: dto.occurred_at ?? new Date().toISOString(),
     relatedQuestionIds: dto.related_question_ids?.map(String),
