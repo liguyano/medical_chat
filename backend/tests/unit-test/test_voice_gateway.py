@@ -249,6 +249,7 @@ async def test_function_call_uses_official_output_then_response_create(
     )
     session.client.create_response.assert_awaited_once()
     publish_result.assert_called_once()
+    assert publish_result.call_args.kwargs["source_invocation_id"] == "call_001"
     assert any(isinstance(event, ToolCallEvent) for event in session.publisher.events)
 
 

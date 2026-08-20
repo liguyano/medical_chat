@@ -115,6 +115,7 @@ def _persist_event(
     payload: dict[str, Any],
     handled_status: str = "pending",
     creator: str = "dialog_agent",
+    source_invocation_id: str | None = None,
 ) -> InteractionEventModel:
     """保存结构化交互事件。"""
     record = InteractionEventModel(
@@ -123,6 +124,7 @@ def _persist_event(
         event_type=event_type,
         event_payload=payload,
         handled_status=handled_status,
+        source_invocation_id=source_invocation_id,
         creator=creator,
         updator=creator,
     )
@@ -247,6 +249,7 @@ def publish_tool_result(
     tool_args: dict[str, Any],
     tool_result: Any,
     publisher: DialogEventPublisher,
+    source_invocation_id: str | None = None,
 ) -> BaseEvent | None:
     """持久化并发布 Agent 工具领域事件。"""
     if not isinstance(tool_result, dict) or not tool_result.get("success"):
@@ -259,6 +262,24 @@ def publish_tool_result(
             db,
             task_id or session_no,
         )
+        source_key = (
+            f"agent:{source_invocation_id}"
+            if source_invocation_id
+            else None
+        )
+        if source_key and db.scalar(
+            select(InteractionEventModel.id).where(
+                InteractionEventModel.interaction_session_id == session.id,
+                InteractionEventModel.source_invocation_id == source_key,
+                InteractionEventModel.deleted == 0,
+            )
+        ):
+            logger.info(
+                "忽略同一 Agent 调用的重复领域事件: session=%s call_id=%s",
+                session.session_no,
+                source_invocation_id,
+            )
+            return None
         result = dict(tool_result)
         result.setdefault("request_source", "agent")
         result.setdefault("tool_name", tool_name)
@@ -290,8 +311,10 @@ def publish_tool_result(
             payload={
                 "tool_name": tool_name,
                 "tool_args": tool_args,
+                "source_invocation_id": source_invocation_id,
                 **domain_event.model_dump(mode="json"),
             },
+            source_invocation_id=source_key,
         )
         db.commit()
 
@@ -344,6 +367,26 @@ def request_handoff(
     task, session, patient, encounter = _load_task_context(db, task_ref)
     if session.patient_id != patient_id:
         raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权呼叫该任务护士")
+    source_key = (
+        f"patient:{request.client_invocation_id}"
+        if request.client_invocation_id
+        else None
+    )
+    if source_key:
+        existing = db.scalar(
+            select(InteractionEventModel).where(
+                InteractionEventModel.interaction_session_id == session.id,
+                InteractionEventModel.source_invocation_id == source_key,
+                InteractionEventModel.deleted == 0,
+            )
+        )
+        if existing is not None:
+            logger.info(
+                "复用患者主动呼叫事件: session=%s invocation=%s",
+                session.session_no,
+                request.client_invocation_id,
+            )
+            return _interaction_event_payload(existing)
     result = _new_handoff_result(request)
     event = _handoff_event(
         task=task,
@@ -362,8 +405,12 @@ def request_handoff(
         session=session,
         message_no=None,
         event_type=event.event_type.value,
-        payload=event.model_dump(mode="json"),
+        payload={
+            **event.model_dump(mode="json"),
+            "client_invocation_id": request.client_invocation_id,
+        },
         creator="patient",
+        source_invocation_id=source_key,
     )
     db.commit()
     publisher = DialogEventPublisher(session.session_no)
@@ -716,6 +763,79 @@ def _interaction_event_payload(row: InteractionEventModel) -> dict[str, Any]:
     return payload
 
 
+def _coalesce_legacy_patient_handoffs(
+    rows: list[InteractionEventModel],
+) -> list[tuple[InteractionEventModel, dict[str, Any]]]:
+    """合并旧版本中同一次患者点击产生的毫秒级重复呼叫
+    作用：旧事件没有 `request_source` 和调用编号，只对明确非 Agent、
+          内容完全相同且间隔不超过一秒的相邻记录做展示兼容。
+          新事件和不同 Agent call_id 不参与合并。
+    """
+    result: list[tuple[InteractionEventModel, dict[str, Any]]] = []
+    legacy_group: tuple[
+        tuple[str, str, str],
+        InteractionEventModel,
+        dict[str, Any],
+    ] | None = None
+    for row in rows:
+        payload = _interaction_event_payload(row)
+        is_legacy_patient_handoff = (
+            row.event_type == "handoff_requested"
+            and row.source_invocation_id is None
+            and not payload.get("request_source")
+            and not payload.get("tool_name")
+        )
+        signature = (
+            str(payload.get("reason") or payload.get("description") or ""),
+            str(payload.get("requested_action") or "other"),
+            str(payload.get("urgency") or "routine"),
+        )
+        if (
+            is_legacy_patient_handoff
+            and legacy_group is not None
+            and legacy_group[0] == signature
+            and abs(
+                (row.create_time - legacy_group[1].create_time).total_seconds()
+            )
+            <= 1
+        ):
+            canonical_payload = legacy_group[2]
+            request_ids = list(
+                canonical_payload.get("legacy_duplicate_request_ids") or []
+            )
+            duplicate_request_id = payload.get("request_id")
+            if duplicate_request_id and duplicate_request_id not in request_ids:
+                request_ids.append(duplicate_request_id)
+            canonical_payload["legacy_duplicate_request_ids"] = request_ids
+            if (
+                row.handled_status == "resolved"
+                or payload.get("status") == "resolved"
+            ):
+                for key in (
+                    "status",
+                    "handled_status",
+                    "handled_by",
+                    "handled_at",
+                    "resolved_by_staff_id",
+                    "resolved_by_staff_no",
+                    "resolved_by_name",
+                    "resolution",
+                ):
+                    if payload.get(key) is not None:
+                        canonical_payload[key] = payload[key]
+                canonical_payload["status"] = "resolved"
+                canonical_payload["handled_status"] = "resolved"
+            continue
+
+        result.append((row, payload))
+        legacy_group = (
+            (signature, row, payload)
+            if is_legacy_patient_handoff
+            else None
+        )
+    return result
+
+
 def list_interaction_events(
     db: Session,
     session_no: str,
@@ -758,7 +878,7 @@ def list_interaction_events(
     )
     return [
         {
-            "event_id": str((row.event_payload or {}).get("event_id") or row.id),
+            "event_id": str(payload.get("event_id") or row.id),
             "event_type": row.event_type,
             "task_id": str(session.task_id),
             "session_id": session.session_no,
@@ -766,7 +886,7 @@ def list_interaction_events(
                 str(row.message_id) if row.message_id is not None else None
             ),
             "occurred_at": row.create_time.isoformat(),
-            "payload": _interaction_event_payload(row),
+            "payload": payload,
         }
-        for row in rows
+        for row, payload in _coalesce_legacy_patient_handoffs(rows)
     ]

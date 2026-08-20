@@ -18,6 +18,7 @@ import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
+import { createClientInvocationId } from '@/lib/clientInvocation';
 import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
 import {
   buildDialogueSnapshotKey,
@@ -210,6 +211,7 @@ export default function PatientDialoguePage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const voiceClientRef = useRef<VoiceSocketClient | undefined>(undefined);
   const loadedSnapshotKeyRef = useRef<string | null>(null);
+  const handoffSubmittingRef = useRef(false);
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const readOnly = isPatientTaskReadOnly(task);
   const updateTask = useTaskStore((state) => state.updateTask);
@@ -248,6 +250,7 @@ export default function PatientDialoguePage() {
   const setStreaming = useChatStore((state) => state.setStreaming);
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isHandoffSubmitting, setIsHandoffSubmitting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [voiceState, setVoiceState] =
@@ -566,10 +569,29 @@ export default function PatientDialoguePage() {
     });
   };
 
+  const requestPatientHandoff = async (
+    reason: string,
+    requestedAction = 'other'
+  ) => {
+    if (handoffSubmittingRef.current) return null;
+    handoffSubmittingRef.current = true;
+    setIsHandoffSubmitting(true);
+    try {
+      return await careRepository.requestHandoff(taskId, reason, {
+        requestedAction,
+        clientInvocationId: createClientInvocationId('patient-handoff'),
+      });
+    } finally {
+      handoffSubmittingRef.current = false;
+      setIsHandoffSubmitting(false);
+    }
+  };
+
   const askNurse = async () => {
     const reason = '患者在AI对话评估中主动请求护士协助';
     try {
-      const response = await careRepository.requestHandoff(taskId, reason);
+      const response = await requestPatientHandoff(reason);
+      if (!response) return;
       applyRealtimeEvent(
         toHandoffSseEnvelope(response, {
           taskId,
@@ -593,14 +615,16 @@ export default function PatientDialoguePage() {
   ) => {
     if (progress.decision === 'needs_explanation') {
       const reason = '患者对知情同意内容需要护士人工解释';
-      const response = await careRepository.requestHandoff(taskId, reason);
-      applyRealtimeEvent(
-        toHandoffSseEnvelope(response, {
-          taskId,
-          sessionId: session?.id,
-          eventType: 'handoff_requested',
-        })
-      );
+      const response = await requestPatientHandoff(reason, 'explain_consent');
+      if (response) {
+        applyRealtimeEvent(
+          toHandoffSseEnvelope(response, {
+            taskId,
+            sessionId: session?.id,
+            eventType: 'handoff_requested',
+          })
+        );
+      }
     }
     await careRepository.submitConsent(progress);
     saveConsent(progress);
@@ -1118,9 +1142,14 @@ export default function PatientDialoguePage() {
                         </Button>
                       )}
                   </div>
-                  <button type="button" onClick={askNurse} className="text-sm text-danger flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void askNurse()}
+                    disabled={isHandoffSubmitting}
+                    className="text-sm text-danger flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
                     <UserPlusIcon className="w-4 h-4" />
-                    找护士
+                    {isHandoffSubmitting ? '正在呼叫' : '找护士'}
                   </button>
                 </div>
                 <ChatInput

@@ -15,6 +15,7 @@ class HandoffRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str | int | None = None
+    client_invocation_id: str | None = Field(default=None, max_length=128)
     reason: str = Field(..., min_length=1, max_length=1000)
     requested_action: Literal[
         "measure_temperature",

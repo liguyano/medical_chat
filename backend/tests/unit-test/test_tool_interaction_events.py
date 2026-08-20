@@ -11,6 +11,7 @@ from app.schemas.events import (
 )
 from app.services.sse_service import format_sse_event
 from app.services.tool_interaction_service import (
+    _coalesce_legacy_patient_handoffs,
     _find_education_acknowledgement,
     _interaction_event_payload,
     _resolve_pending_handoff_rows,
@@ -288,3 +289,64 @@ def test_find_education_acknowledgement_is_idempotent():
     )
 
     assert result is expected
+
+
+def test_legacy_patient_handoff_coalescing_does_not_merge_agent_calls():
+    """旧患者按钮重复事件可合并，但不同 Agent 调用必须完整保留。"""
+    started_at = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+
+    def row(
+        request_id: str,
+        *,
+        created_at: datetime,
+        source_invocation_id: str | None = None,
+        request_source: str | None = None,
+    ):
+        payload = {
+            "request_id": request_id,
+            "reason": "患者主动请求护士协助",
+            "requested_action": "other",
+            "urgency": "routine",
+        }
+        if request_source:
+            payload["request_source"] = request_source
+            payload["tool_name"] = "request_nurse_assistance"
+        return SimpleNamespace(
+            event_type="handoff_requested",
+            source_invocation_id=source_invocation_id,
+            event_payload=payload,
+            handled_status="pending",
+            handled_by=None,
+            handled_at=None,
+            create_time=created_at,
+        )
+
+    rows = [
+        row("PATIENT-1", created_at=started_at),
+        row(
+            "PATIENT-2",
+            created_at=started_at.replace(microsecond=73_000),
+        ),
+        row(
+            "AGENT-1",
+            created_at=started_at.replace(microsecond=100_000),
+            source_invocation_id="agent:call-1",
+            request_source="agent",
+        ),
+        row(
+            "AGENT-2",
+            created_at=started_at.replace(microsecond=120_000),
+            source_invocation_id="agent:call-2",
+            request_source="agent",
+        ),
+    ]
+
+    coalesced = _coalesce_legacy_patient_handoffs(rows)
+
+    assert len(coalesced) == 3
+    assert coalesced[0][1]["request_id"] == "PATIENT-1"
+    assert coalesced[0][1]["legacy_duplicate_request_ids"] == ["PATIENT-2"]
+    assert [item[1]["request_id"] for item in coalesced[1:]] == [
+        "AGENT-1",
+        "AGENT-2",
+    ]

@@ -71,6 +71,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `/nurse/tasks/[id]/nursing-plan` 通过 `CareRepository` 查询和生成患者画像与护理计划，
   支持摘要编辑、计划项接受/修改/拒绝、护士备注和最终确认；API 与 Mock 模式保持同一
   闭环。真实模型生成接口单独使用 120 秒超时，避免普通请求超时提前中断结果展示。
+- `/nurse/patients`、`/nurse/patients/new`、`/nurse/patients/[patientId]` 和编辑页统一通过
+  `CareRepository` 管理患者主档与本次住院记录；列表需展示护理级别、过敏摘要、任务摘要
+  和人工介入状态，新增/编辑共享同一表单，API 模式禁止读取 `src/lib/mock` 补数据。
+- 患者主动呼叫必须为一次按钮异步操作生成唯一 `clientInvocationId` 并在请求完成前锁定
+  重复提交；HTTP 回退、SSE 与历史快照继续按领域 `event_id` / `request_id` 更新同一组件。
+  不同领域事件必须分别展示，前端不得按工具名称或参数合并模型调用。
 
 ## 常用检查命令
 

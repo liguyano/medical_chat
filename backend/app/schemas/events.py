@@ -115,6 +115,7 @@ class ToolCallEvent(BaseEvent):
 
     event_type: EventType = EventType.TOOL_CALL
     turn_number: int
+    call_id: str | None = None
     tool_name: str  # 工具名称
     tool_args: dict[str, Any]  # 工具参数
     tool_result: Any | None = None  # 工具返回值

@@ -128,6 +128,7 @@ async def test_event_publish_emits_turn_and_tool_events():
         "patient_input": "我吸烟",
         "tool_calls": [
             {
+                "call_id": "tool-call-education-1",
                 "name": "get_education_material",
                 "arguments": {"category": "tobacco"},
                 "result": {"success": True},
@@ -144,6 +145,7 @@ async def test_event_publish_emits_turn_and_tool_events():
     assert events[0]["question"] == "我吸烟"
     assert events[0]["tool_calls"] == context["tool_calls"]
     assert events[1]["tool_args"] == {"category": "tobacco"}
+    assert events[1]["call_id"] == "tool-call-education-1"
 
 
 @pytest.mark.asyncio

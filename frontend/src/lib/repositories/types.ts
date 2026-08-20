@@ -28,6 +28,54 @@ import type {
 export interface PatientWithEncounter {
   patient: Patient;
   encounter: PatientEncounter;
+  taskSummary?: PatientTaskSummary;
+}
+
+export interface PatientTaskSummary {
+  total: number;
+  pendingReview: number;
+  inProgress: number;
+  handoffRequired: boolean;
+}
+
+export interface PatientListFilters {
+  keyword?: string;
+  status?: '待入院' | '在院' | '已出院' | '取消' | '';
+  departmentName?: string;
+  wardName?: string;
+}
+
+export interface PatientRecordInput {
+  patient: {
+    hisPatientId?: string;
+    name: string;
+    gender: Patient['gender'];
+    birthday: string;
+    idCardNo?: string;
+    phone: string;
+    emergencyContactName?: string;
+    emergencyContactRelation?: string;
+    emergencyContactPhone?: string;
+    address?: string;
+  };
+  encounter: {
+    id?: string;
+    inpatientNo: string;
+    departmentCode?: string;
+    department: string;
+    ward: string;
+    bedNo: string;
+    admissionDate: string;
+    dischargeDate?: string;
+    encounterStatus: PatientEncounter['encounterStatus'];
+    primaryDiagnosis: string;
+    secondaryDiagnoses: string[];
+    riskNote?: string;
+    admissionSource?: string;
+    nursingLevel?: string;
+    insuranceType?: string;
+    allergySummary?: string;
+  };
 }
 
 export interface PatientLoginInput {
@@ -79,7 +127,24 @@ export interface SendMessageInput {
 }
 
 export interface CareRepository {
+  listPatients(
+    filters?: PatientListFilters,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter[]>;
   listInHospitalPatients(signal?: AbortSignal): Promise<PatientWithEncounter[]>;
+  getPatient(
+    patientId: string,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter>;
+  createPatient(
+    input: PatientRecordInput,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter>;
+  updatePatient(
+    patientId: string,
+    input: PatientRecordInput,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter>;
   listScales(signal?: AbortSignal): Promise<AssessmentScale[]>;
   listEducationMaterials(
     signal?: AbortSignal
@@ -166,6 +231,7 @@ export interface CareRepository {
     details?: {
       requestedAction?: string;
       urgency?: 'routine' | 'urgent';
+      clientInvocationId?: string;
     },
     signal?: AbortSignal
   ): Promise<Record<string, unknown>>;

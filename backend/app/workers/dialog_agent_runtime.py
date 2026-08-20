@@ -98,12 +98,14 @@ class AppDialogEventSink:
             tool_name = str(event.get("tool_name") or "")
             tool_args = dict(event.get("tool_args") or {})
             tool_result = event.get("tool_result")
+            call_id = str(event.get("call_id") or "") or None
             self.publisher.publish(
                 ToolCallEvent(
                     session_id=session_id,
                     task_id=event.get("task_id"),
                     message_id=event.get("message_id"),
                     turn_number=int(event.get("turn_number") or 0),
+                    call_id=call_id,
                     tool_name=tool_name,
                     tool_args=tool_args,
                     tool_result=tool_result,
@@ -118,6 +120,7 @@ class AppDialogEventSink:
                 tool_name=tool_name,
                 tool_args=tool_args,
                 tool_result=tool_result,
+                source_invocation_id=call_id,
                 publisher=self.publisher,
             )
 

@@ -12,8 +12,8 @@ from alembic import command
 DEFAULT_DATABASE_URL = (
     "postgresql://medical:medical_dev_password@localhost:15432/medical_evaluate"
 )
-EXPECTED_REVISION = "20260818_staff_accounts"
-EXPECTED_TABLE_COUNT = 27
+EXPECTED_REVISION = "20260820_patient_event"
+EXPECTED_TABLE_COUNT = 33
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -46,6 +46,31 @@ def test_initial_migration_upgrade_and_downgrade():
             table_names = set(inspect(test_engine).get_table_names())
             assert "alembic_version" in table_names
             assert len(table_names - {"alembic_version"}) == EXPECTED_TABLE_COUNT
+            inspector = inspect(test_engine)
+            patient_columns = {
+                column["name"] for column in inspector.get_columns("patient")
+            }
+            encounter_columns = {
+                column["name"]
+                for column in inspector.get_columns("patient_encounter")
+            }
+            event_columns = {
+                column["name"]
+                for column in inspector.get_columns("interaction_event")
+            }
+            assert {
+                "emergency_contact_name",
+                "emergency_contact_relation",
+                "emergency_contact_phone",
+                "address",
+            } <= patient_columns
+            assert {
+                "admission_source",
+                "nursing_level",
+                "insurance_type",
+                "allergy_summary",
+            } <= encounter_columns
+            assert "source_invocation_id" in event_columns
             with test_engine.connect() as connection:
                 revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
             assert revision == EXPECTED_REVISION

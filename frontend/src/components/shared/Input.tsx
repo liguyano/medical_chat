@@ -1,4 +1,4 @@
-import { InputHTMLAttributes, forwardRef } from 'react';
+import { InputHTMLAttributes, forwardRef, useId } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -7,13 +7,21 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, type = 'text', ...props }, ref) => {
+  ({ className, label, error, id, type = 'text', ...props }, ref) => {
+    const generatedId = useId();
+    const inputId = id ?? generatedId;
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-foreground mb-1.5">{label}</label>
+          <label
+            htmlFor={inputId}
+            className="block text-sm font-medium text-foreground mb-1.5"
+          >
+            {label}
+          </label>
         )}
         <input
+          id={inputId}
           type={type}
           className={cn(
             'w-full px-4 py-2.5 rounded-xl border border-border bg-surface',

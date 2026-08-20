@@ -148,10 +148,21 @@ class InteractionEvent(BusinessBaseMixin, Base):
     handled_status: Mapped[str] = mapped_column(String(32), nullable=False)
     handled_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_invocation_id: Mapped[str | None] = mapped_column(
+        String(160),
+        nullable=True,
+        comment="同一会话内的来源调用编号，用于重复交付幂等",
+    )
 
     __table_args__ = (
         Index("idx_interaction_event_session", "interaction_session_id", "deleted"),
         Index("idx_interaction_event_status", "handled_status", "deleted"),
+        Index(
+            "uq_interaction_event_source_invocation",
+            "interaction_session_id",
+            "source_invocation_id",
+            unique=True,
+        ),
     )
 
 

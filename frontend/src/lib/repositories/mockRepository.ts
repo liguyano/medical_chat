@@ -19,7 +19,9 @@ import type {
   CareRepository,
   CreateTaskInput,
   DialogueSnapshot,
+  PatientListFilters,
   PatientLoginInput,
+  PatientRecordInput,
   PatientWithEncounter,
   SendMessageInput,
   StaffLoginInput,
@@ -348,17 +350,224 @@ function buildEmptySession(task: CareTask): InteractionSession {
   };
 }
 
+function calculateAge(birthday: string): number {
+  const birth = new Date(birthday);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  if (
+    now.getMonth() < birth.getMonth() ||
+    (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())
+  ) {
+    age -= 1;
+  }
+  return Math.max(age, 0);
+}
+
+function buildMockPatientRecord(
+  patient: (typeof mockPatients)[number],
+  encounter: (typeof mockEncounters)[number]
+): PatientWithEncounter {
+  const tasks = mockTasks.filter((task) => task.patientId === patient.id);
+  return {
+    patient: structuredClone(patient),
+    encounter: structuredClone(encounter),
+    taskSummary: {
+      total: tasks.length,
+      pendingReview: tasks.filter(
+        (task) => task.taskStatus === 'pending_review'
+      ).length,
+      inProgress: tasks.filter(
+        (task) => task.taskStatus === 'in_progress'
+      ).length,
+      handoffRequired: tasks.some((task) => task.handoffRequired),
+    },
+  };
+}
+
+function buildMockRecordFromInput(
+  input: PatientRecordInput,
+  patientId: string,
+  encounterId: string,
+  patientNo: string,
+  encounterNo: string,
+  maskedIdCard?: string
+): PatientWithEncounter {
+  const patient = {
+    id: patientId,
+    patientNo,
+    hisPatientId: input.patient.hisPatientId,
+    name: input.patient.name,
+    gender: input.patient.gender,
+    age: calculateAge(input.patient.birthday),
+    birthday: input.patient.birthday,
+    idCard: input.patient.idCardNo
+      ? `${input.patient.idCardNo.slice(0, 3)}***********${input.patient.idCardNo.slice(-4)}`
+      : maskedIdCard,
+    phone: input.patient.phone,
+    emergencyContactName: input.patient.emergencyContactName,
+    emergencyContactRelation: input.patient.emergencyContactRelation,
+    emergencyContactPhone: input.patient.emergencyContactPhone,
+    address: input.patient.address,
+  };
+  const encounter = {
+    id: encounterId,
+    patientId,
+    encounterNo,
+    inpatientNo: input.encounter.inpatientNo,
+    departmentCode: input.encounter.departmentCode,
+    department: input.encounter.department,
+    ward: input.encounter.ward,
+    bedNo: input.encounter.bedNo,
+    admissionDate: input.encounter.admissionDate,
+    dischargeDate: input.encounter.dischargeDate,
+    diagnosis: input.encounter.primaryDiagnosis,
+    diagnosisSnapshot: {
+      primary: input.encounter.primaryDiagnosis,
+      secondary: input.encounter.secondaryDiagnoses,
+      risk_note: input.encounter.riskNote ?? '',
+    },
+    encounterStatus: input.encounter.encounterStatus,
+    admissionSource: input.encounter.admissionSource,
+    nursingLevel: input.encounter.nursingLevel,
+    insuranceType: input.encounter.insuranceType,
+    allergySummary: input.encounter.allergySummary,
+  };
+  return { patient, encounter };
+}
+
 export class MockCareRepository implements CareRepository {
-  async listInHospitalPatients(
+  async listPatients(
+    filters: PatientListFilters = {},
     signal?: AbortSignal
   ): Promise<PatientWithEncounter[]> {
     await wait(signal);
+    const normalizedKeyword = filters.keyword?.trim().toLowerCase() ?? '';
+    const statusMap: Record<
+      NonNullable<PatientListFilters['status']>,
+      (typeof mockEncounters)[number]['encounterStatus'] | ''
+    > = {
+      '': '',
+      待入院: 'pending_admission',
+      在院: 'in_hospital',
+      已出院: 'discharged',
+      取消: 'cancelled',
+    };
     return mockPatients.flatMap((patient) => {
       const encounter = mockEncounters.find(
         (item) => item.patientId === patient.id
       );
-      return encounter ? [{ patient, encounter }] : [];
+      if (!encounter) return [];
+      const searchable = [
+        patient.name,
+        patient.patientNo,
+        patient.hisPatientId,
+        encounter.inpatientNo,
+        encounter.bedNo,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      const expectedStatus = statusMap[filters.status ?? ''];
+      if (normalizedKeyword && !searchable.includes(normalizedKeyword)) {
+        return [];
+      }
+      if (expectedStatus && encounter.encounterStatus !== expectedStatus) {
+        return [];
+      }
+      if (
+        filters.departmentName &&
+        encounter.department !== filters.departmentName
+      ) {
+        return [];
+      }
+      if (filters.wardName && encounter.ward !== filters.wardName) {
+        return [];
+      }
+      return [buildMockPatientRecord(patient, encounter)];
     });
+  }
+
+  async listInHospitalPatients(
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter[]> {
+    return this.listPatients({ status: '在院' }, signal);
+  }
+
+  async getPatient(
+    patientId: string,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter> {
+    await wait(signal);
+    const patient = mockPatients.find((item) => item.id === patientId);
+    const encounter = mockEncounters.find(
+      (item) => item.patientId === patientId
+    );
+    if (!patient || !encounter) throw new Error('患者住院记录不存在');
+    return buildMockPatientRecord(patient, encounter);
+  }
+
+  async createPatient(
+    input: PatientRecordInput,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter> {
+    await wait(signal);
+    if (
+      mockEncounters.some(
+        (item) => item.inpatientNo === input.encounter.inpatientNo
+      )
+    ) {
+      throw new Error('住院号已存在');
+    }
+    const sequence = String(Date.now()).slice(-8);
+    const record = buildMockRecordFromInput(
+      input,
+      `P-${sequence}`,
+      `E-${sequence}`,
+      `P2026${sequence}`,
+      `E2026${sequence}`
+    );
+    mockPatients.push(record.patient);
+    mockEncounters.push(record.encounter);
+    return buildMockPatientRecord(record.patient, record.encounter);
+  }
+
+  async updatePatient(
+    patientId: string,
+    input: PatientRecordInput,
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter> {
+    await wait(signal);
+    const patientIndex = mockPatients.findIndex((item) => item.id === patientId);
+    const encounterIndex = mockEncounters.findIndex(
+      (item) =>
+        item.patientId === patientId &&
+        (!input.encounter.id || item.id === input.encounter.id)
+    );
+    if (patientIndex < 0 || encounterIndex < 0) {
+      throw new Error('患者住院记录不存在');
+    }
+    if (
+      mockEncounters.some(
+        (item, index) =>
+          index !== encounterIndex &&
+          item.inpatientNo === input.encounter.inpatientNo
+      )
+    ) {
+      throw new Error('住院号已存在');
+    }
+    const currentPatient = mockPatients[patientIndex];
+    const currentEncounter = mockEncounters[encounterIndex];
+    const record = buildMockRecordFromInput(
+      input,
+      currentPatient.id,
+      currentEncounter.id,
+      currentPatient.patientNo,
+      currentEncounter.encounterNo,
+      currentPatient.idCard
+    );
+    mockPatients[patientIndex] = record.patient;
+    mockEncounters[encounterIndex] = record.encounter;
+    return buildMockPatientRecord(record.patient, record.encounter);
   }
 
   async listScales(signal?: AbortSignal) {
@@ -633,6 +842,7 @@ export class MockCareRepository implements CareRepository {
     _details?: {
       requestedAction?: string;
       urgency?: 'routine' | 'urgent';
+      clientInvocationId?: string;
     },
     signal?: AbortSignal
   ) {

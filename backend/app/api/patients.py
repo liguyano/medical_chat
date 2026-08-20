@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_staff
@@ -15,14 +15,65 @@ from app.models.base import get_db
 from app.models.staff_account import StaffAccount
 from app.schemas.patient import (
     InHospitalPatientDto,
+    PatientCreateRequest,
     PatientLoginRequest,
     PatientLoginResponse,
+    PatientRecordDto,
+    PatientUpdateRequest,
 )
 from app.schemas.response import ApiResponse, ok
 from app.schemas.task import BackendTaskDto
 from app.services import patient_service
 
 router = APIRouter(prefix="/api/patients", tags=["patients"])
+
+
+@router.get(
+    "",
+    response_model=ApiResponse[list[PatientRecordDto]],
+    summary="查询医护端患者列表",
+)
+def list_patients(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[StaffAccount, Depends(require_staff)],
+    keyword: Annotated[str | None, Query(max_length=128)] = None,
+    encounter_status: Annotated[
+        str | None,
+        Query(alias="status", max_length=32),
+    ] = "在院",
+    department_name: Annotated[str | None, Query(max_length=128)] = None,
+    ward_name: Annotated[str | None, Query(max_length=128)] = None,
+) -> dict:
+    """按关键字、科室、病区和住院状态查询患者。"""
+    return ok(
+        patient_service.list_patients(
+            db,
+            keyword=keyword,
+            encounter_status=encounter_status,
+            department_name=department_name,
+            ward_name=ward_name,
+        )
+    )
+
+
+@router.post(
+    "",
+    response_model=ApiResponse[PatientRecordDto],
+    summary="新增患者及住院记录",
+)
+def create_patient(
+    req: PatientCreateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """同一事务新增患者主档和本次住院记录。"""
+    return ok(
+        patient_service.create_patient_record(
+            db,
+            req,
+            operator=staff.staff_no,
+        )
+    )
 
 
 @router.get(
@@ -105,3 +156,39 @@ def logout_patient(request: Request, response: Response) -> dict:
         path="/",
     )
     return ok()
+
+
+@router.get(
+    "/{patient_id}",
+    response_model=ApiResponse[PatientRecordDto],
+    summary="查询患者详情",
+)
+def get_patient(
+    patient_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """查询患者主档、最近住院记录和护理任务摘要。"""
+    return ok(patient_service.get_patient_record(db, patient_id))
+
+
+@router.put(
+    "/{patient_id}",
+    response_model=ApiResponse[PatientRecordDto],
+    summary="编辑患者及住院记录",
+)
+def update_patient(
+    patient_id: int,
+    req: PatientUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """更新患者主档和指定住院记录。"""
+    return ok(
+        patient_service.update_patient_record(
+            db,
+            patient_id,
+            req,
+            operator=staff.staff_no,
+        )
+    )

@@ -11,6 +11,7 @@ import type {
   MessageRatingListResponse,
   NursingPlanDto,
   PatientLoginResponse,
+  PatientRecordDto,
   QualityReviewDto,
   AssessmentScaleConfigSummaryDto,
   SseEnvelope,
@@ -25,6 +26,7 @@ import {
   mapInHospitalPatient,
   mapMessageRating,
   mapPatientPortal,
+  mapPatientRecord,
   mapQualityReview,
   mapStaffUser,
   mapTaskDto,
@@ -44,6 +46,8 @@ import type {
   CareRepository,
   CreateTaskInput,
   PatientLoginInput,
+  PatientListFilters,
+  PatientRecordInput,
   PatientWithEncounter,
   StaffLoginInput,
 } from '@/lib/repositories/types';
@@ -66,6 +70,64 @@ function mapEducationMaterial(
     requiresAcknowledgement: item.requires_acknowledgement,
     autoPlay: item.auto_play,
     enabled: item.enabled,
+  };
+}
+
+function toBackendEncounterStatus(
+  status: PatientRecordInput['encounter']['encounterStatus']
+): '待入院' | '在院' | '已出院' | '取消' {
+  if (status === 'pending_admission') return '待入院';
+  if (status === 'in_hospital') return '在院';
+  if (status === 'cancelled') return '取消';
+  return '已出院';
+}
+
+function patientRecordBody(input: PatientRecordInput, updating: boolean) {
+  return {
+    patient: {
+      his_patient_id: input.patient.hisPatientId || null,
+      patient_name: input.patient.name,
+      sex:
+        input.patient.gender === 'male'
+          ? '男'
+          : input.patient.gender === 'female'
+            ? '女'
+            : '其他',
+      birthday: input.patient.birthday,
+      ...(input.patient.idCardNo
+        ? { id_card_no: input.patient.idCardNo }
+        : {}),
+      phone: input.patient.phone,
+      emergency_contact_name: input.patient.emergencyContactName || null,
+      emergency_contact_relation:
+        input.patient.emergencyContactRelation || null,
+      emergency_contact_phone: input.patient.emergencyContactPhone || null,
+      address: input.patient.address || null,
+    },
+    encounter: {
+      ...(updating
+        ? { id: Number(input.encounter.id) }
+        : {}),
+      inpatient_no: input.encounter.inpatientNo,
+      department_code: input.encounter.departmentCode || null,
+      department_name: input.encounter.department,
+      ward_name: input.encounter.ward,
+      bed_no: input.encounter.bedNo,
+      admission_time: input.encounter.admissionDate,
+      discharge_time: input.encounter.dischargeDate || null,
+      encounter_status: toBackendEncounterStatus(
+        input.encounter.encounterStatus
+      ),
+      diagnosis_snapshot: {
+        primary: input.encounter.primaryDiagnosis,
+        secondary: input.encounter.secondaryDiagnoses,
+        risk_note: input.encounter.riskNote || '',
+      },
+      admission_source: input.encounter.admissionSource || null,
+      nursing_level: input.encounter.nursingLevel || null,
+      insurance_type: input.encounter.insuranceType || null,
+      allergy_summary: input.encounter.allergySummary || null,
+    },
   };
 }
 
@@ -220,6 +282,25 @@ function buildTaskFallback(
 }
 
 export class ApiCareRepository implements CareRepository {
+  async listPatients(
+    filters: PatientListFilters = {},
+    signal?: AbortSignal
+  ): Promise<PatientWithEncounter[]> {
+    const query = new URLSearchParams();
+    if (filters.keyword) query.set('keyword', filters.keyword);
+    if (filters.status !== undefined) query.set('status', filters.status);
+    if (filters.departmentName) {
+      query.set('department_name', filters.departmentName);
+    }
+    if (filters.wardName) query.set('ward_name', filters.wardName);
+    const suffix = query.size ? `?${query.toString()}` : '';
+    const response = await apiRequest<PatientRecordDto[]>(
+      `/api/patients${suffix}`,
+      { signal }
+    );
+    return response.map(mapPatientRecord);
+  }
+
   async listInHospitalPatients(
     signal?: AbortSignal
   ): Promise<PatientWithEncounter[]> {
@@ -228,6 +309,39 @@ export class ApiCareRepository implements CareRepository {
       { signal }
     );
     return response.map(mapInHospitalPatient);
+  }
+
+  async getPatient(patientId: string, signal?: AbortSignal) {
+    const response = await apiRequest<PatientRecordDto>(
+      `/api/patients/${encodeURIComponent(patientId)}`,
+      { signal }
+    );
+    return mapPatientRecord(response);
+  }
+
+  async createPatient(input: PatientRecordInput, signal?: AbortSignal) {
+    const response = await apiRequest<PatientRecordDto>('/api/patients', {
+      method: 'POST',
+      body: patientRecordBody(input, false),
+      signal,
+    });
+    return mapPatientRecord(response);
+  }
+
+  async updatePatient(
+    patientId: string,
+    input: PatientRecordInput,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<PatientRecordDto>(
+      `/api/patients/${encodeURIComponent(patientId)}`,
+      {
+        method: 'PUT',
+        body: patientRecordBody(input, true),
+        signal,
+      }
+    );
+    return mapPatientRecord(response);
   }
 
   async listScales(signal?: AbortSignal): Promise<AssessmentScale[]> {
@@ -583,6 +697,7 @@ export class ApiCareRepository implements CareRepository {
     details?: {
       requestedAction?: string;
       urgency?: 'routine' | 'urgent';
+      clientInvocationId?: string;
     },
     signal?: AbortSignal
   ) {
@@ -595,6 +710,7 @@ export class ApiCareRepository implements CareRepository {
           reason,
           requested_action: details?.requestedAction ?? 'other',
           urgency: details?.urgency ?? 'routine',
+          client_invocation_id: details?.clientInvocationId,
         },
         signal,
       }

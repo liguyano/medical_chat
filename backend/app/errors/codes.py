@@ -32,6 +32,8 @@ class ErrorCode(str, Enum):
     ERR_PATIENT_002 = "ERR_PATIENT_002"  # 未办理入院
     ERR_PATIENT_003 = "ERR_PATIENT_003"  # 患者登录会话无效
     ERR_PATIENT_004 = "ERR_PATIENT_004"  # 患者登录会话保存失败
+    ERR_PATIENT_005 = "ERR_PATIENT_005"  # 患者或住院记录不存在
+    ERR_PATIENT_006 = "ERR_PATIENT_006"  # 患者或住院标识重复
 
     # 医护身份域
     ERR_STAFF_001 = "ERR_STAFF_001"  # 工号或密码错误
@@ -75,6 +77,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ERR_PATIENT_002: "您还未办理入院，暂不能进入患者端",
     ErrorCode.ERR_PATIENT_003: "患者登录已失效，请重新登录",
     ErrorCode.ERR_PATIENT_004: "患者登录服务暂不可用",
+    ErrorCode.ERR_PATIENT_005: "患者或住院记录不存在",
+    ErrorCode.ERR_PATIENT_006: "患者身份或住院标识已存在",
     ErrorCode.ERR_STAFF_001: "工号或密码错误",
     ErrorCode.ERR_STAFF_002: "医护登录已失效，请重新登录",
     ErrorCode.ERR_STAFF_003: "医护账号不存在或已停用",
@@ -108,6 +112,8 @@ ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ERR_PATIENT_002: 403,
     ErrorCode.ERR_PATIENT_003: 401,
     ErrorCode.ERR_PATIENT_004: 503,
+    ErrorCode.ERR_PATIENT_005: 404,
+    ErrorCode.ERR_PATIENT_006: 409,
     ErrorCode.ERR_STAFF_001: 401,
     ErrorCode.ERR_STAFF_002: 401,
     ErrorCode.ERR_STAFF_003: 422,
