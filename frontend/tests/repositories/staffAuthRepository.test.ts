@@ -100,6 +100,37 @@ describe('staff authentication repository', () => {
     });
   });
 
+  it('患者任务刷新使用患者专用接口，不依赖医护会话', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse([
+        {
+          task_id: 111,
+          task_no: 'TASK-PATIENT-111',
+          session_id: 'SESS-PATIENT-111',
+          patient_id: 1,
+          encounter_id: 2,
+          patient_name: '张桂芳',
+          bed_no: '01-1',
+          collection_mode: 'ai_dialogue',
+          task_status: 'in_progress',
+          created_at: '2026-08-20T10:00:00Z',
+        },
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const tasks = await new ApiCareRepository().listPatientTasks();
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/patients/me/tasks');
+    expect(url).not.toMatch(/\/api\/tasks(?:$|\?)/);
+    expect(request.credentials).toBe('include');
+    expect(tasks[0]).toMatchObject({
+      id: '111',
+      patientName: '张桂芳',
+    });
+  });
+
   it('Mock 模式支持多组演示医护账号并拒绝错误密码', async () => {
     const repository = new MockCareRepository();
 

@@ -97,8 +97,14 @@ def test_completed_voice_progress_finalizes_session_without_text_dialog(
         Mock(return_value=runner),
     )
     monkeypatch.setattr(tasks.dialog_agent_worker, "delay", Mock())
+    from app.services import voice_completion_service
+
     finalize = Mock()
-    monkeypatch.setattr(tasks, "_finalize_voice_assessment", finalize)
+    monkeypatch.setattr(
+        voice_completion_service,
+        "mark_voice_assessment_completed",
+        finalize,
+    )
 
     result = extraction_agent_worker.run(
         "SESS-VOICE",

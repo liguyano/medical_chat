@@ -105,6 +105,7 @@ class VoiceSession:
     generations: dict[str, VoiceGeneration] = field(default_factory=dict)
     active_response_ids: set[str] = field(default_factory=set)
     suppressed_response_ids: set[str] = field(default_factory=set)
+    pending_tool_responses: int = 0
     receive_task: Any | None = None
     close_task: Any | None = None
     closed: bool = False
@@ -327,6 +328,8 @@ class VoiceGateway:
             return
         if event_type == "response.created":
             response = event.get("response") or {}
+            if session.pending_tool_responses > 0:
+                session.pending_tool_responses -= 1
             session.responding = True
             session.audio_suppressed = False
             session.current_response_id = str(response.get("id") or "") or None
@@ -705,8 +708,11 @@ class VoiceGateway:
             return
         if response_id and generation.response_id and response_id != generation.response_id:
             return
-        if generation.tool_call_only and not generation.text and not generation.all_audio:
+        if not generation.text and not generation.all_audio:
             self._remove_generation(session, generation)
+            session.response_requested = False
+            if not session.closed:
+                await self._broadcast_state(session, "listening")
             return
         generation.completed = True
         await self._flush_audio_segment(session, generation)
@@ -760,7 +766,29 @@ class VoiceGateway:
             )
         self._remove_generation(session, generation)
         session.response_requested = False
-        await self._broadcast_state(session, "listening")
+        if not session.responding and session.pending_tool_responses == 0:
+            await self._broadcast_json(
+                session,
+                {
+                    "type": "response_completed",
+                    "response_id": generation.response_id,
+                },
+            )
+            from app.services.voice_completion_service import (
+                mark_voice_response_completed,
+            )
+
+            await asyncio.to_thread(
+                mark_voice_response_completed,
+                session_id=session.session_no,
+                task_id=session.task_id,
+                response_turn=generation.turn_no,
+                response_id=generation.response_id,
+                generation_id=generation.generation_id,
+                redis=session.redis,
+            )
+        if not session.closed:
+            await self._broadcast_state(session, "listening")
 
     async def _cancel_generation(
         self,
@@ -861,6 +889,7 @@ class VoiceGateway:
             publisher=session.publisher,
         )
         await session.client.send_tool_result(call_id, result)
+        session.pending_tool_responses += 1
         await session.client.create_response()
 
     async def _persist_patient_audio(self, session: VoiceSession) -> None:

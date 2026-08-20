@@ -50,11 +50,18 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - API 模式语音页面使用 Qwen Realtime 的后端网关；患者/AI 音频完成索引通过
   `applyRealtimeEvent.ts` 绑定到 `InteractionMessage.audioUrl`，统一由 `ChatBubble`
   的受保护 WAV 播放控件回放，医护监控页与患者页共享该事件适配逻辑。
+- 语音评估收到 `task_status_updated` 后，患者端必须先等待当前 PCM 播放队列排空，
+  且收到 Voice Gateway 的 `response_completed` 控制标记，再关闭麦克风和 WebSocket、
+  显示完成提示并移除输入控件；`response.done` 不等于浏览器已播报完成。语音模式必须
+  提供独立“关闭语音”按钮，主动关闭后保留文字输入能力。
 - 前端单元测试位于 `frontend/tests/`，使用 Vitest；涉及适配器变更时至少覆盖 DTO 映射、事件解析和传输边界。
 - 护士监控页的逐条 AI 质评通过 `CareRepository` 调用 `/api/rating`，整体质量评价通过 `/api/quality-reviews`；Mock 模式继续使用 Zustand sessionStorage，不得把本地保存描述为后端已入库。
 - 结构化答案的 `selectedOptions` 是内部选项编码，只用于审计；患者端和医护端必须通过 `displayValue` / `selectedOptionLabels` 展示目标量表真实值，禁止把 `option_3` 等编码直接暴露给用户。
 - API 模式进入医护监控详情页时必须刷新最新任务详情，使用后端住院号、床位、科室、性别年龄、入院时间和在院状态构造顶部患者摘要，不能复用 sessionStorage 中的旧任务快照。
 - API 模式医护登录成功后必须调用 `CareRepository.listMyTasks()` 刷新当前护士负责的历史任务，并替换 `useTaskStore` 中的本地快照；监控中心、任务管理和工作台不得仅依赖 sessionStorage。
+- API 模式患者登录及患者任务页刷新必须调用
+  `CareRepository.listPatientTasks()` → `/api/patients/me/tasks`，只依赖患者 HttpOnly
+  Cookie；患者端禁止调用医护专用 `/api/tasks`，也不得依赖旧浏览器的医护登录缓存。
 
 ## 常用检查命令
 

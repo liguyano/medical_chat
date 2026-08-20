@@ -193,6 +193,11 @@ export class MockCareRepository implements CareRepository {
     await wait(signal);
   }
 
+  async listPatientTasks(signal?: AbortSignal) {
+    await wait(signal);
+    return mockTasks;
+  }
+
   async listMyTasks(signal?: AbortSignal) {
     await wait(signal);
     return mockTasks;
