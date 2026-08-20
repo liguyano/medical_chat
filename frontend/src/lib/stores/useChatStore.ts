@@ -65,6 +65,7 @@ interface ChatStore {
   setFeedback: (taskId: string, feedback: MessageFeedback[]) => void;
   saveFeedback: (feedback: MessageFeedback) => void;
   setStreaming: (taskId: string | null) => void;
+  clearTaskDomainState: (taskId: string) => void;
   clearSession: (taskId: string) => void;
   resetDemoData: () => void;
 }
@@ -369,6 +370,26 @@ export const useChatStore = create<ChatStore>()(
         })),
 
       setStreaming: (taskId) => set({ streamingTaskId: taskId }),
+
+      clearTaskDomainState: (taskId) =>
+        set((state) => {
+          const events = { ...state.events };
+          const educationCards = { ...state.educationCards };
+          const consentRequests = { ...state.consentRequests };
+          delete events[taskId];
+          delete educationCards[taskId];
+          delete consentRequests[taskId];
+          return {
+            events,
+            educationCards,
+            consentRequests,
+            nurseAssistanceRequests: Object.fromEntries(
+              Object.entries(state.nurseAssistanceRequests).filter(
+                ([, request]) => request.taskId !== taskId
+              )
+            ),
+          };
+        }),
 
       clearSession: (taskId) =>
         set((state) => {

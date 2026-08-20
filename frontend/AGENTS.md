@@ -28,6 +28,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `/api/auth/staff/login` 并使用独立 HttpOnly Cookie；退出时同步调用后端清理会话。
 - `src/lib/api` 保存后端 DTO、HTTP Client 和领域模型映射。后端数字 ID 必须在映射边界转换为字符串。
 - 患者和护士的文本、任务状态、字段抽取、宣教与人工介入事件通过 `src/lib/transports/sseClient.ts` 接收，并由 `applyRealtimeEvent.ts` 幂等写入 Zustand Store。
+- SSE 信封必须区分领域 `event_id` 与传输 `stream_id`：业务卡片和提交接口使用
+  `event_id`，断线续读和传输去重使用 `stream_id`。API 模式加载数据库事件快照前必须
+  清除当前任务在 `sessionStorage` 中残留的旧领域卡片，再以快照重建。
 - `education_triggered` 必须渲染医学宣教原文卡片并按 `spoken_content` 自动播报；
   患者确认阅读后通过仓储调用后端持久化 `education_status_updated`，医护回放显示确认状态和时间；
   `consent_triggered` 必须在对话内渲染强制条款、播放和签名组件；`handoff_requested`

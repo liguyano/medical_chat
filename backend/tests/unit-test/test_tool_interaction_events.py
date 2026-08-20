@@ -11,6 +11,7 @@ from app.schemas.events import (
 )
 from app.services.sse_service import format_sse_event
 from app.services.tool_interaction_service import (
+    _find_education_acknowledgement,
     _interaction_event_payload,
     _resolve_pending_handoff_rows,
 )
@@ -55,6 +56,8 @@ def test_education_event_maps_to_frontend_payload():
     assert envelope["payload"]["auto_play"] is True
     assert envelope["payload"]["tool_name"] == "get_education_material"
     assert envelope["payload"]["tool_result"]["material_id"] == "EDU-1"
+    assert envelope["event_id"] == event.event_id
+    assert envelope["stream_id"] == "1-0"
 
 
 def test_education_status_event_keeps_acknowledged_time():
@@ -256,3 +259,32 @@ def test_interaction_event_payload_keeps_resolved_event_handled_at():
     assert payload["handled_at"] == "2026-08-19T12:00:00+00:00"
     assert payload["handled_status"] == "resolved"
     assert payload["handled_by"] == "1"
+
+
+def test_find_education_acknowledgement_is_idempotent():
+    """同一来源事件和材料已经确认时应返回原状态事件。"""
+    expected = SimpleNamespace(
+        event_payload={
+            "source_event_id": "EDU-EVENT-1",
+            "material_id": "EDU-1",
+            "acknowledged": True,
+        }
+    )
+    rows = [
+        SimpleNamespace(
+            event_payload={
+                "source_event_id": "EDU-EVENT-OTHER",
+                "material_id": "EDU-1",
+                "acknowledged": True,
+            }
+        ),
+        expected,
+    ]
+
+    result = _find_education_acknowledgement(
+        rows,
+        source_event_id="EDU-EVENT-1",
+        material_id="EDU-1",
+    )
+
+    assert result is expected

@@ -195,6 +195,9 @@ from medagent.configs.agent_config import get_agent_config
 - REST 统一使用 `{code,message,data}`；前端可见的核心 SSE 事件为
   `assistant_text_delta`、`user_transcript_completed`、`extraction_updated`、
   `progress_updated` 和 `task_status_updated`。`dialog_turn` 只供 Agent 内部协作。
+- SSE 信封中的 `event_id` 是持久化领域事件编号，用于宣教确认、知情同意和呼叫处理等
+  业务关联；`stream_id` 是 Redis Stream 游标，只用于断线续读。SSE 的 `id:` 行继续使用
+  Redis Stream ID，禁止用传输游标覆盖领域事件编号。
 - Dialog 原生工具结果必须转换为独立业务事件并保存到 `interaction_event`：
   `education_triggered`、`consent_triggered`、`handoff_requested`；通用
   `tool_call` 仅用于内部审计，不得直接推给患者端。模型漏掉关键词规则要求的工具时，

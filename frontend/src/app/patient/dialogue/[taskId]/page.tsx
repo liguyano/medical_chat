@@ -327,6 +327,9 @@ export default function PatientDialoguePage() {
     }
 
     loadedSnapshotKeyRef.current = dialogueSnapshotKey;
+    // API 快照是当前任务领域事件的事实来源，先移除 sessionStorage 中
+    // 可能残留的旧卡片，避免提交已经不存在的领域事件 ID。
+    useChatStore.getState().clearTaskDomainState(taskId);
     const controller = new AbortController();
     void careRepository
       .getDialogueSnapshot(currentTask, controller.signal)

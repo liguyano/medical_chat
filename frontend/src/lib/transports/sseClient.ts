@@ -65,6 +65,10 @@ export function parseSseEnvelope(
   ) as SseEventType;
   return {
     event_id: String(parsed.event_id ?? fallbackEventId ?? ''),
+    stream_id:
+      parsed.stream_id === undefined && fallbackEventId === undefined
+        ? undefined
+        : String(parsed.stream_id ?? fallbackEventId),
     event_type: eventType,
     task_id: String(parsed.task_id ?? ''),
     session_id:
@@ -127,15 +131,17 @@ export class SseClient {
           eventType,
           event.lastEventId
         );
+        const transportEventId =
+          envelope.stream_id || event.lastEventId || envelope.event_id;
         if (
-          envelope.event_id &&
-          this.processedEventIds.has(envelope.event_id)
+          transportEventId &&
+          this.processedEventIds.has(transportEventId)
         ) {
           return;
         }
-        if (envelope.event_id) {
-          this.lastEventId = envelope.event_id;
-          this.processedEventIds.add(envelope.event_id);
+        if (transportEventId) {
+          this.lastEventId = transportEventId;
+          this.processedEventIds.add(transportEventId);
           if (this.processedEventIds.size > 1000) {
             const oldest = this.processedEventIds.values().next().value;
             if (oldest) this.processedEventIds.delete(oldest);

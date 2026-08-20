@@ -39,8 +39,8 @@ from app.schemas.events import (
     HandoffResolvedEvent,
 )
 from app.schemas.interaction_tools import (
-    EducationAcknowledgeRequest,
     ConsentSignRequest,
+    EducationAcknowledgeRequest,
     HandoffRequest,
     HandoffResolveRequest,
 )
@@ -601,6 +601,32 @@ def submit_consent(
     return payload
 
 
+def _find_education_acknowledgement(
+    rows: list[InteractionEventModel],
+    *,
+    source_event_id: str,
+    material_id: str,
+) -> InteractionEventModel | None:
+    """查找同一宣教事件已经保存的确认结果
+    作用：支持浏览器超时重试和重复点击时幂等返回，避免重复写入状态事件。
+    Args:
+        - rows: 当前会话的宣教状态事件，按新到旧排列
+        - source_event_id: 宣教领域事件编号
+        - material_id: 宣教材料编号
+    Return:
+        - 已存在的确认事件；未确认时返回 None
+    """
+    for row in rows:
+        payload = row.event_payload or {}
+        if (
+            str(payload.get("source_event_id") or "") == source_event_id
+            and str(payload.get("material_id") or "") == material_id
+            and bool(payload.get("acknowledged"))
+        ):
+            return row
+    return None
+
+
 def acknowledge_education(
     db: Session,
     task_ref: str,
@@ -631,6 +657,26 @@ def acknowledge_education(
         (material_event.event_payload or {}).get("material_id") or ""
     ) != request.material_id:
         raise AppError(ErrorCode.ERR_COMMON_001, "宣教材料不存在或已失效")
+
+    status_rows = list(
+        db.scalars(
+            select(InteractionEventModel)
+            .where(
+                InteractionEventModel.interaction_session_id == session.id,
+                InteractionEventModel.event_type
+                == EducationStatusUpdatedEvent.model_fields["event_type"].default.value,
+                InteractionEventModel.deleted == 0,
+            )
+            .order_by(InteractionEventModel.id.desc())
+        ).all()
+    )
+    existing_status = _find_education_acknowledgement(
+        status_rows,
+        source_event_id=request.event_id,
+        material_id=request.material_id,
+    )
+    if existing_status is not None:
+        return _interaction_event_payload(existing_status)
 
     acknowledged_at = datetime.now(UTC)
     event = EducationStatusUpdatedEvent(

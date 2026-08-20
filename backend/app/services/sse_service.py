@@ -98,9 +98,14 @@ def format_sse_event(message_id: str, fields: dict[bytes, bytes]) -> dict[str, s
     event_type = str(data.get("event_type", ""))
     event_name = _EVENT_NAME_MAP.get(event_type, "heartbeat")
 
+    # Redis Stream ID 只负责断线续读；领域事件 ID 负责业务对象关联。
+    # 二者不能混用，否则患者确认宣教时会把 Stream ID 提交给数据库事件查询。
+    domain_event_id = str(data.get("event_id") or message_id)
+
     # 构建前端预期的 SseEnvelope 格式
     envelope = {
-        "event_id": message_id,
+        "event_id": domain_event_id,
+        "stream_id": message_id,
         "event_type": event_name,
         "task_id": data.get("task_id", ""),
         "session_id": data.get("session_id"),
