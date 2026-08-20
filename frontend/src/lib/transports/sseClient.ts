@@ -26,6 +26,7 @@ const EVENT_TYPES: SseEventType[] = [
   'session_status',
   'user_transcript_delta',
   'user_transcript_completed',
+  'patient_audio_delta',
   'assistant_message_started',
   'assistant_text_delta',
   'assistant_audio_delta',

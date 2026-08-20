@@ -79,6 +79,12 @@ export class VoiceSocketClient {
 
   constructor(private readonly options: VoiceSocketOptions) {}
 
+  private forwardFrame = (frame: ArrayBuffer) => {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(frame);
+    }
+  };
+
   private setState(state: VoiceConnectionState) {
     this.state = state;
     this.options.onStateChange?.(state);
@@ -104,11 +110,17 @@ export class VoiceSocketClient {
     this.socket = new WebSocket(url);
     this.socket.binaryType = 'arraybuffer';
 
-    await new Promise<void>((resolve, reject) => {
-      if (!this.socket) return reject(new Error('语音连接创建失败'));
-      this.socket.onopen = () => resolve();
-      this.socket.onerror = () => reject(new Error('语音连接失败'));
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        if (!this.socket) return reject(new Error('语音连接创建失败'));
+        this.socket.onopen = () => resolve();
+        this.socket.onerror = () => reject(new Error('语音连接失败'));
+      });
+    } catch (error) {
+      this.socket?.close();
+      this.setState('text_fallback');
+      throw error;
+    }
 
     this.socket.onmessage = (event) => {
       void this.handleMessage(event.data);
@@ -130,11 +142,7 @@ export class VoiceSocketClient {
       channels: 1,
     });
     try {
-      await this.capture.start((frame) => {
-        if (this.socket?.readyState === WebSocket.OPEN) {
-          this.socket.send(frame);
-        }
-      });
+      await this.capture.start(this.forwardFrame);
       this.setState('listening');
     } catch (error) {
       this.setState('text_fallback');
@@ -160,6 +168,14 @@ export class VoiceSocketClient {
     const message = JSON.parse(data) as VoiceServerMessage;
     if (message.type === 'state') {
       this.setState(message.state);
+    } else if (message.type === 'speech_started') {
+      this.player.interrupt();
+      this.setState('listening');
+    } else if (message.type === 'speech_stopped') {
+      this.setState('transcribing');
+    } else if (message.type === 'interrupted') {
+      this.player.interrupt();
+      this.setState('listening');
     } else if (message.type === 'audio') {
       this.setState('speaking');
       await this.player.enqueue(
@@ -186,12 +202,22 @@ export class VoiceSocketClient {
     this.setState('listening');
   }
 
-  pause(): void {
+  async pause(): Promise<void> {
+    await this.capture.stop();
     this.sendControl({ type: 'pause' });
     this.setState('paused');
   }
 
-  resume(): void {
+  async resume(): Promise<void> {
+    try {
+      await this.capture.start(this.forwardFrame);
+    } catch (error) {
+      this.options.onError?.(
+        error instanceof Error ? error.message : '无法恢复麦克风采集'
+      );
+      this.setState('text_fallback');
+      throw error;
+    }
     this.sendControl({ type: 'resume' });
     this.setState('listening');
   }

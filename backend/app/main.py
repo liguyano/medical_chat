@@ -103,6 +103,7 @@ def create_app() -> FastAPI:
         scales,
         sse,
         tasks,
+        voice_dialog,
     )
 
     app.include_router(auth.router)
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(extraction.router)
     app.include_router(quality.router)
     app.include_router(consent.router)
+    app.include_router(voice_dialog.router)
 
     signature_directory = (
         Path(__file__).resolve().parents[1] / "storage" / "consent-signatures"

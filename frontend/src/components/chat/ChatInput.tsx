@@ -15,6 +15,7 @@ interface ChatInputProps {
   placeholder?: string;
   disabled?: boolean;
   isRecording?: boolean;
+  recordingLabel?: string;
 }
 
 export default function ChatInput({
@@ -24,6 +25,7 @@ export default function ChatInput({
   placeholder = '输入消息...',
   disabled = false,
   isRecording = false,
+  recordingLabel = '正在录音...',
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
 
@@ -105,7 +107,7 @@ export default function ChatInput({
       {isRecording && (
         <div className="mt-3 flex items-center justify-center space-x-2 text-danger">
           <div className="w-2 h-2 bg-danger rounded-full animate-pulse" />
-          <span className="text-sm">正在录音...</span>
+          <span className="text-sm">{recordingLabel}</span>
         </div>
       )}
     </div>

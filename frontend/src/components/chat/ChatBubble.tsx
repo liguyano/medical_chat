@@ -4,6 +4,7 @@ import { motion, type Variants } from 'framer-motion';
 import { Badge } from '@/components/shared/Badge';
 import type { InteractionMessage } from '@/lib/types';
 import { formatDateTime } from '@/lib/utils';
+import { runtimeConfig } from '@/lib/runtime/config';
 import {
   UserCircleIcon,
   SparklesIcon,
@@ -28,6 +29,9 @@ export default function ChatBubble({
 }: ChatBubbleProps) {
   const isAI = message.role === 'ai';
   const isPatient = message.role === 'patient';
+  const audioSrc = message.audioUrl
+    ? new URL(message.audioUrl, runtimeConfig.apiBaseUrl).toString()
+    : undefined;
 
   const bubbleVariants: Variants = {
     hidden: { opacity: 0, y: 20, scale: 0.95 },
@@ -95,9 +99,20 @@ export default function ChatBubble({
                 isAI ? 'border-border' : 'border-white/20'
               }`}>
                 <SpeakerWaveIcon className={`w-4 h-4 ${isAI ? 'text-foreground-muted' : 'text-white/80'}`} />
-                <span className={`text-xs ${isAI ? 'text-foreground-muted' : 'text-white/80'}`}>
-                  语音消息
-                </span>
+                {audioSrc ? (
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={audioSrc}
+                    crossOrigin="use-credentials"
+                    className="h-8 min-w-0 max-w-full"
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                ) : (
+                  <span className={`text-xs ${isAI ? 'text-foreground-muted' : 'text-white/80'}`}>
+                    语音消息
+                  </span>
+                )}
               </div>
             )}
 

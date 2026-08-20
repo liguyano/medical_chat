@@ -65,7 +65,6 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
 
 # ==================== Dialog Agent任务 ====================
 
-
 @celery_app.task(name="app.celery_app.tasks.dialog_agent_worker", bind=True)
 def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: dict):
     """Dialog Agent 后台任务
@@ -97,6 +96,7 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
         ensure_worker_runtime()
         model = create_chat_model(model_config)
 
+        # 构造 DialogAgentRunner 实例
         runner = DialogAgentRunner(
             session_id=session_id,
             patient_info=patient_info,
@@ -259,7 +259,12 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
         )
         if result.get("status") == "already_running":
             raise self.retry(countdown=2, max_retries=10)
-        if result.get("assessment_completed"):
+        if result.get("assessment_completed") and task_config.get("interaction_mode") == "voice":
+            _finalize_voice_assessment(
+                session_id=session_id,
+                task_id=task_config.get("task_id"),
+            )
+        elif result.get("assessment_completed"):
             completion_config = {
                 **task_config,
                 "source_message_id": None,
@@ -275,6 +280,60 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
     except Exception as exc:
         logger.exception("[Extraction Agent] Celery任务失败: session=%s", session_id)
         raise self.retry(exc=exc, countdown=10, max_retries=3)
+
+
+def _finalize_voice_assessment(
+    *,
+    session_id: str,
+    task_id: int | str | None,
+) -> None:
+    """Extraction 完成后结束语音会话，不重新派发文本 Dialog Agent。
+
+    语音模型已经输出当前最后一轮播报，结构化答案完整后由 Extraction Agent
+    作为唯一完成事实来源更新数据库并发布任务结束事件。
+    """
+    from sqlalchemy import func, select
+
+    from app.models import base as model_base
+    from app.models.interaction import InteractionMessage, InteractionSession
+    from app.schemas.events import SessionEndEvent
+    from app.services.assessment_progress_service import complete_assessment_session
+    from app.workers.event_publisher import DialogEventPublisher
+
+    if model_base.SessionLocal is None:
+        raise RuntimeError("数据库未初始化")
+    with model_base.SessionLocal() as db:
+        session = db.scalar(
+            select(InteractionSession).where(
+                InteractionSession.session_no == session_id,
+                InteractionSession.deleted == 0,
+            )
+        )
+        if session is None:
+            raise RuntimeError(f"交互会话不存在: {session_id}")
+        was_completed = session.session_status == "completed"
+        progress = complete_assessment_session(db, session_id)
+        total_turns = int(
+            db.scalar(
+                select(func.max(InteractionMessage.turn_no)).where(
+                    InteractionMessage.interaction_session_id == session.id,
+                    InteractionMessage.deleted == 0,
+                )
+            )
+            or 0
+        )
+    if not progress.completed or was_completed:
+        return
+    DialogEventPublisher(session_id).publish(
+        SessionEndEvent(
+            session_id=session_id,
+            task_id=task_id,
+            message_id=None,
+            end_reason="completed",
+            total_turns=total_turns,
+            duration_seconds=0,
+        )
+    )
 
 
 # ==================== 定时任务 ====================

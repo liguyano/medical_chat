@@ -171,6 +171,8 @@ export interface DialogMessageDto {
   intent_type?: string;
   content_text?: string;
   audio_url?: string;
+  asr_text?: string;
+  tts_text?: string;
   occurred_at?: string;
   related_question_ids?: ApiId[];
 }
@@ -277,6 +279,7 @@ export type SseEventType =
   | 'session_status'
   | 'user_transcript_delta'
   | 'user_transcript_completed'
+  | 'patient_audio_delta'
   | 'assistant_message_started'
   | 'assistant_text_delta'
   | 'assistant_audio_delta'
@@ -320,7 +323,19 @@ export type VoiceClientMessage =
 
 export type VoiceServerMessage =
   | { type: 'ready' }
-  | { type: 'state'; state: 'listening' | 'transcribing' | 'thinking' | 'speaking' }
+  | { type: 'mode'; turn_detection: 'server_vad' | 'smart_turn' | 'manual' }
+  | { type: 'speech_started' }
+  | { type: 'speech_stopped' }
+  | { type: 'interrupted' }
+  | {
+      type: 'state';
+      state:
+        | 'listening'
+        | 'transcribing'
+        | 'thinking'
+        | 'speaking'
+        | 'paused';
+    }
   | { type: 'audio'; sequence: number; sample_rate: number; audio_base64: string }
   | { type: 'error'; code?: string; message: string }
   | { type: 'closed' };

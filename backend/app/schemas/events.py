@@ -16,6 +16,7 @@ class EventType(str, Enum):
     DIALOG_TURN = "dialog_turn"  # 对话轮次事件
     DIALOG_TEXT = "dialog_text"  # 文本输出事件
     DIALOG_AUDIO = "dialog_audio"  # 音频输出事件
+    PATIENT_AUDIO = "patient_audio"  # 患者语音已持久化事件
     DIALOG_MESSAGE = "dialog_message"  # AI问诊问题事件（Dialog Agent输出）
     ASSISTANT_MESSAGE_STARTED = "assistant_message_started"  # AI消息开始生成
     PATIENT_ANSWER = "patient_answer"  # 患者答案事件（POST /api/dialog/message输入）
@@ -83,7 +84,28 @@ class DialogAudioEvent(BaseEvent):
     turn_number: int
     audio_url: str  # 音频URL（OSS/本地）
     audio_format: str = "pcm"  # pcm | opus | mp3
+    role: Literal["patient", "assistant"] = "assistant"
+    generation_id: str | None = None
+    segment_no: int = 0
+    sample_rate: int = 24000
+    is_final: bool = False
     duration_ms: int | None = None
+
+
+class PatientAudioEvent(BaseEvent):
+    """患者语音已持久化事件。
+
+    作用：通过 Redis Stream/SSE 通知患者端和医护端，当前轮患者原始语音
+    已经保存，可在历史回放中播放。
+    """
+
+    event_type: EventType = EventType.PATIENT_AUDIO
+    turn_number: int
+    audio_url: str
+    audio_format: str = "pcm_s16le"
+    sample_rate: int = 16000
+    duration_ms: int | None = None
+    message_id: str | None = None
 
 
 class ToolCallEvent(BaseEvent):
@@ -315,6 +337,7 @@ EVENT_TYPE_MAP = {
     EventType.DIALOG_TURN: DialogTurnEvent,
     EventType.DIALOG_TEXT: DialogTextEvent,
     EventType.DIALOG_AUDIO: DialogAudioEvent,
+    EventType.PATIENT_AUDIO: PatientAudioEvent,
     EventType.DIALOG_MESSAGE: DialogMessageEvent,
     EventType.ASSISTANT_MESSAGE_STARTED: AssistantMessageStartedEvent,
     EventType.PATIENT_ANSWER: PatientAnswerEvent,

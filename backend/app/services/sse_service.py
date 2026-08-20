@@ -49,6 +49,7 @@ _EVENT_NAME_MAP: dict[str, str] = {
     # 兼容旧事件（后补）
     EventType.DIALOG_TEXT.value: "assistant_text_delta",
     EventType.DIALOG_AUDIO.value: "assistant_audio_delta",
+    EventType.PATIENT_AUDIO.value: "patient_audio_delta",
     EventType.SESSION_START.value: "session_status",
 }
 
@@ -145,6 +146,27 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "turn_no": data.get("turn_number", 0),
             "question_id": data.get("question_id"),
             "role": "assistant",
+        }
+    elif event_type == EventType.DIALOG_AUDIO.value:
+        return {
+            "audio_url": data.get("audio_url", ""),
+            "audio_format": data.get("audio_format", "pcm"),
+            "role": data.get("role", "assistant"),
+            "turn_no": int(data.get("turn_number", 0)),
+            "generation_id": data.get("generation_id"),
+            "segment_no": int(data.get("segment_no", 0)),
+            "sample_rate": int(data.get("sample_rate", 24000)),
+            "duration_ms": data.get("duration_ms"),
+            "is_final": _as_bool(data.get("is_final"), False),
+        }
+    elif event_type == EventType.PATIENT_AUDIO.value:
+        return {
+            "audio_url": data.get("audio_url", ""),
+            "audio_format": data.get("audio_format", "pcm_s16le"),
+            "role": "patient",
+            "turn_no": int(data.get("turn_number", 0)),
+            "sample_rate": int(data.get("sample_rate", 16000)),
+            "duration_ms": data.get("duration_ms"),
         }
     elif event_type == EventType.ASSISTANT_MESSAGE_STARTED.value:
         return {
