@@ -12,16 +12,15 @@ from typing import Any
 
 from medagent.agents.middlewares import (
     EventPublishMiddleware,
-    KeywordInterceptMiddleware,
     ScheduleConstraintMiddleware,
     TimeoutMiddleware,
 )
-from medagent.agents.service_agent.dialog_agent.tools import execute_tool
 
 from app.managers.agent_state_manager import AsyncAgentStateManager
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.managers.session_timeout_manager import SessionTimeoutManager
 from app.schemas.events import DialogTurnEvent, EventType, ToolCallEvent
+from app.services.dialog_tool_executor import execute_tool
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
 
@@ -143,7 +142,6 @@ def get_runtime_dependencies(session_id: str) -> dict[str, Any]:
 
     return {
         "middlewares": [
-            KeywordInterceptMiddleware(),
             ScheduleConstraintMiddleware(RedisConstraintSource(redis_client)),
             EventPublishMiddleware(session_id, event_sink),
             TimeoutMiddleware(timeout_manager.update_activity),

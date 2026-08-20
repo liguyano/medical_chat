@@ -3,8 +3,8 @@
 from unittest.mock import Mock
 
 import pytest
-from medagent.agents.service_agent.dialog_agent.tools import execute_tool
 
+from app.services.dialog_tool_executor import execute_tool
 from app.utils import redis_client as redis_module
 from app.workers import dialog_agent_runtime as runtime_module
 
@@ -99,4 +99,4 @@ def test_runtime_dependencies_inject_real_tool_executor(monkeypatch):
     assert dependencies["state_store"] is state_store
     assert dependencies["history_store"] is history_store
     assert dependencies["tool_executor"] is execute_tool
-    assert len(dependencies["middlewares"]) == 4
+    assert len(dependencies["middlewares"]) == 3

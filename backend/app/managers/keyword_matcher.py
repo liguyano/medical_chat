@@ -130,7 +130,8 @@ class KeywordMatcher:
 
     def match(self, text: str | None) -> list[MatchResult]:
         """对文本执行匹配
-        作用：精确匹配关键词 + 正则匹配，命中规则按 priority 降序返回。
+        作用：每次从数据库刷新规则后执行关键词 + 正则匹配，保证 Demo 配置中心
+              的修改在 API 与不同 Celery Worker 进程中立即生效。
         Args:
             - text: 待匹配文本（患者输入）
         Return:
@@ -139,7 +140,7 @@ class KeywordMatcher:
         if not text:
             return []
 
-        rules = self.load_rules()
+        rules = self.load_rules(force=True)
         results: list[MatchResult] = []
 
         for rule in rules:

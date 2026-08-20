@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from medagent.agents.service_agent.dialog_agent.prompt import build_system_prompt
-from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS, execute_tool
+from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS
 from sqlalchemy import func, select
 
 from app.configs.app_config import get_app_config
@@ -39,6 +39,7 @@ from app.schemas.events import (
 )
 from app.services.agent_dispatch_service import dispatch_voice_answer_workers
 from app.services.dialog_audio_store import DialogAudioStore
+from app.services.dialog_tool_executor import execute_tool
 from app.services.qwen_realtime_client import QwenRealtimeClient
 from app.services.tool_interaction_service import publish_tool_result
 from app.utils.redis_client import RedisClient, get_redis

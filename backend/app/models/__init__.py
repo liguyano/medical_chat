@@ -17,6 +17,11 @@ from app.models.assessment_template import (
     AssessmentSection,
 )
 from app.models.base import Base, BusinessBaseMixin, get_db, init_db
+from app.models.education import (
+    EducationProgram,
+    EducationProgramVersion,
+    EducationUnit,
+)
 from app.models.interaction import (
     DialogueScript,
     InteractionEvent,
@@ -52,6 +57,9 @@ __all__ = [
     "BusinessBaseMixin",
     "CareTask",
     "DialogueScript",
+    "EducationProgram",
+    "EducationProgramVersion",
+    "EducationUnit",
     "InteractionEvent",
     "InteractionMessage",
     "InteractionMessageFeedback",

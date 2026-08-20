@@ -32,6 +32,9 @@ EXPECTED_TABLES = {
     "quality_review",
     "quality_review_score",
     "staff_account",
+    "education_program",
+    "education_program_version",
+    "education_unit",
 }
 
 OBSOLETE_TABLES = {
@@ -48,7 +51,7 @@ OBSOLETE_TABLES = {
 
 
 def test_quality_review_registers_all_domain_tables():
-    """批次 A 加质量评价与医护账号域应准确注册 27 张领域表。"""
+    """核心、质量评价、医护账号与宣教配置域应准确注册 30 张领域表。"""
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert OBSOLETE_TABLES.isdisjoint(Base.metadata.tables)
 
@@ -67,8 +70,8 @@ def test_all_tables_have_unified_business_columns():
         assert table.c.deleted.server_default is not None
 
 
-def test_all_foreign_keys_resolve_to_batch_a_tables():
-    """所有已声明外键必须能解析到本批次表。"""
+def test_all_foreign_keys_resolve_to_registered_domain_tables():
+    """所有已声明外键必须能解析到已注册领域表。"""
     for table in Base.metadata.sorted_tables:
         for foreign_key in table.foreign_keys:
             assert foreign_key.column.table.name in EXPECTED_TABLES
