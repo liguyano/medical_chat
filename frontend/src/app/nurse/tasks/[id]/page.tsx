@@ -386,6 +386,12 @@ export default function TaskDetailPage() {
                   {task.taskStatus === 'completed' && (
                     <>
                       <Button
+                        onClick={() => router.push(`/nurse/tasks/${task.id}/nursing-plan`)}
+                        className="w-full"
+                      >
+                        查看患者画像与护理计划
+                      </Button>
+                      <Button
                         variant="outline"
                         onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
                         className="w-full"
@@ -400,6 +406,16 @@ export default function TaskDetailPage() {
                         查看AI质量评价
                       </Button>
                     </>
+                  )}
+
+                  {task.taskStatus === 'pending_review' && (
+                    <Button
+                      onClick={() => router.push(`/nurse/tasks/${task.id}/nursing-plan`)}
+                      className="w-full"
+                    >
+                      <ClipboardDocumentCheckIcon className="w-4 h-4 mr-2" />
+                      患者画像与护理计划
+                    </Button>
                   )}
 
                   <Button

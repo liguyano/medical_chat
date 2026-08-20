@@ -11,6 +11,8 @@ import type {
   EducationMaterialConfig,
   InteractionRuleConfig,
   InteractionSession,
+  NursingPlan,
+  NursingPlanUpdate,
   User,
 } from '@/lib/types';
 import type {
@@ -141,6 +143,79 @@ const mockScaleDetails: AssessmentScaleConfigDetail[] = mockScales.map(
     actions: [],
   })
 );
+
+const mockNursingPlans = new Map<string, NursingPlan>();
+
+function buildMockNursingPlan(taskId: string): NursingPlan {
+  const now = new Date().toISOString();
+  return {
+    id: 1,
+    taskId: Number(taskId) || 1,
+    planNo: `PLAN-DEMO-${taskId}`,
+    planStatus: 'ai_draft',
+    riskSummary: '当前为演示草案：建议重点关注跌倒风险、用药过敏信息和患者理解程度。',
+    educationSummary: '用药前核对过敏史，采用短句和回教法确认患者理解。',
+    handoverSummary: '交接班时说明患者配合度、认知状态及需要持续观察的风险点。',
+    generatedBy: 'ai:demo',
+    confirmedBy: null,
+    confirmedAt: null,
+    profile: {
+      id: 1,
+      profileNo: `PROFILE-DEMO-${taskId}`,
+      sourceSubmissionIds: [1],
+      cooperationLevel: 'partial',
+      cognitionLevel: 'clear',
+      selfCareLevel: 'partial_assistance',
+      fallRiskLevel: 'medium',
+      pressureRiskLevel: 'low',
+      nutritionRiskLevel: 'medium',
+      communicationLevel: 'good',
+      educationNeedLevel: 'high',
+      detail: {
+        task_id: Number(taskId) || 1,
+        summary: '患者可正常交流，但需要护士使用通俗语言并重复确认重点。',
+        evidence: ['演示评估结果', '对话理解度观察'],
+      },
+      generatedBy: 'ai:demo',
+      generatedAt: now,
+    },
+    items: [
+      {
+        id: 1,
+        itemType: 'observation',
+        itemCode: 'fall_risk_observation',
+        itemContent: '首次下床及夜间活动时陪同，观察头晕、步态不稳等表现。',
+        sourceType: 'assessment_score',
+        sourceId: 'demo-fall-score',
+        priority: 'high',
+        nurseAction: 'pending',
+        nurseComment: null,
+      },
+      {
+        id: 2,
+        itemType: 'education',
+        itemCode: 'medication_allergy_education',
+        itemContent: '用药前向患者复述过敏药物核对要点，并请患者回述。',
+        sourceType: 'risk_event',
+        sourceId: 'demo-allergy-event',
+        priority: 'medium',
+        nurseAction: 'pending',
+        nurseComment: null,
+      },
+      {
+        id: 3,
+        itemType: 'nursing_measure',
+        itemCode: 'nutrition_follow_up',
+        itemContent: '观察进食量和食欲变化，必要时记录并反馈责任医生。',
+        sourceType: 'assessment_answer',
+        sourceId: 'demo-nutrition-answer',
+        priority: 'low',
+        nurseAction: 'pending',
+        nurseComment: null,
+      },
+    ],
+  };
+}
 
 const MOCK_STAFF_USERS: Record<
   string,
@@ -440,6 +515,77 @@ export class MockCareRepository implements CareRepository {
   ): Promise<CareTask> {
     await wait(signal);
     throw new Error(`Mock任务 ${taskId} 应从本地Store读取`);
+  }
+
+  async getNursingPlan(taskId: string, signal?: AbortSignal) {
+    await wait(signal);
+    const current = mockNursingPlans.get(taskId);
+    return structuredClone(current ?? null);
+  }
+
+  async generateNursingPlan(
+    taskId: string,
+    force = false,
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    if (!force && mockNursingPlans.has(taskId)) {
+      return structuredClone(mockNursingPlans.get(taskId) as NursingPlan);
+    }
+    const plan = buildMockNursingPlan(taskId);
+    mockNursingPlans.set(taskId, plan);
+    return structuredClone(plan);
+  }
+
+  async updateNursingPlan(
+    taskId: string,
+    input: NursingPlanUpdate,
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    const current =
+      mockNursingPlans.get(taskId) ?? buildMockNursingPlan(taskId);
+    const updated: NursingPlan = {
+      ...current,
+      planStatus: 'adjusted',
+      riskSummary: input.riskSummary,
+      educationSummary: input.educationSummary,
+      handoverSummary: input.handoverSummary,
+      items: current.items.map((item) => {
+        const next = input.items.find((candidate) => candidate.id === item.id);
+        return next
+          ? {
+              ...item,
+              itemContent: next.itemContent,
+              priority: next.priority,
+              nurseAction: next.nurseAction,
+              nurseComment: next.nurseComment ?? null,
+            }
+          : item;
+      }),
+    };
+    mockNursingPlans.set(taskId, updated);
+    return structuredClone(updated);
+  }
+
+  async confirmNursingPlan(taskId: string, signal?: AbortSignal) {
+    await wait(signal);
+    const current =
+      mockNursingPlans.get(taskId) ?? buildMockNursingPlan(taskId);
+    if (current.items.some((item) => item.nurseAction === 'pending')) {
+      throw new Error('请先处理全部护理计划明细');
+    }
+    if (current.items.every((item) => item.nurseAction === 'rejected')) {
+      throw new Error('护理计划至少需要保留一条有效建议');
+    }
+    const confirmed: NursingPlan = {
+      ...current,
+      planStatus: 'confirmed',
+      confirmedBy: 1,
+      confirmedAt: new Date().toISOString(),
+    };
+    mockNursingPlans.set(taskId, confirmed);
+    return structuredClone(confirmed);
   }
 
   async getDialogueSnapshot(

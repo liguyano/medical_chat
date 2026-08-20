@@ -13,10 +13,16 @@ from app.api.dependencies import require_patient, require_staff
 from app.models.base import get_db
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
+from app.schemas.assessment_review import AssessmentReviewRequest
 from app.schemas.interaction_tools import (
     EducationAcknowledgeRequest,
     HandoffRequest,
     HandoffResolveRequest,
+)
+from app.schemas.nursing_plan import (
+    NursingPlanDto,
+    NursingPlanGenerateRequest,
+    NursingPlanUpdateRequest,
 )
 from app.schemas.response import ApiResponse, ok
 from app.schemas.task import BackendTaskDto, CreateTaskRequest, CreateTaskResponse
@@ -156,5 +162,123 @@ def acknowledge_education(
             task_ref,
             req,
             patient_id=patient.id,
+        )
+    )
+
+
+@router.get(
+    "/{task_ref}/nursing-plan",
+    response_model=ApiResponse[NursingPlanDto | None],
+    summary="查询患者画像与护理计划",
+)
+def get_nursing_plan(
+    task_ref: str,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """查询任务最近一次患者画像和护理计划。"""
+    from app.services import nursing_plan_service
+
+    return ok(
+        nursing_plan_service.get_nursing_plan(
+            db,
+            task_ref,
+            staff_id=staff.id,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/review",
+    response_model=ApiResponse[dict],
+    summary="保存护士评估复核结果",
+)
+def submit_assessment_review(
+    task_ref: str,
+    req: AssessmentReviewRequest,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """保存护士独立结果、最终结果和差异原因。"""
+    from app.services import assessment_review_service
+
+    return ok(
+        assessment_review_service.submit_assessment_review(
+            db,
+            task_ref,
+            req,
+            staff_id=staff.id,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/nursing-plan/generate",
+    response_model=ApiResponse[NursingPlanDto],
+    summary="生成或重新生成护理计划草案",
+)
+async def generate_nursing_plan(
+    task_ref: str,
+    req: NursingPlanGenerateRequest,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """使用真实模型生成患者画像和护理计划 AI 草案。"""
+    from app.services import nursing_plan_service
+
+    return ok(
+        await nursing_plan_service.generate_nursing_plan(
+            db,
+            task_ref,
+            staff_id=staff.id,
+            force=req.force,
+        )
+    )
+
+
+@router.put(
+    "/{task_ref}/nursing-plan",
+    response_model=ApiResponse[NursingPlanDto],
+    summary="编辑护理计划草案",
+)
+def update_nursing_plan(
+    task_ref: str,
+    req: NursingPlanUpdateRequest,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """保存护士对护理计划摘要和明细的编辑与处置。"""
+    from app.services import nursing_plan_service
+
+    return ok(
+        nursing_plan_service.update_nursing_plan(
+            db,
+            task_ref,
+            req,
+            staff_id=staff.id,
+            operator=staff.staff_no,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/nursing-plan/confirm",
+    response_model=ApiResponse[NursingPlanDto],
+    summary="确认护理计划",
+)
+def confirm_nursing_plan(
+    task_ref: str,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """由责任护士确认最终护理指导方案。"""
+    from app.services import nursing_plan_service
+
+    return ok(
+        nursing_plan_service.confirm_nursing_plan(
+            db,
+            task_ref,
+            staff_id=staff.id,
+            operator=staff.staff_no,
         )
     )

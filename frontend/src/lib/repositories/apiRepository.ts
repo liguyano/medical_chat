@@ -9,6 +9,7 @@ import type {
   InteractionRuleConfigDto,
   InteractionRuleMatchDto,
   MessageRatingListResponse,
+  NursingPlanDto,
   PatientLoginResponse,
   QualityReviewDto,
   AssessmentScaleConfigSummaryDto,
@@ -36,6 +37,8 @@ import type {
   EducationMaterialConfig,
   InteractionRuleConfig,
   InteractionRuleMatch,
+  NursingPlan,
+  NursingPlanUpdate,
 } from '@/lib/types';
 import type {
   CareRepository,
@@ -120,6 +123,59 @@ function mapScaleConfigSummary(
     optionCount: item.option_count,
     ruleCount: item.rule_count,
     actionCount: item.action_count,
+  };
+}
+
+function mapNursingPlan(item: NursingPlanDto): NursingPlan {
+  return {
+    id: Number(item.id),
+    taskId: Number(item.task_id),
+    planNo: item.plan_no,
+    planStatus: item.plan_status,
+    riskSummary: item.risk_summary,
+    educationSummary: item.education_summary,
+    handoverSummary: item.handover_summary,
+    generatedBy: item.generated_by,
+    confirmedBy:
+      item.confirmed_by === null || item.confirmed_by === undefined
+        ? null
+        : Number(item.confirmed_by),
+    confirmedAt: item.confirmed_at ?? null,
+    profile: {
+      id: Number(item.profile.id),
+      profileNo: item.profile.profile_no,
+      sourceSubmissionIds: item.profile.source_submission_ids.map(Number),
+      cooperationLevel: item.profile.cooperation_level,
+      cognitionLevel: item.profile.cognition_level,
+      selfCareLevel: item.profile.self_care_level,
+      fallRiskLevel: item.profile.fall_risk_level,
+      pressureRiskLevel: item.profile.pressure_risk_level,
+      nutritionRiskLevel: item.profile.nutrition_risk_level,
+      communicationLevel: item.profile.communication_level,
+      educationNeedLevel: item.profile.education_need_level,
+      detail: item.profile.profile_detail,
+      generatedBy: item.profile.generated_by,
+      generatedAt: item.profile.generated_at,
+    },
+    items: item.items.map((planItem) => ({
+      id: Number(planItem.id),
+      itemType: planItem.item_type,
+      itemCode: planItem.item_code,
+      itemContent: planItem.item_content,
+      sourceType: planItem.source_type,
+      sourceId: planItem.source_id ?? null,
+      priority:
+        planItem.priority === 'high' || planItem.priority === 'low'
+          ? planItem.priority
+          : 'medium',
+      nurseAction:
+        planItem.nurse_action === 'accepted' ||
+        planItem.nurse_action === 'modified' ||
+        planItem.nurse_action === 'rejected'
+          ? planItem.nurse_action
+          : 'pending',
+      nurseComment: planItem.nurse_comment ?? null,
+    })),
   };
 }
 
@@ -374,6 +430,67 @@ export class ApiCareRepository implements CareRepository {
       { signal }
     );
     return mapTaskDto(response);
+  }
+
+  async getNursingPlan(taskId: string, signal?: AbortSignal) {
+    const response = await apiRequest<NursingPlanDto | null>(
+      `/api/tasks/${encodeURIComponent(taskId)}/nursing-plan`,
+      { signal }
+    );
+    return response ? mapNursingPlan(response) : null;
+  }
+
+  async generateNursingPlan(
+    taskId: string,
+    force = false,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<NursingPlanDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/nursing-plan/generate`,
+      {
+        method: 'POST',
+        body: { force },
+        signal,
+        // 真实模型结构化生成通常需要几十秒，不能沿用普通接口的短超时。
+        timeoutMs: 120_000,
+      }
+    );
+    return mapNursingPlan(response);
+  }
+
+  async updateNursingPlan(
+    taskId: string,
+    input: NursingPlanUpdate,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<NursingPlanDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/nursing-plan`,
+      {
+        method: 'PUT',
+        body: {
+          risk_summary: input.riskSummary,
+          education_summary: input.educationSummary,
+          handover_summary: input.handoverSummary,
+          items: input.items.map((item) => ({
+            id: item.id,
+            item_content: item.itemContent,
+            priority: item.priority,
+            nurse_action: item.nurseAction,
+            nurse_comment: item.nurseComment ?? null,
+          })),
+        },
+        signal,
+      }
+    );
+    return mapNursingPlan(response);
+  }
+
+  async confirmNursingPlan(taskId: string, signal?: AbortSignal) {
+    const response = await apiRequest<NursingPlanDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/nursing-plan/confirm`,
+      { method: 'POST', signal }
+    );
+    return mapNursingPlan(response);
   }
 
   async getDialogueSnapshot(task: CareTask, signal?: AbortSignal) {

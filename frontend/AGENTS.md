@@ -68,6 +68,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `/nurse/config` 通过 `CareRepository` 管理宣教材料、拦截特征字典和评估量表：
   宣教与规则使用结构化表单，量表使用完整 JSON 查看和编辑。API 与 Mock 模式必须保持
   同一接口，页面须等待医护身份就绪后再加载配置，保存后直接生效。
+- `/nurse/tasks/[id]/nursing-plan` 通过 `CareRepository` 查询和生成患者画像与护理计划，
+  支持摘要编辑、计划项接受/修改/拒绝、护士备注和最终确认；API 与 Mock 模式保持同一
+  闭环。真实模型生成接口单独使用 120 秒超时，避免普通请求超时提前中断结果展示。
 
 ## 常用检查命令
 

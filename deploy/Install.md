@@ -115,7 +115,7 @@ Beat 每 30 秒补派因 Worker 重启或任务丢失而未生成下一问的患
 
 ## Step7：真实模型检查
 
-`config.yaml` 中三个 Agent 必须绑定测试语言模型：
+`config.yaml` 中四个 Agent 必须绑定测试语言模型：
 
 ```yaml
 agent_models:
@@ -124,6 +124,8 @@ agent_models:
   schedule_agent:
     language: qwen3.5-flash
   extraction_agent:
+    language: qwen3.5-flash
+  nursing_plan_agent:
     language: qwen3.5-flash
 ```
 

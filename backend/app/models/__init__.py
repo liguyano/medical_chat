@@ -30,6 +30,11 @@ from app.models.interaction import (
     InteractionRule,
     InteractionSession,
 )
+from app.models.nursing_plan import (
+    NursingPlan,
+    NursingPlanItem,
+    PatientProfileSnapshot,
+)
 from app.models.patient_task import CareTask, Patient, PatientEncounter
 from app.models.quality_review import (
     QualityReview,
@@ -65,8 +70,11 @@ __all__ = [
     "InteractionMessageFeedback",
     "InteractionRule",
     "InteractionSession",
+    "NursingPlan",
+    "NursingPlanItem",
     "Patient",
     "PatientEncounter",
+    "PatientProfileSnapshot",
     "QualityReview",
     "QualityReviewDimension",
     "QualityReviewScore",

@@ -99,7 +99,7 @@ export default function NurseReviewPage() {
       await careRepository.submitAssessmentReview(review);
       saveReview(review);
       if (status === 'confirmed') {
-        router.push(`/nurse/quality/${taskId}`);
+        router.push(`/nurse/tasks/${taskId}/nursing-plan`);
       } else {
         router.push(`/nurse/tasks/${taskId}`);
       }

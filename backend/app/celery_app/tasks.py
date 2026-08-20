@@ -286,6 +286,35 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
         raise self.retry(exc=exc, countdown=10, max_retries=3)
 
 
+# ==================== Nursing Plan Agent任务 ====================
+
+
+@celery_app.task(name="app.celery_app.tasks.nursing_plan_worker", bind=True)
+def nursing_plan_worker(self, task_id: int, force: bool = False):
+    """异步生成患者画像和护理计划 AI 草案。"""
+    import asyncio
+
+    from app.celery_app.runtime import ensure_worker_runtime
+    from app.models import base as model_base
+    from app.services.nursing_plan_service import generate_nursing_plan
+
+    try:
+        ensure_worker_runtime()
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        with model_base.SessionLocal() as db:
+            return asyncio.run(
+                generate_nursing_plan(
+                    db,
+                    task_id,
+                    force=force,
+                )
+            ).model_dump(mode="json")
+    except Exception as exc:
+        logger.exception("[Nursing Plan] Celery任务失败: task=%s", task_id)
+        raise self.retry(exc=exc, countdown=15, max_retries=3)
+
+
 # ==================== 定时任务 ====================
 
 

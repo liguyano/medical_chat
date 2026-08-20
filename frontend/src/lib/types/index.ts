@@ -3,6 +3,7 @@
 // ============================================================
 
 export * from './systemConfig';
+export * from './nursingPlan';
 
 // 用户角色
 export type UserRole = 'nurse' | 'patient';
