@@ -38,7 +38,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `docs/后端详细设计方案.md` 的表结构章节仅保留指针，不再作为数据库依据。
 - 智能体运行态存 Redis（TTL），不映射为独立 `agent_states` 表。
 
-当前 ORM 已落地 30 张表，按领域分组：
+当前 ORM 已落地 33 张表，按领域分组：
 - `app/models/staff_account.py` — 医护端登录账号 `staff_account`
 - `app/models/patient_task.py` — `patient` / `patient_encounter` / `care_task`
 - `app/models/assessment_template.py` — 量表配置 7 表
@@ -46,8 +46,9 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `app/models/assessment_execution.py` — 评估执行 6 表
 - `app/models/quality_review.py` — AI 整体质量评价 4 表
 - `app/models/education.py` — 宣教方案、版本与内容单元 3 表
+- `app/models/nursing_plan.py` — 患者画像快照、护理计划与计划明细 3 表
 - Alembic 初始迁移：`26533d4669bd_initial_domain_model_batch_a.py`
-- 当前迁移头：`20260820_demo_config_center.py`
+- 当前迁移头：`20260820_patient_profile_nursing_plan.py`
 
 
 ## 项目架构
@@ -265,4 +266,16 @@ from medagent.configs.agent_config import get_agent_config
   每条患者文本匹配前重新加载当前数据库规则。
 - 量表配置接口返回主档、当前版本、分组、题目、选项、规则和护理措施；Demo 编辑只允许
   更新已有记录，必须保持全部 ID 集合和量表内部关联完整。
+
+## 患者画像与护理计划
+
+- `patient_profile_snapshot` 保存按评估结果生成的时点画像；`nursing_plan` 与
+  `nursing_plan_item` 保存 AI 草案、护士逐项处置和最终确认结果，禁止把 AI 草案直接视为
+  已生效护理计划。
+- 生成证据按 `final_confirmed`、`nurse_independent`、`ai_extracted` 优先级选择，
+  聚合结构化答案、量表得分、风险标签和对话摘要；护士最终复核后强制刷新画像和计划。
+- 护理计划生成模型优先读取 `nursing_plan_agent`，未单独配置时回退
+  `extraction_agent`；结构化生成必须关闭 thinking，并通过 Pydantic JSON 校验。
+- 任务进入 `pending_review` 后异步派发护理计划生成；医护端也可调用同步生成接口。
+  护士确认前必须处理全部计划项，且不得全部拒绝。
 

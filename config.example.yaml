@@ -145,3 +145,6 @@ agent_models:
 
   extraction_agent:
     language: qwen-plus
+
+  nursing_plan_agent:
+    language: qwen-plus  # 患者画像与护理计划结构化生成
