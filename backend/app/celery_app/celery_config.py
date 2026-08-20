@@ -110,6 +110,10 @@ def _build_celery_app() -> Celery:
             "queue": "extraction_queue",
             "routing_key": "extraction",
         },
+        "app.celery_app.tasks.nursing_plan_worker": {
+            "queue": "extraction_queue",
+            "routing_key": "extraction",
+        },
     }
 
     # ==================== Beat定时任务配置 ====================

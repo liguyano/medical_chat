@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -21,6 +22,8 @@ from app.models.assessment_execution import (
 from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -192,4 +195,14 @@ def complete_assessment_session(db: Session, session_no: str) -> AssessmentProgr
         task.completed_at = now
         task.updator = "assessment_progress"
     db.commit()
+    if task is not None:
+        try:
+            from app.celery_app.tasks import nursing_plan_worker
+
+            nursing_plan_worker.delay(task.id, False)
+        except Exception:
+            logger.exception(
+                "护理计划自动生成任务派发失败，不阻塞评估完成: task=%s",
+                task.id,
+            )
     return progress
