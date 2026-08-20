@@ -17,10 +17,16 @@ export interface ApiResponse<T> {
 export interface PatientDto {
   id: ApiId;
   patient_no: string;
+  his_patient_id?: string;
   patient_name: string;
   sex?: string;
   birthday?: string;
   phone?: string;
+  id_card_masked?: string;
+  emergency_contact_name?: string;
+  emergency_contact_relation?: string;
+  emergency_contact_phone?: string;
+  address?: string;
 }
 
 export interface PatientEncounterDto {
@@ -33,14 +39,29 @@ export interface PatientEncounterDto {
   ward_name?: string;
   bed_no?: string;
   admission_time: string;
+  discharge_time?: string;
   encounter_status: string;
   diagnosis_snapshot?: Record<string, unknown>;
+  admission_source?: string;
+  nursing_level?: string;
+  insurance_type?: string;
+  allergy_summary?: string;
 }
 
-export interface InHospitalPatientDto {
+export interface PatientTaskSummaryDto {
+  total: number;
+  pending_review: number;
+  in_progress: number;
+  handoff_required: boolean;
+}
+
+export interface PatientRecordDto {
   patient: PatientDto;
   encounter: PatientEncounterDto;
+  task_summary?: PatientTaskSummaryDto;
 }
+
+export type InHospitalPatientDto = PatientRecordDto;
 
 export interface PatientLoginRequest {
   id_card_no: string;
@@ -375,6 +396,7 @@ export interface ConsentSignRequest {
 export interface HandoffRequest {
   task_id: string;
   reason: string;
+  client_invocation_id?: string;
 }
 
 export type SseEventType =

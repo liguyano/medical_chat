@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import SignaturePad from '@/components/consent/SignaturePad';
@@ -10,6 +10,7 @@ import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { careRepository } from '@/lib/repositories';
+import { createClientInvocationId } from '@/lib/clientInvocation';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
@@ -70,6 +71,7 @@ export default function PatientConsentPage() {
   const [signatureData, setSignatureData] = useState(savedConsent?.signatureData);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const handoffSubmittingRef = useRef(false);
 
   const completedCount = clauses.filter((clause) => clause.confirmed).length;
   const currentIndex = Math.min(
@@ -113,6 +115,8 @@ export default function PatientConsentPage() {
   };
 
   const needExplanation = async () => {
+    if (handoffSubmittingRef.current) return;
+    handoffSubmittingRef.current = true;
     const reason = `患者对知情同意条款“${current.clauseName}”表示不理解`;
     const nextClauses = clauses.map((item) =>
       item.id === current.id
@@ -128,7 +132,10 @@ export default function PatientConsentPage() {
     };
     setSubmitting(true);
     try {
-      const response = await careRepository.requestHandoff(taskId, reason);
+      const response = await careRepository.requestHandoff(taskId, reason, {
+        requestedAction: 'explain_consent',
+        clientInvocationId: createClientInvocationId('patient-handoff'),
+      });
       applyRealtimeEvent(
         toHandoffSseEnvelope(response, {
           taskId,
@@ -147,6 +154,7 @@ export default function PatientConsentPage() {
           : '通知护士失败，请重试'
       );
     } finally {
+      handoffSubmittingRef.current = false;
       setSubmitting(false);
     }
   };

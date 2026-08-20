@@ -7,6 +7,7 @@ import type {
   DialogMessageDto,
   ExtractedFieldDto,
   InHospitalPatientDto,
+  PatientRecordDto,
   MessageRatingDto,
   PatientLoginResponse,
   QualityReviewDto,
@@ -229,12 +230,20 @@ function calculateAge(birthday?: string): number {
 export function mapInHospitalPatient(dto: InHospitalPatientDto): {
   patient: Patient;
   encounter: PatientEncounter;
+  taskSummary?: {
+    total: number;
+    pendingReview: number;
+    inProgress: number;
+    handoffRequired: boolean;
+  };
 } {
   const patientId = id(dto.patient.id);
   const diagnosis = dto.encounter.diagnosis_snapshot;
   const diagnosisText =
     typeof diagnosis?.primary_diagnosis === 'string'
       ? diagnosis.primary_diagnosis
+      : typeof diagnosis?.primary === 'string'
+        ? diagnosis.primary
       : typeof diagnosis?.diagnosis === 'string'
         ? diagnosis.diagnosis
         : '';
@@ -242,6 +251,7 @@ export function mapInHospitalPatient(dto: InHospitalPatientDto): {
     patient: {
       id: patientId,
       patientNo: dto.patient.patient_no,
+      hisPatientId: dto.patient.his_patient_id,
       name: dto.patient.patient_name,
       gender:
         dto.patient.sex === '女'
@@ -250,25 +260,53 @@ export function mapInHospitalPatient(dto: InHospitalPatientDto): {
             ? 'male'
             : 'other',
       age: calculateAge(dto.patient.birthday),
+      birthday: dto.patient.birthday,
+      idCard: dto.patient.id_card_masked,
       phone: dto.patient.phone,
+      emergencyContactName: dto.patient.emergency_contact_name,
+      emergencyContactRelation: dto.patient.emergency_contact_relation,
+      emergencyContactPhone: dto.patient.emergency_contact_phone,
+      address: dto.patient.address,
     },
     encounter: {
       id: id(dto.encounter.id),
       patientId,
       encounterNo: dto.encounter.encounter_no,
       inpatientNo: dto.encounter.inpatient_no ?? dto.encounter.encounter_no,
+      departmentCode: dto.encounter.department_code,
       department: dto.encounter.department_name ?? '',
       ward: dto.encounter.ward_name ?? '',
       bedNo: dto.encounter.bed_no ?? '',
       admissionDate: dto.encounter.admission_time,
+      dischargeDate: dto.encounter.discharge_time,
       diagnosis: diagnosisText,
+      diagnosisSnapshot: diagnosis,
       encounterStatus:
-        dto.encounter.encounter_status === '在院'
-          ? 'in_hospital'
-          : 'discharged',
+        dto.encounter.encounter_status === '待入院'
+          ? 'pending_admission'
+          : dto.encounter.encounter_status === '在院'
+            ? 'in_hospital'
+            : dto.encounter.encounter_status === '取消'
+              ? 'cancelled'
+              : 'discharged',
+      admissionSource: dto.encounter.admission_source,
+      nursingLevel: dto.encounter.nursing_level,
+      insuranceType: dto.encounter.insurance_type,
+      allergySummary: dto.encounter.allergy_summary,
     },
+    taskSummary: dto.task_summary
+      ? {
+          total: dto.task_summary.total,
+          pendingReview: dto.task_summary.pending_review,
+          inProgress: dto.task_summary.in_progress,
+          handoffRequired: dto.task_summary.handoff_required,
+        }
+      : undefined,
   };
 }
+
+export const mapPatientRecord = (dto: PatientRecordDto) =>
+  mapInHospitalPatient(dto);
 
 export function mapPatientPortal(response: PatientLoginResponse): {
   patient: Patient;

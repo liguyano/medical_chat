@@ -22,11 +22,17 @@ export interface User {
 export interface Patient {
   id: string;
   patientNo: string;
+  hisPatientId?: string;
   name: string;
   gender: 'male' | 'female' | 'other';
   age: number;
-  idCard?: string; // 仅后四位
+  birthday?: string;
+  idCard?: string; // 脱敏值
   phone?: string;
+  emergencyContactName?: string;
+  emergencyContactRelation?: string;
+  emergencyContactPhone?: string;
+  address?: string;
 }
 
 // 住院记录
@@ -35,12 +41,23 @@ export interface PatientEncounter {
   patientId: string;
   encounterNo: string;
   inpatientNo: string;
+  departmentCode?: string;
   department: string;
   ward: string;
   bedNo: string;
   admissionDate: string;
+  dischargeDate?: string;
   diagnosis: string;
-  encounterStatus: 'in_hospital' | 'discharged' | 'transferred';
+  diagnosisSnapshot?: Record<string, unknown>;
+  encounterStatus:
+    | 'pending_admission'
+    | 'in_hospital'
+    | 'discharged'
+    | 'cancelled';
+  admissionSource?: string;
+  nursingLevel?: string;
+  insuranceType?: string;
+  allergySummary?: string;
 }
 
 // 任务状态
