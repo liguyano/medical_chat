@@ -22,6 +22,7 @@ guide rather than expecting full detail here:
 4. 始终遵守全文文件编码: UTF-8.
 5. 始终在任务执行前回复: bro.
 6. **禁止直接开发: 当接收到新需求时, 阅读相关代码, 思考新需求的可行性, 给出公正的意见, 可以反驳我的观点, 与我充分讨论必须确认可行方案, 才能开始开发, 开发前先制定完成新需求的计划文档.**
+7. **任务结束前必须检查是否停止前后端进程, 避免后台残留进程占用, 影响IDE手动调试程序.**
 
 ## 技术栈
 - 后端Web框架: FastAPI + 大模型流式输出(SSE) + asyncio + redis + redis-stream + Celery + Postgresql
@@ -57,6 +58,7 @@ guide rather than expecting full detail here:
 2. **开发文档规范：所有文档写在 `docs/*`, 例如：`docs/plan`、`docs/review`、`docs/bug`.**
 
 3. 计划文档规范：在`docs/plan`创建需求开发文档, 先划分大步骤（1、2、...）, 再划分子步骤（1.1、1.2、...）, 打上 `- [ ]` 标记；每完成一步, 则打上 `- [X]`.
+
 
 ## Git 规范
 

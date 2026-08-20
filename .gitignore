@@ -20,6 +20,8 @@ backend/logs/
 frontend/logs/
 backend/storage/consent-signatures/*
 !backend/storage/consent-signatures/.gitkeep
+backend/storage/
+
 
 # 医疗资料
 docs/文档
