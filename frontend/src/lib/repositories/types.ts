@@ -20,6 +20,8 @@ import type {
   InteractionRuleConfig,
   InteractionRuleMatch,
   InteractionRuleUpdate,
+  NursingPlan,
+  NursingPlanUpdate,
   User,
 } from '@/lib/types';
 
@@ -120,6 +122,24 @@ export interface CareRepository {
   listMyTasks(signal?: AbortSignal): Promise<CareTask[]>;
   createTask(input: CreateTaskInput, signal?: AbortSignal): Promise<CareTask>;
   getTask(taskId: string, signal?: AbortSignal): Promise<CareTask>;
+  getNursingPlan(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<NursingPlan | null>;
+  generateNursingPlan(
+    taskId: string,
+    force?: boolean,
+    signal?: AbortSignal
+  ): Promise<NursingPlan>;
+  updateNursingPlan(
+    taskId: string,
+    input: NursingPlanUpdate,
+    signal?: AbortSignal
+  ): Promise<NursingPlan>;
+  confirmNursingPlan(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<NursingPlan>;
   getDialogueSnapshot(
     task: CareTask,
     signal?: AbortSignal

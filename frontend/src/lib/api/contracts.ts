@@ -188,6 +188,50 @@ export interface BackendTaskDto {
   completed_at?: string;
 }
 
+export interface PatientProfileDto {
+  id: ApiId;
+  profile_no: string;
+  source_submission_ids: ApiId[];
+  cooperation_level: string;
+  cognition_level: string;
+  self_care_level: string;
+  fall_risk_level: string;
+  pressure_risk_level: string;
+  nutrition_risk_level: string;
+  communication_level: string;
+  education_need_level: string;
+  profile_detail: Record<string, unknown>;
+  generated_by: string;
+  generated_at: string;
+}
+
+export interface NursingPlanItemDto {
+  id: ApiId;
+  item_type: string;
+  item_code: string;
+  item_content: string;
+  source_type: string;
+  source_id?: string | null;
+  priority: 'low' | 'medium' | 'high' | string;
+  nurse_action: 'pending' | 'accepted' | 'modified' | 'rejected' | string;
+  nurse_comment?: string | null;
+}
+
+export interface NursingPlanDto {
+  id: ApiId;
+  task_id: ApiId;
+  plan_no: string;
+  plan_status: string;
+  risk_summary: string;
+  education_summary: string;
+  handover_summary: string;
+  generated_by: string;
+  confirmed_by?: ApiId | null;
+  confirmed_at?: string | null;
+  profile: PatientProfileDto;
+  items: NursingPlanItemDto[];
+}
+
 export interface CreateTaskRequest {
   patient_id: number;
   encounter_id: number;
