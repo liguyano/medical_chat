@@ -33,3 +33,29 @@ def test_audio_index_sse_payload_keeps_turn_number_and_playback_metadata():
     assert payload["audio_format"] == "wav"
     assert payload["sample_rate"] == 24000
     assert payload["is_final"] is True
+
+
+def test_sse_envelope_separates_domain_event_id_from_stream_cursor():
+    """业务关联使用领域事件 ID，断线续读保留 Redis Stream ID。"""
+    event = format_sse_event(
+        "1787205471545-0",
+        {
+            b"event_id": b"EDU-EVENT-1",
+            b"event_type": b"education_triggered",
+            b"task_id": b"112",
+            b"session_id": b"SESS-1",
+            b"material_id": b"EDU-TOBACCO-V1-L2",
+            b"category": b"tobacco",
+            b"level": b"2",
+            b"document_version": b"1.0",
+            b"title": "戒烟宣教".encode(),
+            b"original_content": "原文".encode(),
+            b"patient_content": "通俗文本".encode(),
+            b"spoken_content": "播报文本".encode(),
+        },
+    )
+    envelope = json.loads(event["data"])
+
+    assert event["id"] == "1787205471545-0"
+    assert envelope["event_id"] == "EDU-EVENT-1"
+    assert envelope["stream_id"] == "1787205471545-0"

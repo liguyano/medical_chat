@@ -56,4 +56,38 @@ describe('患者对话 Store', () => {
 
     expect(useChatStore.getState().streamingTaskId).toBeNull();
   });
+
+  it('加载 API 快照前只清除当前任务的陈旧领域卡片', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const store = useChatStore.getState();
+    const card = (taskId: string, id: string) => ({
+      id,
+      taskId,
+      materialId: `MATERIAL-${id}`,
+      category: 'tobacco',
+      title: '戒烟宣教',
+      documentVersion: '1.0',
+      originalContent: '原文',
+      patientContent: '通俗文本',
+      spokenContent: '播报文本',
+      priority: 'medium' as const,
+      requiresAcknowledgement: true,
+      autoPlay: true,
+      acknowledged: false,
+      occurredAt: '2026-08-20T10:00:00Z',
+    });
+    store.upsertEducationCard('112', card('112', 'OLD-STREAM-ID'));
+    store.upsertEducationCard('113', card('113', 'DOMAIN-EVENT-2'));
+
+    useChatStore.getState().clearTaskDomainState('112');
+
+    expect(useChatStore.getState().educationCards['112']).toBeUndefined();
+    expect(useChatStore.getState().educationCards['113']).toHaveLength(1);
+  });
 });

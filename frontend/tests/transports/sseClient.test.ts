@@ -5,7 +5,8 @@ describe('SSE envelope parser', () => {
   it('解析统一事件信封', () => {
     const event = parseSseEnvelope(
       JSON.stringify({
-        event_id: '1723-0',
+        event_id: 'DOMAIN-EVENT-1',
+        stream_id: '1723-0',
         event_type: 'assistant_text_delta',
         task_id: 1,
         session_id: 2,
@@ -14,7 +15,8 @@ describe('SSE envelope parser', () => {
         payload: { delta: '您好' },
       })
     );
-    expect(event.event_id).toBe('1723-0');
+    expect(event.event_id).toBe('DOMAIN-EVENT-1');
+    expect(event.stream_id).toBe('1723-0');
     expect(event.task_id).toBe('1');
     expect(event.session_id).toBe('2');
     expect(event.payload.delta).toBe('您好');
@@ -32,6 +34,7 @@ describe('SSE envelope parser', () => {
     );
     expect(event.event_type).toBe('progress_updated');
     expect(event.event_id).toBe('1724-0');
+    expect(event.stream_id).toBe('1724-0');
     expect(event.payload.current).toBe(3);
   });
 });

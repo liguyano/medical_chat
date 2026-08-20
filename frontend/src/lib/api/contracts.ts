@@ -298,6 +298,7 @@ export type SseEventType =
 
 export interface SseEnvelope<TPayload = Record<string, unknown>> {
   event_id: string;
+  stream_id?: string;
   event_type: SseEventType;
   task_id: string;
   session_id?: string;
