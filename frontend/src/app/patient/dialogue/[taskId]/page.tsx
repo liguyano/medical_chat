@@ -260,6 +260,7 @@ export default function PatientDialoguePage() {
     useState<string | null>(null);
   const [editingAnswerId, setEditingAnswerId] = useState<string | null>(null);
   const [correction, setCorrection] = useState('');
+  const [manualInterventionReason, setManualInterventionReason] = useState('');
 
   const dialogueSnapshotKey = task
     ? buildDialogueSnapshotKey(taskId, task.sessionId)
@@ -345,6 +346,11 @@ export default function PatientDialoguePage() {
         useChatStore
           .getState()
           .setStructuredAnswers(taskId, snapshot.answers);
+        setManualInterventionReason(
+          snapshot.manualIntervention
+            ? snapshot.interventionReason ?? '部分字段需要医护人工确认'
+            : ''
+        );
         snapshot.events.forEach(applyRealtimeEvent);
         setConnectionError('');
         updateTask(taskId, {
@@ -1184,6 +1190,14 @@ export default function PatientDialoguePage() {
               >
                 {connectionError || streamError}
                 {voiceState === 'text_fallback' && '，您仍可继续使用文字输入。'}
+              </div>
+            )}
+            {manualInterventionReason && (
+              <div
+                role="status"
+                className="mx-4 mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800"
+              >
+                字段抽取需要医护人工处理：{manualInterventionReason}。对话仍可继续，人工填写结果将在后续请求中生效。
               </div>
             )}
           </div>

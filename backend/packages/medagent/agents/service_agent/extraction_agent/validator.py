@@ -3,19 +3,18 @@
 """
 
 from datetime import date
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .types import AnswerType
 
 class ExtractedAnswer(BaseModel):
     """单个字段的抽取结果"""
 
     question_id: int = Field(..., description="问题ID")
     question_code: str = Field(..., description="问题编码")
-    answer_type: Literal[
-        "text", "number", "boolean", "date", "single_choice", "multiple_choice"
-    ] = Field(..., description="答案类型")
+    answer_type: AnswerType = Field(..., description="答案类型")
 
     # 基础答案字段（根据 answer_type 填充对应字段）
     answer_value: str | float | bool | date | None = Field(
@@ -56,6 +55,29 @@ class ExtractedAnswer(BaseModel):
         return v
 
 
+class InvalidExtractedAnswer(BaseModel):
+    """单个字段校验失败的人工介入记录。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    question_id: int | None = None
+    question_code: str | None = None
+    answer_type: str | None = None
+    raw_answer: dict[str, Any] = Field(default_factory=dict)
+    error: str
+
+
+class RawExtractionResult(BaseModel):
+    """宽松的模型响应容器，供逐字段校验使用。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    extracted_answers: list[dict[str, Any]] = Field(default_factory=list)
+    overall_confidence: float = 0.0
+    missing_questions: list[int] = Field(default_factory=list)
+    ambiguous_questions: list[int] = Field(default_factory=list)
+
+
 class ExtractionResult(BaseModel):
     """完整的字段抽取结果"""
 
@@ -70,6 +92,10 @@ class ExtractionResult(BaseModel):
     )
     ambiguous_questions: list[int] = Field(
         default_factory=list, description="回答不清晰的题目ID列表"
+    )
+    invalid_answers: list[InvalidExtractedAnswer] = Field(
+        default_factory=list,
+        description="仅记录单字段校验失败，不影响同批有效字段写入",
     )
 
     @field_validator("overall_confidence")

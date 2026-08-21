@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from medagent.agents.service_agent.extraction_agent.types import normalize_answer_type
 
 from app.models import (
     AssessmentActionDefinition,
@@ -30,17 +31,17 @@ STATUS_MAP = {
     "published": "已发布",
     "disabled": "已停用",
 }
-TYPE_MAP = {
-    "text": ("文本", "字符串"),
-    "textarea": ("文本", "字符串"),
-    "integer": ("数字", "整数"),
-    "decimal": ("数字", "小数"),
-    "boolean": ("布尔", "布尔"),
-    "date": ("日期", "日期"),
-    "datetime": ("日期时间", "日期时间"),
-    "single_choice": ("单选", "字符串"),
-    "multiple_choice": ("多选", "字符串"),
-    "grouped_choice": ("多选", "字符串"),
+TYPE_VALUE_MAP = {
+    "text": "string",
+    "textarea": "string",
+    "integer": "number",
+    "decimal": "number",
+    "boolean": "boolean",
+    "date": "date",
+    "datetime": "date",
+    "single_choice": "string",
+    "multiple_choice": "string",
+    "grouped_choice": "string",
 }
 DERIVED_EXPRESSIONS = {
     "sex": "patient.sex",
@@ -55,6 +56,24 @@ DERIVED_EXPRESSIONS = {
     "nutrition_score": "reference('nrs2002')",
     "aspiration_risk_score": "reference('aspiration_risk')",
 }
+
+
+def _normalize_payload_types(value: Any) -> Any:
+    """归一化结构化量表快照中的 type/answer_type 字段。"""
+    if isinstance(value, list):
+        return [_normalize_payload_types(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in {"type", "answer_type"} and isinstance(item, str):
+            try:
+                normalized[key] = normalize_answer_type(item)
+            except ValueError:
+                normalized[key] = item
+        else:
+            normalized[key] = _normalize_payload_types(item)
+    return normalized
 
 
 class AssessmentCatalogImporter:
@@ -125,6 +144,7 @@ class AssessmentCatalogImporter:
         counters: dict[str, int],
     ) -> None:
         """导入一个量表及其完整版本。"""
+        payload = _normalize_payload_types(payload)
         content_hash = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -231,11 +251,16 @@ class AssessmentCatalogImporter:
         source_type = field.get("type") or (
             "single_choice" if field.get("options") else "text"
         )
-        question_type, value_type = TYPE_MAP.get(source_type, ("文本", "字符串"))
+        try:
+            question_type = normalize_answer_type(source_type)
+        except ValueError:
+            question_type = "text"
+        value_type = TYPE_VALUE_MAP.get(question_type, "string")
         derived = field["id"] in DERIVED_EXPRESSIONS
         options = self._normalize_options(field)
-        if options and question_type == "文本":
-            question_type = "单选"
+        if options and question_type == "text":
+            question_type = "single_choice"
+            value_type = "string"
 
         question = AssessmentQuestion(
             scale_version_id=version_id,
@@ -397,7 +422,11 @@ class AssessmentCatalogImporter:
         """生成保守、可追溯的患者口语化问题。"""
         if label.endswith(("？", "?")):
             return label
-        if question_type == "布尔":
+        try:
+            question_type = normalize_answer_type(question_type)
+        except ValueError:
+            pass
+        if question_type == "boolean":
             return f"请问“{label}”这一项是否符合您的情况？"
         return f"请问您的“{label}”情况是怎样的？"
 

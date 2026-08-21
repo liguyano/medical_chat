@@ -116,6 +116,19 @@ export interface DialogueSnapshot {
   session: InteractionSession;
   answers: StructuredAnswer[];
   events: SseEnvelope[];
+  manualIntervention?: boolean;
+  interventionReason?: string;
+}
+
+export interface ManualFieldUpdateInput {
+  questionId: string;
+  answerType: NonNullable<StructuredAnswer['answerType']>;
+  answerText?: string;
+  answerNumber?: number;
+  answerBoolean?: boolean;
+  answerDate?: string;
+  selectedOptionCodes?: string[];
+  completeManual?: boolean;
 }
 
 export interface SendMessageInput {
@@ -207,6 +220,11 @@ export interface CareRepository {
   ): Promise<NursingPlan>;
   getDialogueSnapshot(
     task: CareTask,
+    signal?: AbortSignal
+  ): Promise<DialogueSnapshot>;
+  updateManualField(
+    sessionId: string,
+    input: ManualFieldUpdateInput,
     signal?: AbortSignal
   ): Promise<DialogueSnapshot>;
   sendDialogMessage(

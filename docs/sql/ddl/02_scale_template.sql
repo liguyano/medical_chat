@@ -105,7 +105,7 @@ CREATE TABLE assessment_question (
     deleted                SMALLINT     NOT NULL DEFAULT 0
 );
 COMMENT ON TABLE  assessment_question IS '量表问题定义；原文/患者文/护士文三种文本并存';
-COMMENT ON COLUMN assessment_question.question_type IS 'single_choice / multi_choice / text / number / date / boolean';
+COMMENT ON COLUMN assessment_question.question_type IS 'single_choice / multiple_choice / text / number / date / boolean';
 COMMENT ON COLUMN assessment_question.value_type    IS 'string / integer / decimal / boolean / date / time / datetime';
 COMMENT ON COLUMN assessment_question.derived       IS '1=计算字段（BMI 等），排除在进度分母之外';
 CREATE UNIQUE INDEX ux_question_code    ON assessment_question (scale_version_id, question_code) WHERE deleted = 0;

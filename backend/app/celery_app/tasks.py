@@ -283,6 +283,41 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
         return result
     except Exception as exc:
         logger.exception("[Extraction Agent] Celery任务失败: session=%s", session_id)
+        if self.request.retries >= 3:
+            # 达到 Celery 任务上限后停止当前批次，通知医护人工介入。
+            from app.models import base as model_base
+            from app.models.patient_task import CareTask
+            from app.schemas.events import AgentErrorEvent
+            from app.utils.redis_client import get_redis
+            from app.workers.event_publisher import DialogEventPublisher
+
+            task_id = task_config.get("task_id")
+            if task_id and model_base.SessionLocal is not None:
+                with model_base.SessionLocal() as db:
+                    task = db.get(CareTask, int(task_id))
+                    if task is not None:
+                        task.need_manual_intervention = True
+                        task.intervention_reason = "字段抽取任务达到重试上限，请医护人工填写"
+                        task.updator = "extraction_agent"
+                        db.commit()
+            if task_config.get("task_id"):
+                DialogEventPublisher(session_id, get_redis()).publish(
+                    AgentErrorEvent(
+                        session_id=session_id,
+                        task_id=task_config.get("task_id"),
+                        agent_name="extraction_agent",
+                        error_code="EXTRACTION_RETRY_EXHAUSTED",
+                        message="字段抽取任务达到重试上限，请医护人工填写",
+                        retrying=False,
+                        manual_intervention=True,
+                        intervention_reason="字段抽取任务达到重试上限，请医护人工填写",
+                    )
+                )
+            return {
+                "status": "manual_intervention",
+                "session_id": session_id,
+                "task_id": task_id,
+            }
         raise self.retry(exc=exc, countdown=10, max_retries=3)
 
 

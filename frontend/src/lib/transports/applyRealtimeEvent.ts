@@ -275,6 +275,23 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           questionId: String(raw.question_id ?? raw.field_id ?? ''),
           questionCode: String(raw.question_code ?? ''),
           questionText: String(raw.question_text ?? raw.field_name ?? '评估字段'),
+          answerType: raw.answer_type as StructuredAnswer['answerType'],
+          options: Array.isArray(raw.options)
+            ? raw.options.map((option) => {
+                const item =
+                  option && typeof option === 'object'
+                    ? (option as Record<string, unknown>)
+                    : {};
+                return {
+                  code: String(item.code ?? ''),
+                  label: String(item.label ?? ''),
+                  value:
+                    item.value === undefined ? undefined : String(item.value),
+                  score:
+                    typeof item.score === 'number' ? item.score : undefined,
+                };
+              })
+            : undefined,
           answerText:
             raw.answer_text === undefined || raw.answer_text === null
               ? undefined
@@ -308,6 +325,15 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           extractionConfidence:
             typeof raw.confidence === 'number' ? raw.confidence : 0,
           corrected: Boolean(raw.corrected),
+          invalid: Boolean(raw.invalid),
+          invalidReason:
+            raw.invalid_reason === undefined || raw.invalid_reason === null
+              ? undefined
+              : String(raw.invalid_reason),
+          rawAnswer:
+            raw.raw_answer && typeof raw.raw_answer === 'object'
+              ? (raw.raw_answer as Record<string, unknown>)
+              : undefined,
         };
         if (answer.questionId) {
           chatStore.upsertStructuredAnswer(event.task_id, answer);
@@ -652,6 +678,15 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
       break;
     }
     case 'error':
+      if (Boolean(event.payload.manual_intervention)) {
+        taskStore.updateTask(event.task_id, {
+          needManualIntervention: true,
+          interventionReason:
+            typeof event.payload.intervention_reason === 'string'
+              ? event.payload.intervention_reason
+              : '字段抽取需要医护人工处理',
+        });
+      }
       chatStore.setStreaming(null);
       break;
     case 'heartbeat':

@@ -104,7 +104,6 @@ CREATE TABLE consent_item_definition (
 );
 COMMENT ON TABLE  consent_item_definition IS '需患者/家属明确应答的签署项；如"是否同意手术""是否放弃抢救"';
 COMMENT ON COLUMN consent_item_definition.item_type     IS 'consent / refusal / choice / acknowledgement';
-COMMENT ON COLUMN consent_item_definition.response_type IS 'yes_no / single_choice / multi_choice / free_text';
+COMMENT ON COLUMN consent_item_definition.response_type IS 'yes_no / single_choice / multiple_choice / free_text';
 CREATE UNIQUE INDEX ux_consent_item_code ON consent_item_definition (document_version_id, item_code) WHERE deleted = 0;
 CREATE        INDEX ix_consent_item_ver  ON consent_item_definition (document_version_id);
-

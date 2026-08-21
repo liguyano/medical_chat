@@ -130,6 +130,8 @@ export interface CareTask {
   createdAt: string;
   updatedAt?: string;
   completedAt?: string;
+  needManualIntervention?: boolean;
+  interventionReason?: string;
   progress?: {
     current: number;
     total: number;
@@ -292,6 +294,11 @@ export interface StructuredAnswer {
   sourceMessageIds: string[];
   extractionConfidence: number;
   corrected: boolean; // 患者是否已纠正
+  answerType?: 'text' | 'number' | 'boolean' | 'date' | 'single_choice' | 'multiple_choice';
+  options?: Array<{ code: string; label: string; value?: string; score?: number | null }>;
+  invalid?: boolean;
+  invalidReason?: string;
+  rawAnswer?: Record<string, unknown>;
 }
 
 // 评估提交

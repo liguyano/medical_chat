@@ -105,6 +105,7 @@ class AssessmentSubmission(BusinessBaseMixin, Base):
     confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(7, 6), nullable=True)
     total_question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     answered_question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    invalid_answers: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (

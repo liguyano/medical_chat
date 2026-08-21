@@ -8,6 +8,8 @@ uv run pytest tests/unit-test -v
 
 本目录测试不得连接 PostgreSQL、Redis 或外部模型；外部依赖必须使用 fake/mock/stub。
 
+本目录新增字段抽取契约测试，覆盖答案类型边界转换、历史别名拒绝以及增量上下文拼装。
+
 Schedule Agent 单元测试覆盖：
 
 - SDK 分层依赖、问题任务与输出 Schema；
@@ -34,17 +36,4 @@ uv run pytest tests/unit-test `
   --cov=app.celery_app.runtime `
   --cov=app.configs.app_config `
   --cov-report=term-missing
-```
-
-Dialog Agent 覆盖率命令：
-
-```powershell
-$dialogTests = Get-ChildItem tests/unit-test -Filter "test_dialog_*.py" |
-  Select-Object -ExpandProperty FullName
-uv run pytest $dialogTests `
-  --cov=medagent.agents.service_agent.dialog_agent `
-  --cov=medagent.agents.middleware `
-  --cov=app.workers.dialog_agent_runtime `
-  --cov-report=term-missing `
-  --cov-fail-under=90
 ```

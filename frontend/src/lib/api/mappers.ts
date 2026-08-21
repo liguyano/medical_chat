@@ -147,6 +147,8 @@ export function mapTaskDto(dto: BackendTaskDto): CareTask {
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
     completedAt: dto.completed_at,
+    needManualIntervention: dto.need_manual_intervention ?? false,
+    interventionReason: dto.intervention_reason,
     progress:
       dto.total_question_count !== undefined
         ? {
@@ -361,6 +363,11 @@ export function mapExtractedField(
     sourceMessageIds: field.source_message_ids ?? [],
     extractionConfidence: field.confidence ?? 0,
     corrected: field.corrected ?? false,
+    answerType: field.answer_type as StructuredAnswer['answerType'],
+    options: field.options,
+    invalid: field.invalid ?? false,
+    invalidReason: field.invalid_reason,
+    rawAnswer: field.raw_answer,
   };
 }
 
