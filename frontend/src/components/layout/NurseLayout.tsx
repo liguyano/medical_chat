@@ -307,21 +307,23 @@ export default function NurseLayout({
                     >
                       立即查看
                     </Link>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void handleResolveRequest(
-                          request.taskId,
-                          request.requestId
-                        )
-                      }
-                      disabled={resolvingRequests.includes(request.requestId)}
-                      className="text-sm font-medium text-emerald-700 disabled:opacity-50"
-                    >
-                      {resolvingRequests.includes(request.requestId)
-                        ? '处理中'
-                        : '标记已处理'}
-                    </button>
+                    {request.actionLabel !== '字段抽取人工介入' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleResolveRequest(
+                            request.taskId,
+                            request.requestId
+                          )
+                        }
+                        disabled={resolvingRequests.includes(request.requestId)}
+                        className="text-sm font-medium text-emerald-700 disabled:opacity-50"
+                      >
+                        {resolvingRequests.includes(request.requestId)
+                          ? '处理中'
+                          : '标记已处理'}
+                      </button>
+                    )}
                     <span className="text-xs text-foreground-muted">
                       提醒流 {nurseAlertStatus === 'connected' ? '已连接' : '连接中'}
                     </span>

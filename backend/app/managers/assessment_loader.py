@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime
 
 from medagent.agents.service_agent.schedule_agent import QuestionOption, QuestionTask
+from medagent.agents.service_agent.extraction_agent.types import STANDARD_ANSWER_TYPES
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -155,7 +156,7 @@ class AssessmentQuestionLoader:
                 question_code=question.question_code,
                 question_name=question.question_name,
                 patient_text=question.patient_text,
-                question_type=question.question_type,
+                question_type=_require_standard_question_type(question.question_type),
                 required=question.required,
                 sort_no=question.sort_no,
                 section_name=section_name,
@@ -164,3 +165,12 @@ class AssessmentQuestionLoader:
             )
             for question, section_name in rows
         ]
+
+
+def _require_standard_question_type(question_type: str) -> str:
+    """确保量表运行时只接收统一答案类型。"""
+    if question_type not in STANDARD_ANSWER_TYPES:
+        raise RuntimeError(
+            f"量表问题类型未归一化: {question_type!r}，请先执行标准类型迁移"
+        )
+    return question_type

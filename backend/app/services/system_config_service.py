@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.managers.keyword_matcher import get_keyword_matcher
+from medagent.agents.service_agent.extraction_agent.types import normalize_answer_type
 from app.models.assessment_template import (
     AssessmentActionDefinition,
     AssessmentOption,
@@ -46,6 +47,24 @@ from app.schemas.system_config import (
     InteractionRuleMatchDto,
     InteractionRuleUpdateRequest,
 )
+
+
+def _normalize_scale_snapshot(value: Any) -> Any:
+    """归一化量表快照中的字段类型，避免旧别名再次落库。"""
+    if isinstance(value, list):
+        return [_normalize_scale_snapshot(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in {"type", "answer_type"} and isinstance(item, str):
+            try:
+                normalized[key] = normalize_answer_type(item)
+            except ValueError:
+                normalized[key] = item
+        else:
+            normalized[key] = _normalize_scale_snapshot(item)
+    return normalized
 
 
 def _content_hash(payload: dict[str, Any]) -> str:
@@ -649,7 +668,7 @@ def update_scale_config(
     scale.updator = operator
     version.version_name = request.version_name
     version.publish_status = request.publish_status
-    version.scale_snapshot = request.scale_snapshot
+    version.scale_snapshot = _normalize_scale_snapshot(request.scale_snapshot)
     version.content_hash = _content_hash(request.model_dump(mode="json"))
     version.updator = operator
 
@@ -682,8 +701,30 @@ def update_scale_config(
         row.original_text = item.original_text
         row.patient_text = item.patient_text
         row.nurse_text = item.nurse_text
-        row.question_type = item.question_type
-        row.value_type = item.value_type
+        try:
+            row.question_type = normalize_answer_type(item.question_type)
+        except ValueError as exc:
+            raise AppError(ErrorCode.ERR_COMMON_001, str(exc)) from exc
+        value_type_map = {
+            "字符串": "string",
+            "整数": "number",
+            "小数": "number",
+            "布尔": "boolean",
+            "日期": "date",
+            "日期时间": "date",
+            "text": "string",
+            "number": "number",
+            "boolean": "boolean",
+            "date": "date",
+            "string": "string",
+        }
+        normalized_value_type = value_type_map.get(item.value_type)
+        if normalized_value_type is None:
+            raise AppError(
+                ErrorCode.ERR_COMMON_001,
+                f"不支持的值类型: {item.value_type}",
+            )
+        row.value_type = normalized_value_type
         row.required = item.required
         row.scored = item.scored
         row.unit = item.unit

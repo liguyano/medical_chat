@@ -805,6 +805,15 @@ export class MockCareRepository implements CareRepository {
     return { session: buildEmptySession(task), answers: [], events: [] };
   }
 
+  async updateManualField(
+    _sessionId: string,
+    _input: Parameters<CareRepository['updateManualField']>[1],
+    signal?: AbortSignal
+  ): Promise<DialogueSnapshot> {
+    await wait(signal);
+    return { session: buildEmptySession({ id: _sessionId } as CareTask), answers: [], events: [] };
+  }
+
   async sendDialogMessage(
     _input: SendMessageInput,
     signal?: AbortSignal

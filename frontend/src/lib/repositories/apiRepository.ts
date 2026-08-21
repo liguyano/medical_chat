@@ -18,6 +18,7 @@ import type {
   StaffLoginResponse,
 } from '@/lib/api/contracts';
 import { apiRequest } from '@/lib/api/httpClient';
+import { useTaskStore } from '@/lib/stores/useTaskStore';
 import {
   mapCreateTaskRequest,
   mapAssessmentScale,
@@ -627,6 +628,50 @@ export class ApiCareRepository implements CareRepository {
       session: mapDialogHistory(history, task),
       answers: extraction.fields.map(mapExtractedField),
       events,
+      manualIntervention: extraction.manual_intervention ?? false,
+      interventionReason: extraction.intervention_reason,
+    };
+  }
+
+  async updateManualField(
+    sessionId: string,
+    input: Parameters<CareRepository['updateManualField']>[1],
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<ExtractedFieldsResponse>(
+      `/api/extraction/${encodeURIComponent(sessionId)}/fields/${encodeURIComponent(input.questionId)}`,
+      {
+        method: 'PUT',
+        body: {
+          question_id: Number(input.questionId),
+          answer_type: input.answerType,
+          answer_text: input.answerText ?? null,
+          answer_number: input.answerNumber ?? null,
+          answer_boolean: input.answerBoolean ?? null,
+          answer_date: input.answerDate ?? null,
+          selected_option_codes: input.selectedOptionCodes ?? [],
+          complete_manual: input.completeManual ?? false,
+        },
+        signal,
+      }
+    );
+    const task = useTaskStore.getState().tasks.find((item) => item.sessionId === sessionId);
+    if (!task) throw new Error('任务不存在，无法刷新对话快照');
+    return {
+      session: mapDialogHistory(
+        await apiRequest<DialogHistoryResponse>(
+          `/api/dialog/${encodeURIComponent(sessionId)}/history?limit=100&offset=0`,
+          { signal }
+        ),
+        task
+      ),
+      answers: response.fields.map(mapExtractedField),
+      events: await apiRequest<SseEnvelope[]>(
+        `/api/dialog/${encodeURIComponent(sessionId)}/events`,
+        { signal }
+      ),
+      manualIntervention: response.manual_intervention ?? false,
+      interventionReason: response.intervention_reason,
     };
   }
 

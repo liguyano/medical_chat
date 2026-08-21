@@ -58,6 +58,23 @@ class ExtractionResultWriter:
                 .scalars()
                 .all()
             )
+            answer_ids = [answer.id for answer in answers]
+            option_rows = (
+                db.execute(
+                    select(AssessmentAnswerOption).where(
+                        AssessmentAnswerOption.assessment_answer_id.in_(answer_ids),
+                        AssessmentAnswerOption.selected_flag.is_(True),
+                        AssessmentAnswerOption.deleted == 0,
+                    )
+                ).scalars().all()
+                if answer_ids
+                else []
+            )
+            options_by_answer: dict[int, list[str]] = {}
+            for option in option_rows:
+                options_by_answer.setdefault(option.assessment_answer_id, []).append(
+                    option.option_code_snapshot
+                )
 
             result = {}
             for ans in answers:
@@ -78,8 +95,14 @@ class ExtractionResultWriter:
                     None,
                 )
 
+                selected_options = options_by_answer.get(ans.id, [])
+                # 空行不进入模型上下文；无效答案仍由查询接口展示给人工。
+                if answer_value is None and not selected_options:
+                    continue
                 result[ans.question_id] = {
                     "answer": answer_value,
+                    "answer_type": ans.answer_type,
+                    "selected_option_codes": selected_options,
                     "confidence": float(ans.extraction_confidence or 0.0),
                     "source_turns": ans.source_message_ids or [],
                     "value_source": ans.value_source,
@@ -93,6 +116,7 @@ class ExtractionResultWriter:
         assessment_instance_id: int,
         extraction_result,
         total_question_count: int | None = None,
+        invalid_answers: list[dict] | None = None,
         creator: str = "system",
     ) -> AssessmentSubmission:
         """创建或更新 AI 提交记录
@@ -146,6 +170,7 @@ class ExtractionResultWriter:
                     existing.total_question_count = total_questions
                     existing.answered_question_count = answered_questions
                     existing.submission_status = submission_status
+                    existing.invalid_answers = invalid_answers or existing.invalid_answers
                     existing.updator = creator
                     existing.update_time = datetime.now(UTC)
 
@@ -171,6 +196,7 @@ class ExtractionResultWriter:
                         confidence_score=Decimal(str(extraction_result.overall_confidence)),
                         total_question_count=total_questions,
                         answered_question_count=answered_questions,
+                        invalid_answers=invalid_answers,
                         interaction_session_id=interaction_session_id,
                         creator=creator,
                     )

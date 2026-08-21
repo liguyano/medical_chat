@@ -411,6 +411,8 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
         created_at=task.create_time.isoformat(),
         updated_at=task.update_time.isoformat() if task.update_time else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        need_manual_intervention=task.need_manual_intervention,
+        intervention_reason=task.intervention_reason,
     )
 
 

@@ -100,7 +100,9 @@ def build_user_prompt(
         for question_id, data in previous_extraction.items():
             prompt_parts.append(
                 f"- 题目ID {question_id}: {data.get('answer', 'N/A')} "
-                f"(置信度: {data.get('confidence', 0.0):.2f}, "
+                f"(类型: {data.get('answer_type', 'unknown')}, "
+                f"选项: {data.get('selected_option_codes', [])}, "
+                f"置信度: {data.get('confidence', 0.0):.2f}, "
                 f"来源轮次: {data.get('source_turns', [])})"
             )
         prompt_parts.append("")
@@ -147,16 +149,17 @@ def get_summarization_prompt(messages: list[dict]) -> str:
         ]
     )
 
-    return f"""请将以下护理评估对话压缩为 2-3 句话的摘要，\
+    return f"""请将以下护理评估对话压缩为简短、直接的事实摘要，\
 保留关键医疗信息（症状、药物、数值、过敏史等），去除寒暄和重复内容。
 
 ## 对话历史
 {dialog_text}
 
 ## 要求
-- 摘要长度：2-3 句话（不超过 150 字）
+- 摘要长度：最多 3 句（不超过 180 字）
 - 保留关键词：数值（体重、血压）、药物名称、症状描述、吸烟/饮酒史
 - 去除寒暄：如"您好"、"谢谢"等
+- 明确记录前后矛盾和后续更正，例如：用户历史说没有过敏，后续反问得知青霉素过敏；
 - 格式：自然语言，不需要"患者说"等前缀
 
 ## 输出示例

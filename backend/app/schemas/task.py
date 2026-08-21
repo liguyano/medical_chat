@@ -90,6 +90,8 @@ class BackendTaskDto(BaseModel):
     created_at: str
     updated_at: str | None = None
     completed_at: str | None = None
+    need_manual_intervention: bool = False
+    intervention_reason: str | None = None
 
 
 class CreateTaskResponse(BaseModel):

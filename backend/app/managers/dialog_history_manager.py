@@ -246,6 +246,7 @@ class DialogHistoryManager:
         session_no: str,
         model,
         max_turns: int = 20,
+        exclude_message_id: str | None = None,
     ) -> str:
         """生成对话摘要（2-3句话）
         作用：调用 LLM 将历史对话压缩，保留关键医疗信息
@@ -260,7 +261,13 @@ class DialogHistoryManager:
             get_summarization_prompt,
         )
 
-        history = await self.get_latest_messages(session_no, count=max_turns)
+        history = await self.get_latest_messages(session_no, count=max_turns + 1)
+        if exclude_message_id:
+            history = [
+                message
+                for message in history
+                if message.message_no != exclude_message_id
+            ][-max_turns:]
         if not history:
             return ""
 

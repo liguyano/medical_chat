@@ -207,6 +207,8 @@ export interface BackendTaskDto {
   created_at: string;
   updated_at?: string;
   completed_at?: string;
+  need_manual_intervention?: boolean;
+  intervention_reason?: string;
 }
 
 export interface PatientProfileDto {
@@ -319,6 +321,8 @@ export interface ExtractedFieldDto {
   question_id: ApiId;
   question_code: string;
   question_text: string;
+  answer_type?: string;
+  options?: Array<{ code: string; label: string; value?: string; score?: number | null }>;
   answer_text?: string;
   answer_number?: number;
   answer_boolean?: boolean;
@@ -329,11 +333,17 @@ export interface ExtractedFieldDto {
   source_message_ids?: string[];
   confidence?: number;
   corrected?: boolean;
+  invalid?: boolean;
+  invalid_reason?: string;
+  raw_answer?: Record<string, unknown>;
 }
 
 export interface ExtractedFieldsResponse {
   session_id: ApiId;
   fields: ExtractedFieldDto[];
+  task_id?: ApiId;
+  manual_intervention?: boolean;
+  intervention_reason?: string;
 }
 
 export interface RatingRequest {

@@ -319,6 +319,9 @@ def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
             "error_code": data.get("error_code", "MODEL_CALL_FAILED"),
             "message": data.get("message", "AI 模型调用失败，请稍后重试"),
             "retrying": data.get("retrying", True),
+            "manual_intervention": data.get("manual_intervention", False),
+            "intervention_reason": data.get("intervention_reason"),
+            "invalid_fields": data.get("invalid_fields", []),
         }
     else:
         # 其他事件保持原样

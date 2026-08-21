@@ -30,7 +30,7 @@ import {
   type MonitorTimelineSort,
 } from '@/lib/dialogue/monitorTimeline';
 import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
-import type { MessageFeedback } from '@/lib/types';
+import type { MessageFeedback, StructuredAnswer } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeftIcon,
@@ -131,6 +131,98 @@ export default function NurseMonitorDetailPage() {
   const [timelineSort, setTimelineSort] =
     useState<MonitorTimelineSort>('asc');
   const [durationNow, setDurationNow] = useState(() => new Date());
+  const [manualDrafts, setManualDrafts] = useState<
+    Record<string, { value: string; options: string[] }>
+  >({});
+  const [manualSaving, setManualSaving] = useState<string | null>(null);
+
+  const startManualDraft = (answer: StructuredAnswer) => {
+    setManualDrafts((current) => ({
+      ...current,
+      [answer.questionId]: {
+        value:
+          answer.answerText ??
+          (answer.answerNumber !== undefined
+            ? String(answer.answerNumber)
+            : answer.answerBoolean !== undefined
+              ? String(answer.answerBoolean)
+              : ''),
+        options: answer.selectedOptions ?? [],
+      },
+    }));
+  };
+
+  const saveManualField = async (answer: StructuredAnswer) => {
+    const draft = manualDrafts[answer.questionId];
+    if (!answer.answerType || !draft) return;
+    if (
+      (answer.answerType === 'text' && !draft.value.trim()) ||
+      (answer.answerType === 'number' &&
+        (draft.value.trim() === '' || Number.isNaN(Number(draft.value)))) ||
+      (answer.answerType === 'boolean' && draft.value === '') ||
+      (answer.answerType === 'date' && draft.value === '') ||
+      ((answer.answerType === 'single_choice' ||
+        answer.answerType === 'multiple_choice') &&
+        draft.options.length === 0)
+    ) {
+      setActionError('请先填写或选择完整的字段值');
+      return;
+    }
+    setManualSaving(answer.questionId);
+    try {
+      const snapshot = await careRepository.updateManualField(
+        session?.sessionNo ?? task?.sessionId ?? taskId,
+        {
+          questionId: answer.questionId,
+          answerType: answer.answerType,
+          answerText: answer.answerType === 'text' ? draft.value : undefined,
+          answerNumber:
+            answer.answerType === 'number' ? Number(draft.value) : undefined,
+          answerBoolean:
+            answer.answerType === 'boolean' ? draft.value === 'true' : undefined,
+          answerDate: answer.answerType === 'date' ? draft.value : undefined,
+          selectedOptionCodes:
+            answer.answerType === 'single_choice' ||
+            answer.answerType === 'multiple_choice'
+              ? draft.options
+              : [],
+          completeManual: true,
+        }
+      );
+      useChatStore.getState().setStructuredAnswers(taskId, snapshot.answers);
+      if (!snapshot.manualIntervention) {
+        const alert = Object.values(useChatStore.getState().nurseAssistanceRequests)
+          .find(
+            (request) =>
+              request.taskId === taskId &&
+              request.requestSource === 'agent' &&
+              request.actionLabel === '字段抽取人工介入' &&
+              request.status === 'requested'
+          );
+        if (alert) {
+          const resolved = await careRepository.resolveHandoff(
+            taskId,
+            alert.requestId
+          );
+          applyRealtimeEvent(
+            toHandoffSseEnvelope(resolved, {
+              taskId,
+              eventType: 'handoff_resolved',
+            })
+          );
+        }
+      }
+      setManualDrafts((current) => {
+        const next = { ...current };
+        delete next[answer.questionId];
+        return next;
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '人工字段保存失败');
+    } finally {
+      setManualSaving(null);
+    }
+  };
 
   useEffect(() => {
     if (runtimeConfig.dataMode !== 'api') return;
@@ -515,9 +607,127 @@ export default function NurseMonitorDetailPage() {
                       {Math.round(answer.extractionConfidence * 100)}%
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-1">
-                    {getStructuredAnswerDisplayValue(answer)}
+                  <p className={cn('text-sm font-medium mt-1', answer.invalid && 'text-red-700')}>
+                    {answer.invalid
+                      ? `模型未识别：${answer.invalidReason ?? '请人工填写'}`
+                      : getStructuredAnswerDisplayValue(answer)}
                   </p>
+                  {answer.answerType && (
+                    <div className="mt-2 space-y-2 border-t border-border pt-2">
+                      {!manualDrafts[answer.questionId] ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => startManualDraft(answer)}
+                        >
+                          编辑字段值
+                        </Button>
+                      ) : (
+                        <>
+                          {answer.answerType === 'text' && (
+                            <input
+                              className="w-full rounded-lg border border-border bg-white px-2 py-1 text-sm"
+                              value={manualDrafts[answer.questionId].value}
+                              onChange={(event) =>
+                                setManualDrafts((current) => ({
+                                  ...current,
+                                  [answer.questionId]: {
+                                    ...current[answer.questionId],
+                                    value: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          )}
+                          {answer.answerType === 'number' && (
+                            <input
+                              type="number"
+                              className="w-full rounded-lg border border-border bg-white px-2 py-1 text-sm"
+                              value={manualDrafts[answer.questionId].value}
+                              onChange={(event) =>
+                                setManualDrafts((current) => ({
+                                  ...current,
+                                  [answer.questionId]: {
+                                    ...current[answer.questionId],
+                                    value: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          )}
+                          {answer.answerType === 'boolean' && (
+                            <select
+                              className="w-full rounded-lg border border-border bg-white px-2 py-1 text-sm"
+                              value={manualDrafts[answer.questionId].value}
+                              onChange={(event) =>
+                                setManualDrafts((current) => ({
+                                  ...current,
+                                  [answer.questionId]: {
+                                    ...current[answer.questionId],
+                                    value: event.target.value,
+                                  },
+                                }))
+                              }
+                            >
+                              <option value="">请选择</option>
+                              <option value="true">是</option>
+                              <option value="false">否</option>
+                            </select>
+                          )}
+                          {answer.answerType === 'date' && (
+                            <input
+                              type="date"
+                              className="w-full rounded-lg border border-border bg-white px-2 py-1 text-sm"
+                              value={manualDrafts[answer.questionId].value}
+                              onChange={(event) =>
+                                setManualDrafts((current) => ({
+                                  ...current,
+                                  [answer.questionId]: {
+                                    ...current[answer.questionId],
+                                    value: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          )}
+                          {(answer.answerType === 'single_choice' ||
+                            answer.answerType === 'multiple_choice') && (
+                            <select
+                              multiple={answer.answerType === 'multiple_choice'}
+                              className="w-full rounded-lg border border-border bg-white px-2 py-1 text-sm"
+                              value={manualDrafts[answer.questionId].options}
+                              onChange={(event) =>
+                                setManualDrafts((current) => ({
+                                  ...current,
+                                  [answer.questionId]: {
+                                    ...current[answer.questionId],
+                                    options: Array.from(
+                                      event.target.selectedOptions,
+                                      (option) => option.value
+                                    ),
+                                  },
+                                }))
+                              }
+                            >
+                              {(answer.options ?? []).map((option) => (
+                                <option key={option.code} value={option.code}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            disabled={manualSaving === answer.questionId}
+                            onClick={() => void saveManualField(answer)}
+                          >
+                            {manualSaving === answer.questionId ? '保存中' : '保存并完成介入'}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               {!answers.length && <p className="text-sm text-foreground-muted">暂无结构化答案</p>}

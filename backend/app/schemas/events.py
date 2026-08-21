@@ -224,6 +224,9 @@ class AgentErrorEvent(BaseEvent):
     error_code: str
     message: str
     retrying: bool = True
+    manual_intervention: bool = False
+    intervention_reason: str | None = None
+    invalid_fields: list[dict[str, Any]] = Field(default_factory=list)
     generation_id: str | None = None
 
 

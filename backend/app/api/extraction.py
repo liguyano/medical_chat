@@ -13,7 +13,7 @@ from app.api.dependencies import require_staff_or_patient
 from app.models.base import get_db
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
-from app.schemas.extraction import ExtractedFieldsResponse
+from app.schemas.extraction import ExtractedFieldsResponse, ManualFieldUpdateRequest
 from app.schemas.response import ApiResponse, ok
 from app.services import extraction_service
 
@@ -47,5 +47,38 @@ def get_extracted_fields(
             db,
             session_no,
             patient_id=patient_id,
+        )
+    )
+
+
+@router.put(
+    "/{session_no}/fields/{question_id}",
+    response_model=ApiResponse[ExtractedFieldsResponse],
+    summary="医护人工填写抽取字段",
+)
+def update_manual_field(
+    session_no: str,
+    question_id: int,
+    req: ManualFieldUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    staff: Annotated[StaffAccount, Depends(require_staff_or_patient)],
+) -> dict:
+    """保存人工字段；该操作只更新结构化结果，不中断患者对话。"""
+    if req.question_id != question_id:
+        from app.errors.codes import ErrorCode
+        from app.errors.handlers import AppError
+
+        raise AppError(ErrorCode.ERR_COMMON_001, "字段编号不匹配")
+    if not isinstance(staff, StaffAccount):
+        from app.errors.codes import ErrorCode
+        from app.errors.handlers import AppError
+
+        raise AppError(ErrorCode.ERR_COMMON_001, "仅医护可以人工填写字段")
+    return ok(
+        extraction_service.update_manual_field(
+            db,
+            session_no,
+            req,
+            staff_id=staff.id,
         )
     )

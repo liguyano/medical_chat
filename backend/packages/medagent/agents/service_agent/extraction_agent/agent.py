@@ -3,13 +3,20 @@
 """
 
 import asyncio
+import json
 import logging
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .prompt import build_system_prompt, build_user_prompt
-from .validator import ExtractionResult
+from .types import normalize_answer_type
+from .validator import (
+    ExtractedAnswer,
+    ExtractionResult,
+    InvalidExtractedAnswer,
+    RawExtractionResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +81,52 @@ class FieldExtractionAgent:
             HumanMessage(content=user_prompt),
         ]
 
-        structured = self.model.with_structured_output(ExtractionResult)
-        result = await structured.ainvoke(messages)
-        if not isinstance(result, ExtractionResult):
-            # 少数供应商可能返回 dict，做一次兜底校验
-            result = ExtractionResult.model_validate(result)
+        # 先让供应商返回对象，再逐条校验答案。不能用整个 ExtractionResult
+        # 一次性校验，否则一个坏字段会丢弃同批所有有效字段。
+        structured = self.model.with_structured_output(RawExtractionResult)
+        raw_result = await structured.ainvoke(messages)
+        if isinstance(raw_result, ExtractionResult):
+            result = raw_result
+        else:
+            raw = (
+                raw_result.model_dump(mode="json")
+                if isinstance(raw_result, RawExtractionResult)
+                else self._coerce_object(raw_result)
+            )
+            valid_answers: list[ExtractedAnswer] = []
+            invalid_answers: list[InvalidExtractedAnswer] = []
+            for item in raw.get("extracted_answers", []) or []:
+                if not isinstance(item, dict):
+                    invalid_answers.append(
+                        InvalidExtractedAnswer(
+                            raw_answer={"value": item},
+                            error="字段结果不是对象",
+                        )
+                    )
+                    continue
+                try:
+                    normalized_item = {
+                        **item,
+                        "answer_type": normalize_answer_type(item["answer_type"]),
+                    }
+                    valid_answers.append(ExtractedAnswer.model_validate(normalized_item))
+                except Exception as exc:  # noqa: BLE001
+                    invalid_answers.append(
+                        InvalidExtractedAnswer(
+                            question_id=item.get("question_id"),
+                            question_code=item.get("question_code"),
+                            answer_type=item.get("answer_type"),
+                            raw_answer=item,
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                    )
+            result = ExtractionResult.model_validate(
+                {
+                    **raw,
+                    "extracted_answers": valid_answers,
+                    "invalid_answers": invalid_answers,
+                }
+            )
 
         # 计算派生字段
         result = self._calculate_derived_fields(result)
@@ -90,6 +138,21 @@ class FieldExtractionAgent:
             result.overall_confidence,
         )
         return result
+
+    @staticmethod
+    def _coerce_object(value) -> dict:
+        """将兼容模型响应转换为 JSON 对象。"""
+        if isinstance(value, dict):
+            return value
+        content = getattr(value, "content", value)
+        if isinstance(content, list):
+            content = "".join(
+                str(item.get("text", "")) if isinstance(item, dict) else str(item)
+                for item in content
+            )
+        if isinstance(content, str):
+            return json.loads(content)
+        raise TypeError("字段抽取模型未返回 JSON 对象")
 
     async def extract_with_retry(
         self,
