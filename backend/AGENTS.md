@@ -19,6 +19,8 @@
   已认证的 API 返回，禁止重新挂载为公开静态目录。
 - 生产启动不得自动调用 `seed_demo`，正式初始化使用
   `app.commands.bootstrap_production` 并显式提供首个医护账号。
+- 生产后端由本地/CI 构建为指定平台镜像后上传服务器运行；服务器只执行
+  `docker load` 和 Compose `--no-build`，不得依赖服务器源码或重新安装 Python 依赖。
 
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 

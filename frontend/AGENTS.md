@@ -111,6 +111,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   修改输出模式时必须同步更新 `deploy/frontend.Dockerfile`。
 - 宝塔代理规则的事实来源是 `deploy/baota-reverse-proxy.conf`，不得新增需要
   直接暴露后端端口的前端路由。
+- 生产前端通过 `deploy/build-images.ps1` 构建为目标 Linux 平台镜像；构建时必须
+  传入最终 HTTPS `PublicOrigin`，服务器不得重新执行 Next.js 构建。
 
 ## 常用检查命令
 

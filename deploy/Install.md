@@ -1,6 +1,6 @@
 # Install.md
-本文档记录系统启动的完整部署/启动指南, 用户可按照本文档的步骤, 完整启动项目. 依赖中间件全部使用 Docker 容器启动.
-> 暂时默认 本地环境部署 启动项目, 先不使用 Docker 打包部署启动项目.
+本文档记录系统启动的完整部署/启动指南，用户可按照本文档步骤启动项目。
+公网正式环境使用本地构建 Docker 镜像、上传服务器后启动的方式。
 > 公网正式环境请先阅读第 0 节；第 1 节及之后保留为本地开发联调指南。
 
 # 0. Linux 公网正式部署（宝塔 + Docker）
@@ -16,7 +16,7 @@ Docker Compose 负责前端、后端、PostgreSQL、Redis、Celery Worker 和 Be
 - Linux（推荐 Ubuntu 22.04/24.04）
 - Docker Engine 和 Docker Compose v2
 - 宝塔面板及 Nginx
-- `git`、`openssl`
+- `curl`
 
 在云服务器安全组和宝塔防火墙中只开放：
 
@@ -46,13 +46,128 @@ PostgreSQL、Redis、前端和后端端口不应对公网开放。
 
 SSE 和 WebSocket 的代理配置不能省略，否则实时对话和语音功能会断开。
 
-## 0.3 准备项目配置
+## 0.3 本地构建 Linux 镜像
 
-在服务器上执行：
+本项目生产部署采用“本地构建、服务器导入”的方式。服务器不需要
+`backend`、`frontend` 源码，也不需要在服务器上安装 Python、Node.js、uv 或 pnpm。
+
+本地 Windows 电脑需要：
+
+- Docker Desktop，使用 Linux containers；
+- Docker Buildx；
+- 能够访问 Docker Hub、PyPI 和 npm/pnpm 镜像源；
+- 当前项目源代码。
+
+在项目根目录打开 PowerShell，执行：
+
+```powershell
+Set-Location D:\A-AICodeWork\medical-evaluate
+
+.\deploy\build-images.ps1 `
+  -PublicOrigin "https://app.example.com" `
+  -ReleaseTag "20260822-01" `
+  -Platform "linux/amd64"
+```
+
+说明：
+
+- `PublicOrigin` 必须是最终宝塔站点的 HTTPS 地址，不能带结尾 `/`；
+- `ReleaseTag` 是本次发布版本号，建议使用日期和序号；
+- 常见 x86_64 服务器使用 `linux/amd64`；
+- ARM 服务器改用 `linux/arm64`；
+- 前端域名写入 Next.js 构建产物，域名变更后必须重新构建前端镜像。
+
+脚本完成后，会生成：
+
+```text
+release/20260822-01/
+├─ medical-evaluate-images-20260822-01.tar
+├─ medical-evaluate-images-20260822-01.tar.sha256
+├─ docker-compose.yaml
+├─ deploy.sh
+├─ baota-reverse-proxy.conf
+├─ .env.production.example
+├─ config.production.example.yaml
+└─ RELEASE.txt
+```
+
+镜像包中不包含生产密码和模型密钥。
+
+如果服务器可以访问 Docker Hub，只需传输本次项目的两个镜像；
+PostgreSQL 和 Redis 会在服务器启动时自动拉取。若服务器没有外网，
+本地还需要执行以下命令，把中间件镜像一并导出：
+
+```powershell
+docker pull postgres:16-alpine
+docker pull redis:7-alpine
+
+docker save `
+  medical-evaluate-backend:20260822-01 `
+  medical-evaluate-frontend:20260822-01 `
+  postgres:16-alpine `
+  redis:7-alpine `
+  -o .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar
+
+(Get-FileHash `
+  .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar `
+  -Algorithm SHA256).Hash.ToLowerInvariant() |
+  Set-Content .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar.sha256 `
+  -Encoding ASCII
+```
+
+## 0.4 上传发布包到服务器
+
+建议上传到服务器的临时目录，不要直接覆盖正在运行的部署目录。
+PowerShell 通过 `scp` 上传示例：
+
+```powershell
+scp -r `
+  .\release\20260822-01 `
+  root@服务器公网IP:/opt/medical-evaluate-release/
+```
+
+上传内容至少包括：
+
+```text
+medical-evaluate-images-20260822-01.tar
+medical-evaluate-images-20260822-01.tar.sha256
+docker-compose.yaml
+deploy.sh
+baota-reverse-proxy.conf
+.env.production.example
+config.production.example.yaml
+```
+
+## 0.5 服务器导入镜像并准备配置
+
+SSH 登录服务器后执行：
 
 ```bash
-git clone <项目地址> medical-evaluate
-cd medical-evaluate/deploy
+mkdir -p /opt/medical-evaluate/deploy
+cd /opt/medical-evaluate-release/20260822-01
+
+sha256sum -c medical-evaluate-images-20260822-01.tar.sha256
+
+docker load -i medical-evaluate-images-20260822-01.tar
+```
+
+如果导出的是包含中间件的镜像包，则改为：
+
+```bash
+sha256sum -c medical-evaluate-images-all-20260822-01.tar.sha256
+docker load -i medical-evaluate-images-all-20260822-01.tar
+```
+
+复制运行文件：
+
+```bash
+cp docker-compose.yaml deploy.sh baota-reverse-proxy.conf \
+  /opt/medical-evaluate/deploy/
+cp .env.production.example config.production.example.yaml \
+  /opt/medical-evaluate/deploy/
+
+cd /opt/medical-evaluate/deploy
+chmod 700 deploy.sh
 cp .env.production.example .env.production
 cp config.production.example.yaml config.production.yaml
 chmod 600 .env.production config.production.yaml
@@ -62,6 +177,7 @@ chmod 600 .env.production config.production.yaml
 
 ```dotenv
 PUBLIC_ORIGIN=https://app.example.com
+IMAGE_TAG=20260822-01
 POSTGRES_PASSWORD=随机强密码
 REDIS_APP_PASSWORD=随机强密码
 REDIS_CELERY_PASSWORD=随机强密码
@@ -72,7 +188,10 @@ DASHSCOPE_API_KEY=真实模型密钥
 编辑 `config.production.yaml`，确认语音模型中的 `{WorkspaceId}` 已替换为
 真实工作空间 ID。禁止提交 `.env.production` 和 `config.production.yaml`。
 
-## 0.4 一键启动
+`IMAGE_TAG` 必须与本次导入的镜像标签完全一致。若写成 `latest`，
+服务器必须实际加载带有 `:latest` 标签的镜像。
+
+## 0.6 服务器启动容器
 
 首次启动前先校验 Compose 配置：
 
@@ -80,17 +199,39 @@ DASHSCOPE_API_KEY=真实模型密钥
 ./deploy.sh config
 ```
 
-构建镜像、执行数据库迁移并启动全部服务：
+服务器不重新构建镜像，执行数据库迁移并启动全部服务：
 
 ```bash
 ./deploy.sh up
 ```
 
+如果不使用脚本，也可以直接输入 Docker Compose 命令：
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.yaml \
+  config --quiet
+
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.yaml \
+  up -d --no-build --remove-orphans
+```
+
 查看状态和日志：
 
 ```bash
+./deploy.sh images
 ./deploy.sh ps
 ./deploy.sh logs
+```
+
+等价的 Docker 命令：
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yaml ps
+docker compose --env-file .env.production -f docker-compose.yaml logs -f --tail=200
 ```
 
 首次生产初始化不会导入演示患者和演示密码。需要显式创建首个医护账号，
@@ -109,7 +250,7 @@ unset BOOTSTRAP_STAFF_ROLE BOOTSTRAP_STAFF_DEPARTMENT
 
 `bootstrap` 会导入正式量表和交互规则，但不会创建演示患者。
 
-## 0.5 部署验证
+## 0.7 部署验证
 
 ```bash
 curl -I https://app.example.com
@@ -125,13 +266,30 @@ docker compose --env-file .env.production -f docker-compose.yaml ps
 确认浏览器开发者工具中 API、SSE 和 WebSocket 均使用当前 HTTPS 域名，
 不能出现 `localhost:8000`。
 
-## 0.6 更新和停止
+## 0.8 更新、回滚和停止
 
-拉取新代码后执行：
+发布新版本时，在本地使用新的 `ReleaseTag` 构建镜像并上传新发布目录。
+服务器执行：
 
 ```bash
-cd medical-evaluate/deploy
-git pull
+cd /opt/medical-evaluate-release/20260822-02
+sha256sum -c medical-evaluate-images-20260822-02.tar.sha256
+docker load -i medical-evaluate-images-20260822-02.tar
+
+cd /opt/medical-evaluate/deploy
+cp /opt/medical-evaluate-release/20260822-02/docker-compose.yaml .
+cp /opt/medical-evaluate-release/20260822-02/deploy.sh .
+cp /opt/medical-evaluate-release/20260822-02/baota-reverse-proxy.conf .
+sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=20260822-02/' .env.production
+./deploy.sh update
+```
+
+`update` 使用 `--no-build`，只使用已经通过 `docker load` 导入的新镜像。
+
+回滚时把 `IMAGE_TAG` 改回旧版本，再执行：
+
+```bash
+sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=20260822-01/' .env.production
 ./deploy.sh update
 ```
 
@@ -143,7 +301,7 @@ git pull
 
 禁止执行 `docker compose down -v`，除非确认要删除全部数据。
 
-## 0.7 数据备份
+## 0.9 数据备份
 
 至少定期备份：
 
@@ -160,7 +318,7 @@ docker compose --env-file .env.production -f docker-compose.yaml exec -T postgre
 
 备份文件必须存放到服务器之外，并定期验证可恢复性。
 
-## 0.8 生产安全要求
+## 0.10 生产安全要求
 
 - 禁止执行 `seed_demo`，禁止使用 `123456`。
 - 只开放 SSH、HTTP、HTTPS，数据库和 Redis 仅在 Docker 内部网络通信。
