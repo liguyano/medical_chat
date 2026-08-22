@@ -33,7 +33,10 @@ export interface VoiceSocketOptions {
     messageId?: string;
     audioUrl?: string | null;
   }) => void;
+  onTranscriptConfirmed?: (transcriptId: string) => void;
   onTranscriptDiscarded?: (transcriptId: string) => void;
+  onSpeechStarted?: () => void;
+  onPlaybackCompleted?: () => void;
 }
 
 class MicrophonePcmCapture {
@@ -208,6 +211,7 @@ export class VoiceSocketClient {
     if (message.type === 'state') {
       this.setState(message.state);
     } else if (message.type === 'speech_started') {
+      this.options.onSpeechStarted?.();
       this.player.interrupt();
       this.completePendingResponse();
       this.setState('listening');
@@ -219,6 +223,8 @@ export class VoiceSocketClient {
       this.setState('listening');
     } else if (message.type === 'response_completed') {
       this.completePendingResponse();
+      await this.player.waitForIdle();
+      this.options.onPlaybackCompleted?.();
     } else if (message.type === 'audio') {
       this.setState('speaking');
       await this.player.enqueue(
@@ -234,6 +240,9 @@ export class VoiceSocketClient {
         audioUrl: message.audio_url,
       });
       this.setState('transcribing');
+    } else if (message.type === 'transcript_confirmed') {
+      this.options.onTranscriptConfirmed?.(message.transcript_id);
+      this.setState('thinking');
     } else if (message.type === 'transcript_discarded') {
       this.options.onTranscriptDiscarded?.(message.transcript_id);
       this.setState('listening');

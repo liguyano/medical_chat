@@ -198,6 +198,9 @@ export default function PatientDialoguePage() {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const voiceClientRef = useRef<VoiceSocketClient | undefined>(undefined);
+  const voiceOverlayHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const loadedSnapshotKeyRef = useRef<string | null>(null);
   const handoffSubmittingRef = useRef(false);
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
@@ -252,6 +255,31 @@ export default function PatientDialoguePage() {
   const [messageDraft, setMessageDraft] = useState('');
   const [pendingVoiceTranscript, setPendingVoiceTranscript] = useState('');
   const [pendingVoiceTranscriptId, setPendingVoiceTranscriptId] = useState('');
+  const [voiceOverlayVisible, setVoiceOverlayVisible] = useState(false);
+
+  const clearVoiceOverlayHideTimer = () => {
+    if (voiceOverlayHideTimerRef.current !== null) {
+      clearTimeout(voiceOverlayHideTimerRef.current);
+      voiceOverlayHideTimerRef.current = null;
+    }
+  };
+
+  const showVoiceOverlay = () => {
+    clearVoiceOverlayHideTimer();
+    setVoiceOverlayVisible(true);
+  };
+
+  const hideVoiceOverlay = (delayMs = 0) => {
+    clearVoiceOverlayHideTimer();
+    if (delayMs <= 0) {
+      setVoiceOverlayVisible(false);
+      return;
+    }
+    voiceOverlayHideTimerRef.current = setTimeout(() => {
+      voiceOverlayHideTimerRef.current = null;
+      setVoiceOverlayVisible(false);
+    }, delayMs);
+  };
 
   const dialogueSnapshotKey = task
     ? buildDialogueSnapshotKey(taskId, task.sessionId)
@@ -391,6 +419,7 @@ export default function PatientDialoguePage() {
 
   useEffect(
     () => () => {
+      clearVoiceOverlayHideTimer();
       void voiceClientRef.current?.close();
       voiceClientRef.current = undefined;
     },
@@ -698,6 +727,7 @@ export default function PatientDialoguePage() {
   };
 
   const startVoice = async () => {
+    showVoiceOverlay();
     setPendingVoiceTranscript('');
     setPendingVoiceTranscriptId('');
     if (runtimeConfig.dataMode === 'mock') {
@@ -708,6 +738,7 @@ export default function PatientDialoguePage() {
     const currentSession = useChatStore.getState().sessions[taskId];
     if (!currentSession) {
       setConnectionError('会话尚未准备完成，请稍后重试');
+      hideVoiceOverlay(2800);
       return;
     }
     if (
@@ -729,12 +760,36 @@ export default function PatientDialoguePage() {
             state === 'thinking' ||
             state === 'speaking'
         );
+        if (
+          state === 'connecting' ||
+          state === 'transcribing' ||
+          state === 'thinking' ||
+          state === 'speaking' ||
+          state === 'paused'
+        ) {
+          showVoiceOverlay();
+        } else if (state === 'error' || state === 'text_fallback') {
+          showVoiceOverlay();
+          hideVoiceOverlay(2800);
+        }
       },
       onError: setConnectionError,
+      onSpeechStarted: showVoiceOverlay,
+      onPlaybackCompleted: () => hideVoiceOverlay(),
       onTranscriptReady: (transcript) => {
+        showVoiceOverlay();
         setPendingVoiceTranscript(transcript.text);
         setPendingVoiceTranscriptId(transcript.transcriptId);
         setVoiceState('transcribing');
+        // 生产语音识别完成后直接提交；确认卡仅保留给 Mock 原型演示。
+        if (runtimeConfig.dataMode === 'api') {
+          client.confirmTranscript(transcript.transcriptId);
+        }
+      },
+      onTranscriptConfirmed: () => {
+        setPendingVoiceTranscript('');
+        setPendingVoiceTranscriptId('');
+        setVoiceState('thinking');
       },
       onTranscriptDiscarded: (transcriptId) => {
         if (transcriptId === pendingVoiceTranscriptId) {
@@ -749,6 +804,8 @@ export default function PatientDialoguePage() {
     } catch {
       setIsRecording(false);
       setVoiceState('text_fallback');
+      showVoiceOverlay();
+      hideVoiceOverlay(2800);
     }
   };
 
@@ -759,6 +816,7 @@ export default function PatientDialoguePage() {
       voiceClientRef.current = undefined;
       setIsRecording(false);
       setVoiceState('idle');
+      hideVoiceOverlay();
     }
     setConnectionError('');
     setInputMode(mode);
@@ -771,12 +829,14 @@ export default function PatientDialoguePage() {
       voiceClientRef.current = undefined;
       setIsRecording(false);
       setVoiceState('closed');
+      hideVoiceOverlay();
       setInputMode('text');
     }
   };
 
   const stopVoice = async () => {
     setIsRecording(false);
+    showVoiceOverlay();
     if (runtimeConfig.dataMode === 'mock') {
       setVoiceState('transcribing');
       setPendingVoiceTranscript('我目前感觉还可以，没有特别不舒服。');
@@ -787,6 +847,8 @@ export default function PatientDialoguePage() {
       await voiceClientRef.current?.pause();
     } catch (voiceError) {
       setVoiceState('text_fallback');
+      showVoiceOverlay();
+      hideVoiceOverlay(2800);
       setConnectionError(
         voiceError instanceof Error
           ? voiceError.message
@@ -813,6 +875,7 @@ export default function PatientDialoguePage() {
     setVoiceState('thinking');
     await handleSendMessage(transcript);
     setVoiceState('idle');
+    hideVoiceOverlay();
   };
 
   const retryVoiceTranscript = async () => {
@@ -824,6 +887,7 @@ export default function PatientDialoguePage() {
     }
     setPendingVoiceTranscript('');
     setPendingVoiceTranscriptId('');
+    showVoiceOverlay();
     await startVoice();
   };
 
@@ -895,7 +959,7 @@ export default function PatientDialoguePage() {
         </button>
       }
     >
-      <div className="flex h-[calc(100dvh-64px)] flex-col overflow-hidden">
+      <div className="relative flex h-[calc(100dvh-64px)] flex-col overflow-hidden">
         <section className="shrink-0 border-b border-border bg-[#fffaf6]/90 px-[18px] py-3">
           <div className="flex items-center gap-3">
             <span className="font-black text-primary">{progressValue}</span>
@@ -927,21 +991,6 @@ export default function PatientDialoguePage() {
         </section>
 
         <div className="scrollbar-soft flex-1 overflow-y-auto px-[14px] py-4">
-          {inputMode === 'voice' && !readOnly && !completed && (
-            <section className="pb-4 pt-2">
-              <VoiceOrb state={visualVoiceState} />
-              {(voiceState === 'listening' || isRecording) && (
-                <button
-                  type="button"
-                  onClick={() => void stopVoice()}
-                  className="patient-outline-button mx-auto mt-4 flex min-w-[160px] rounded-full"
-                >
-                  结束回答
-                </button>
-              )}
-            </section>
-          )}
-
           <section
             className={`${
               inputMode === 'voice' && !readOnly
@@ -1028,7 +1077,8 @@ export default function PatientDialoguePage() {
             <div ref={messagesEndRef} />
           </section>
 
-          {pendingVoiceTranscript || voiceState === 'transcribing' ? (
+          {runtimeConfig.dataMode === 'mock' &&
+          (pendingVoiceTranscript || voiceState === 'transcribing') ? (
             <section className="patient-card mt-3 p-3">
               <div className="flex items-center gap-2 rounded-2xl bg-[#edf8f7] px-3 py-3 font-bold text-[#258f91]">
                 <PatientIcon name="microphone" className="h-5 w-5" />
@@ -1139,6 +1189,30 @@ export default function PatientDialoguePage() {
             </div>
           )}
         </div>
+
+        {voiceOverlayVisible &&
+          inputMode === 'voice' &&
+          !readOnly &&
+          !completed && (
+            <div
+              className="patient-voice-overlay pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-4"
+              aria-live="polite"
+              aria-label="语音状态"
+            >
+              <div className="pointer-events-auto w-full max-w-[360px] rounded-[28px] border border-white/80 bg-[#fffaf6]/92 px-4 py-5 shadow-[0_18px_60px_rgba(94,67,48,.18)] backdrop-blur-md">
+                <VoiceOrb state={visualVoiceState} />
+                {(voiceState === 'listening' || isRecording) && (
+                  <button
+                    type="button"
+                    onClick={() => void stopVoice()}
+                    className="patient-outline-button mx-auto mt-4 flex min-w-[160px] rounded-full"
+                  >
+                    结束回答
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
         <footer className="shrink-0 border-t border-border bg-[#fffaf6] px-[14px] pb-[max(10px,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_28px_rgba(94,67,48,.08)]">
           {readOnly ? (
