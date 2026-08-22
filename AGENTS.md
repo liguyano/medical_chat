@@ -93,3 +93,15 @@ These apply repo-wide; module guides own the module-specific detail.
 - **Test-driven development** — features and bug fixes ship with tests. Backend tests live
   in `backend/tests/` (TDD is mandatory there; see [backend/AGENTS.md](backend/AGENTS.md));
   frontend tests live in `frontend/tests/`.
+
+## 生产部署与访问边界
+
+- 公网正式环境使用宝塔宿主机 Nginx 终止 HTTPS 和反向代理，Docker Compose
+  不启动第二个 Nginx，也不允许 PostgreSQL、Redis 对公网发布端口。
+- 前端通过当前域名访问 `/api`、`/api/sse` 和 `/api/ws`；禁止在生产代码、
+  配置或文档中写死 `localhost:8000`、宿主机后端端口或容器服务名。
+- 宝塔 Nginx 必须保留 SSE 的 `proxy_buffering off` 和 WebSocket 的
+  `Upgrade`/`Connection` 转发，修改前端传输路径时必须同步检查
+  `deploy/baota-reverse-proxy.conf`。
+- 部署环境变量和生产配置只保存在服务器，不得提交 Git；生产环境禁止执行
+  `seed_demo` 或使用演示账号密码。

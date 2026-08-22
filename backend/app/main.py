@@ -7,11 +7,9 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.configs.app_config import get_app_config
 from app.configs.logging_config import setup_logging
@@ -118,16 +116,6 @@ def create_app() -> FastAPI:
     app.include_router(quality.router)
     app.include_router(consent.router)
     app.include_router(voice_dialog.router)
-
-    signature_directory = (
-        Path(__file__).resolve().parents[1] / "storage" / "consent-signatures"
-    )
-    signature_directory.mkdir(parents=True, exist_ok=True)
-    app.mount(
-        "/media/consent-signatures",
-        StaticFiles(directory=signature_directory),
-        name="consent-signatures",
-    )
 
     # 健康检查
     @app.get("/health", tags=["system"])

@@ -82,6 +82,20 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   重复提交；HTTP 回退、SSE 与历史快照继续按领域 `event_id` / `request_id` 更新同一组件。
   不同领域事件必须分别展示，前端不得按工具名称或参数合并模型调用。
 
+## 生产部署访问约定
+
+- 生产前端由宝塔 Nginx 以 HTTPS 域名提供服务，API、SSE 和 WebSocket 必须使用
+  当前站点同源路径：`/api`、`/api/sse/*`、`/api/ws/*`。
+- 禁止在页面、仓储、传输层或生产环境变量中写死 `http://localhost:8000`、
+  `127.0.0.1:8000` 或 Docker 内部服务名。开发 Mock/API 联调可以使用本地地址，
+  但生产构建必须使用 `PUBLIC_ORIGIN` 对应的 HTTPS 域名。
+- 修改 `src/lib/api`、`src/lib/transports` 或运行时地址解析时，必须同时验证
+  医护端和患者端的 Cookie、SSE 断线续读、WebSocket 语音连接以及音频相对地址。
+- `frontend/next.config.ts` 必须保持 `output: 'standalone'`，以供生产镜像运行；
+  修改输出模式时必须同步更新 `deploy/frontend.Dockerfile`。
+- 宝塔代理规则的事实来源是 `deploy/baota-reverse-proxy.conf`，不得新增需要
+  直接暴露后端端口的前端路由。
+
 ## 常用检查命令
 
 在 `frontend` 目录执行：

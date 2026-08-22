@@ -1,0 +1,319 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - medical_evaluate_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  redis-app:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_APP_MAXMEMORY:-512mb}
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_APP_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_APP_PASSWORD}
+    volumes:
+      - medical_evaluate_redis_app_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  redis-celery:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_CELERY_MAXMEMORY:-512mb}
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_CELERY_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_CELERY_PASSWORD}
+    volumes:
+      - medical_evaluate_redis_celery_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    image: medical-evaluate-backend:${IMAGE_TAG:-latest}
+    restart: "no"
+    environment: &backend-environment
+      MEDICAL_CONFIG: /app/config.yaml
+      APP_ENV: production
+      APP_DATABASE__HOST: postgres
+      APP_DATABASE__PORT: 5432
+      APP_DATABASE__USER: ${POSTGRES_USER}
+      APP_DATABASE__PASSWORD: ${POSTGRES_PASSWORD}
+      APP_DATABASE__DB: ${POSTGRES_DB}
+      APP_REDIS__HOST: redis-app
+      APP_REDIS__PORT: 6379
+      APP_REDIS__PASSWORD: ${REDIS_APP_PASSWORD}
+      APP_CELERY__BROKER_URL: redis://:${REDIS_CELERY_PASSWORD}@redis-celery:6379/0
+      APP_CELERY__BACKEND_URL: redis://:${REDIS_CELERY_PASSWORD}@redis-celery:6379/1
+      APP_SECURITY__PATIENT_IDENTITY_SECRET: ${PATIENT_IDENTITY_SECRET}
+      APP_SECURITY__PATIENT_SESSION_SECURE: "true"
+      APP_SECURITY__STAFF_SESSION_SECURE: "true"
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+    volumes:
+      - ./config.production.yaml:/app/config.yaml:ro
+    command: ["alembic", "-c", "/app/backend/alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    image: medical-evaluate-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+    ports:
+      - "127.0.0.1:${API_BIND_PORT:-18000}:8000"
+    volumes:
+      - medical_evaluate_app_storage:/app/backend/storage
+      - ./config.production.yaml:/app/config.yaml:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis-app:
+        condition: service_healthy
+      redis-celery:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  worker-dialog:
+    image: medical-evaluate-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+    volumes:
+      - medical_evaluate_app_storage:/app/backend/storage
+      - ./config.production.yaml:/app/config.yaml:ro
+    command:
+      - celery
+      - -A
+      - app.celery_app.celery_config:celery_app
+      - worker
+      - --pool=solo
+      - --concurrency=1
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - -Q
+      - dialog_queue
+      - -n
+      - dialog-real@%h
+      - --loglevel=info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis-app:
+        condition: service_healthy
+      redis-celery:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  worker-schedule:
+    image: medical-evaluate-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+    volumes:
+      - medical_evaluate_app_storage:/app/backend/storage
+      - ./config.production.yaml:/app/config.yaml:ro
+    command:
+      - celery
+      - -A
+      - app.celery_app.celery_config:celery_app
+      - worker
+      - --pool=solo
+      - --concurrency=1
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - -Q
+      - schedule_queue
+      - -n
+      - schedule-real@%h
+      - --loglevel=info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis-app:
+        condition: service_healthy
+      redis-celery:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  worker-extraction:
+    image: medical-evaluate-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+    volumes:
+      - medical_evaluate_app_storage:/app/backend/storage
+      - ./config.production.yaml:/app/config.yaml:ro
+    command:
+      - celery
+      - -A
+      - app.celery_app.celery_config:celery_app
+      - worker
+      - --pool=solo
+      - --concurrency=1
+      - --without-gossip
+      - --without-mingle
+      - --without-heartbeat
+      - -Q
+      - extraction_queue
+      - -n
+      - extraction-real@%h
+      - --loglevel=info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis-app:
+        condition: service_healthy
+      redis-celery:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  celery-beat:
+    image: medical-evaluate-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+    volumes:
+      - medical_evaluate_app_storage:/app/backend/storage
+      - ./config.production.yaml:/app/config.yaml:ro
+    command:
+      - celery
+      - -A
+      - app.celery_app.celery_config:celery_app
+      - beat
+      - --loglevel=info
+      - --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis-app:
+        condition: service_healthy
+      redis-celery:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_DATA_MODE: api
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_ORIGIN}
+        NEXT_PUBLIC_DIALOG_TRANSPORT: websocket
+        NEXT_PUBLIC_API_TIMEOUT_MS: ${NEXT_PUBLIC_API_TIMEOUT_MS:-15000}
+    image: medical-evaluate-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_BIND_PORT:-13000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  medical_evaluate_pgdata:
+  medical_evaluate_redis_app_data:
+  medical_evaluate_redis_celery_data:
+  medical_evaluate_app_storage:
+
+networks:
+  backend:
+    driver: bridge

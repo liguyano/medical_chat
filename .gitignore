@@ -7,6 +7,8 @@ Thumbs.db
 
 # 本地配置（由 config.example.yaml 拷贝生成，不入库）
 config.yaml
+deploy/.env.production
+deploy/config.production.yaml
 
 # Python
 __pycache__/

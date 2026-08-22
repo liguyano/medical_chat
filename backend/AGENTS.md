@@ -7,6 +7,19 @@
 - Dialog 首问和后续问句均由真实语言模型生成；模型失败时发布 `agent_error` SSE 并触发 Celery 重试，禁止静默回退量表原文。
 - TextChatEngine 必须跳过供应商发送的 `choices=[]` 用量 chunk。
 
+## 生产部署约定
+
+- 生产环境由宝塔宿主机 Nginx 终止 HTTPS；FastAPI 只监听容器内部的
+  `0.0.0.0:8000`，宿主机仅通过回环端口供宝塔转发。
+- API 的 SSE 和 WebSocket 路径分别由 `/api/sse/*`、`/api/ws/*` 提供，
+  不得改成要求公网直连后端端口的地址。
+- Alembic 迁移必须读取统一应用配置或 `APP_DATABASE__*` 环境变量，禁止新增
+  `localhost:15432` 等宿主机开发地址。
+- 签名、对话音频等 `backend/storage` 内容必须使用持久化卷；敏感文件只能通过
+  已认证的 API 返回，禁止重新挂载为公开静态目录。
+- 生产启动不得自动调用 `seed_demo`，正式初始化使用
+  `app.commands.bootstrap_production` 并显式提供首个医护账号。
+
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
 # 开发规范
