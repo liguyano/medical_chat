@@ -105,3 +105,7 @@ These apply repo-wide; module guides own the module-specific detail.
   `deploy/baota-reverse-proxy.conf`。
 - 部署环境变量和生产配置只保存在服务器，不得提交 Git；生产环境禁止执行
   `seed_demo` 或使用演示账号密码。
+- 生产 Compose 使用已构建的版本化镜像，不在服务器执行源码构建；应用镜像必须
+  与 `.env.production` 中的 `IMAGE_TAG` 完全一致。
+- 前端镜像构建时必须传入最终 HTTPS `PUBLIC_ORIGIN`，域名变化需要重新构建前端
+  镜像；服务器只上传镜像发布包、Compose 文件和运行时配置。

@@ -81,9 +81,6 @@ services:
       - no-new-privileges:true
 
   migrate:
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
     image: medical-evaluate-backend:${IMAGE_TAG:-latest}
     restart: "no"
     environment: &backend-environment
@@ -113,9 +110,6 @@ services:
       - backend
 
   api:
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
     image: medical-evaluate-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
@@ -145,9 +139,6 @@ services:
 
   worker-dialog:
     image: medical-evaluate-backend:${IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
     restart: unless-stopped
     environment:
       <<: *backend-environment
@@ -183,9 +174,6 @@ services:
 
   worker-schedule:
     image: medical-evaluate-backend:${IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
     restart: unless-stopped
     environment:
       <<: *backend-environment
@@ -221,9 +209,6 @@ services:
 
   worker-extraction:
     image: medical-evaluate-backend:${IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
     restart: unless-stopped
     environment:
       <<: *backend-environment
@@ -259,9 +244,6 @@ services:
 
   celery-beat:
     image: medical-evaluate-backend:${IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
     restart: unless-stopped
     environment:
       <<: *backend-environment
@@ -288,14 +270,6 @@ services:
       - no-new-privileges:true
 
   frontend:
-    build:
-      context: ..
-      dockerfile: deploy/frontend.Dockerfile
-      args:
-        NEXT_PUBLIC_DATA_MODE: api
-        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_ORIGIN}
-        NEXT_PUBLIC_DIALOG_TRANSPORT: websocket
-        NEXT_PUBLIC_API_TIMEOUT_MS: ${NEXT_PUBLIC_API_TIMEOUT_MS:-15000}
     image: medical-evaluate-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
