@@ -112,7 +112,7 @@ class VoiceSession:
     receive_task: Any | None = None
     close_task: Any | None = None
     closed: bool = False
-    # 患者端真实连接要求先展示转写草稿，后台无 WebSocket 的历史单测兼容旧自动确认。
+    # 默认识别完成即提交；仅在显式启用时保留转写确认草稿协议，兼容历史客户端/测试。
     require_transcript_confirmation: bool = False
     pending_transcript_id: str | None = None
     pending_transcript_text: str | None = None
@@ -202,7 +202,7 @@ class VoiceGateway:
                 audio_store=DialogAudioStore(),
                 publisher=DialogEventPublisher(session_no),
                 turn_detection=turn_detection,
-                require_transcript_confirmation=True,
+                require_transcript_confirmation=False,
             )
             self._sessions[session_no] = gateway_session
             gateway_session.receive_task = asyncio.create_task(

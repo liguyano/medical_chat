@@ -347,6 +347,21 @@ h1, h2 {
   isolation: isolate;
 }
 
+.patient-voice-overlay {
+  animation: patient-voice-overlay-in 180ms ease-out both;
+}
+
+@keyframes patient-voice-overlay-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-50% + 10px)) scale(.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
 .patient-orb::before,
 .patient-orb::after {
   position: absolute;

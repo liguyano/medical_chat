@@ -50,7 +50,12 @@ class FakeWebSocket:
         self.messages.append(payload)
 
 
-def make_session(tmp_path: Path, redis: FakeRedis | None = None) -> VoiceSession:
+def make_session(
+    tmp_path: Path,
+    redis: FakeRedis | None = None,
+    *,
+    require_transcript_confirmation: bool = True,
+) -> VoiceSession:
     return VoiceSession(
         session_no="SESS-TRANSCRIPT",
         task_id=1,
@@ -62,7 +67,7 @@ def make_session(tmp_path: Path, redis: FakeRedis | None = None) -> VoiceSession
         redis=redis or FakeRedis(),
         audio_store=DialogAudioStore(tmp_path),
         publisher=FakePublisher(),
-        require_transcript_confirmation=True,
+        require_transcript_confirmation=require_transcript_confirmation,
     )
 
 
@@ -106,6 +111,43 @@ async def test_transcript_draft_is_not_persisted_or_dispatched_until_confirmed(
     await gateway.confirm_transcript(session, transcript_id)
     assert len(saved) == 1
     dispatch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_transcript_is_committed_immediately_when_confirmation_is_disabled(
+    tmp_path: Path, monkeypatch
+):
+    gateway = VoiceGateway()
+    session = make_session(
+        tmp_path,
+        require_transcript_confirmation=False,
+    )
+    session.input_turn_no = 2
+    session.input_message_id = "MSG-PATIENT-2"
+    session.input_audio_url = "/audio/patient.wav"
+    saved: list[dict] = []
+
+    class FakeHistory:
+        async def save_message(self, _session_no: str, **kwargs):
+            saved.append(kwargs)
+            return SimpleNamespace(**kwargs)
+
+    dispatch = Mock()
+    monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
+    monkeypatch.setattr(voice_gateway_module, "dispatch_voice_answer_workers", dispatch)
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "get_keyword_matcher",
+        lambda: SimpleNamespace(match=lambda _text: []),
+    )
+
+    await gateway._handle_patient_transcript(session, "我有一点头晕")
+
+    assert saved[0]["content_text"] == "我有一点头晕"
+    assert saved[0]["audio_url"] == "/audio/patient.wav"
+    assert dispatch.call_count == 1
+    assert session.pending_transcript_id is None
+    assert session.confirmed_transcript_id
 
 
 @pytest.mark.asyncio
