@@ -200,6 +200,10 @@ export interface CareRepository {
   listMyTasks(signal?: AbortSignal): Promise<CareTask[]>;
   createTask(input: CreateTaskInput, signal?: AbortSignal): Promise<CareTask>;
   getTask(taskId: string, signal?: AbortSignal): Promise<CareTask>;
+  retryTaskPreparation(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<CareTask>;
   getNursingPlan(
     taskId: string,
     signal?: AbortSignal

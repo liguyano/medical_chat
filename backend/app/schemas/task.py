@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +48,26 @@ class TaskScaleProgressDto(BaseModel):
     status: Literal["pending", "collecting", "completed"]
 
 
+class TaskPreparationStageDto(BaseModel):
+    """AI首问准备单阶段快照。"""
+
+    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    output: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    updated_at: str | None = None
+
+
+class TaskPreparationDto(BaseModel):
+    """AI首问准备总状态及医护端可查看的阶段输出。"""
+
+    status: Literal["not_required", "queued", "running", "ready", "failed"]
+    stage: str | None = None
+    attempt: int = 0
+    error: str | None = None
+    patient_visible_at: str | None = None
+    stages: dict[str, TaskPreparationStageDto] = Field(default_factory=dict)
+
+
 class BackendTaskDto(BaseModel):
     """任务详情响应
     作用：返回页面展示和实时会话所需的完整任务信息。
@@ -72,6 +92,7 @@ class BackendTaskDto(BaseModel):
     task_type: str
     collection_mode: Literal["traditional_form", "ai_dialogue"]
     task_status: str
+    preparation: TaskPreparationDto | None = None
     assigned_nurse_id: int | None = None
     assigned_nurse_name: str | None = None
     scale_ids: list[int] = Field(default_factory=list)

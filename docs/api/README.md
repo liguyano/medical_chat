@@ -135,6 +135,14 @@ Content-Type: application/json
 }
 ```
 
+AI 对话任务创建后会先进入后台准备流程。医护端通过任务详情中的 `preparation` 查看
+`schedule_prepare`、`dialog_preheat`、`dialog_opening` 三阶段及量表问题、首问输出；
+只有首问落库后任务才会出现在患者端任务列表。准备失败时可调用：
+
+**接口**: `POST /api/tasks/{task_id}/preparation/retry`
+
+该接口只允许责任护士重试 `preparation.status=failed` 的原任务，不会重复创建任务。
+
 ---
 
 ### 1.3 取消任务

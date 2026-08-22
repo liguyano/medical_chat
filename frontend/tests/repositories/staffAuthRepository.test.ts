@@ -131,6 +131,37 @@ describe('staff authentication repository', () => {
     });
   });
 
+  it('医护端重试首问准备使用原任务接口', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        task_id: 112,
+        task_no: 'TASK-RETRY-112',
+        patient_id: 1,
+        encounter_id: 2,
+        patient_name: '张桂芳',
+        bed_no: '01-1',
+        collection_mode: 'ai_dialogue',
+        task_status: 'in_progress',
+        preparation: {
+          status: 'queued',
+          stage: 'schedule_prepare',
+          attempt: 2,
+          stages: {},
+        },
+        created_at: '2026-08-20T10:00:00Z',
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await new ApiCareRepository().retryTaskPreparation('112');
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/tasks/112/preparation/retry');
+    expect(request.method).toBe('POST');
+    expect(task.preparation?.status).toBe('queued');
+    expect(task.preparation?.attempt).toBe(2);
+  });
+
   it('Mock 模式支持多组演示医护账号并拒绝错误密码', async () => {
     const repository = new MockCareRepository();
 

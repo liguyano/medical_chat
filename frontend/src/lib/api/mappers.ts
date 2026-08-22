@@ -24,6 +24,7 @@ import type {
   PatientEncounter,
   QualityReview,
   StructuredAnswer,
+  TaskPreparation,
   User,
 } from '@/lib/types';
 
@@ -43,6 +44,30 @@ function optionalNumericId(value: string | number | undefined): number | undefin
   if (value === undefined) return undefined;
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function mapTaskPreparation(
+  dto: BackendTaskDto['preparation']
+): TaskPreparation | undefined {
+  if (!dto) return undefined;
+  return {
+    status: dto.status,
+    stage: dto.stage,
+    attempt: dto.attempt ?? 0,
+    error: dto.error,
+    patientVisibleAt: dto.patient_visible_at,
+    stages: Object.fromEntries(
+      Object.entries(dto.stages ?? {}).map(([stage, snapshot]) => [
+        stage,
+        {
+          status: snapshot.status,
+          output: snapshot.output ?? {},
+          error: snapshot.error,
+          updatedAt: snapshot.updated_at,
+        },
+      ])
+    ),
+  };
 }
 
 export function toReviewerId(value: string | number | undefined): number {
@@ -120,6 +145,7 @@ export function mapTaskDto(dto: BackendTaskDto): CareTask {
         : dto.task_type ?? '入院评估任务包',
     collectionMode: toCollectionMode(dto.collection_mode),
     taskStatus: dto.task_status,
+    preparation: mapTaskPreparation(dto.preparation),
     assignedNurseId: id(dto.assigned_nurse_id ?? dto.nurse_id),
     assignedNurseName: dto.assigned_nurse_name ?? '责任护士',
     scaleIds: dto.scale_ids?.map(String),

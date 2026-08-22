@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from medagent.agents.service_agent.schedule_agent import QuestionTask
+from medagent.agents.service_agent.schedule_agent import QuestionTask, SchedulePlanDraft
 
 from app.workers.schedule_agent_runner import ScheduleAgentRunner
 
@@ -93,12 +93,24 @@ async def test_missing_scale_codes_fails_without_agent_creation():
 async def test_opening_prepares_recoverable_task_todo():
     """首问前必须由 Schedule Agent 生成并保存 Task-todo。"""
     redis = FakeRedis()
+    model = SimpleNamespace(
+        with_structured_output=Mock(
+            return_value=SimpleNamespace(
+                ainvoke=AsyncMock(
+                    return_value=SchedulePlanDraft(
+                        opening_guidance="自然开场",
+                        planning_reason="测试规划",
+                    )
+                )
+            )
+        )
+    )
     runner = ScheduleAgentRunner(
         loader=FakeLoader([question()]),
         history_manager=FakeHistory(),
         redis_client=redis,
         publisher_factory=lambda _session: FakePublisher([]),
-        model=object(),
+        model=model,
     )
 
     result = await runner.run("session", scale_codes=["adl"])

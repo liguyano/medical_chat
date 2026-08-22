@@ -35,8 +35,48 @@ from app.schemas.task import (
 from app.services.assessment_progress_service import (
     valid_assessment_answer_condition,
 )
+from app.services.task_preparation_service import (
+    PREPARATION_STAGES,
+    empty_preparation_detail,
+    initialize_ai_preparation,
+    initialize_traditional_preparation,
+    preparation_payload,
+    reset_for_retry,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _record_opening_dispatch_failure(
+    task: CareTask,
+    *,
+    stage: str,
+    reason: str,
+) -> None:
+    """在创建请求事务中记录首问准备入队失败的阶段快照。"""
+    detail = task.preparation_detail or empty_preparation_detail()
+    stages = detail.setdefault("stages", {})
+    snapshot = stages.setdefault(
+        stage,
+        {
+            "status": "pending",
+            "output": {},
+            "error": None,
+            "updated_at": None,
+        },
+    )
+    snapshot.update(
+        {
+            "status": "failed",
+            "error": reason,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    task.preparation_detail = detail
+    task.preparation_status = "failed"
+    task.preparation_stage = stage
+    task.preparation_error = reason
+    task.patient_visible_at = None
 
 
 def _business_no(prefix: str, length: int = 12) -> str:
@@ -166,10 +206,11 @@ def _build_instance(
 
 def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
     """创建评估任务并启动AI文本问诊。"""
-    patient = db.scalar(select(Patient).where(Patient.id == req.patient_id, Patient.deleted == 0))
+    patient = db.scalar(
+        select(Patient).where(Patient.id == req.patient_id, Patient.deleted == 0)
+    )
     if patient is None:
         raise AppError(ErrorCode.ERR_TASK_001)
-
     encounter = db.scalar(
         select(PatientEncounter).where(
             PatientEncounter.id == req.encounter_id,
@@ -178,7 +219,6 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
     )
     if encounter is None or encounter.patient_id != patient.id:
         raise AppError(ErrorCode.ERR_TASK_002)
-
     if req.assigned_nurse_id is not None:
         assigned_staff = db.scalar(
             select(StaffAccount.id).where(
@@ -189,7 +229,6 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         )
         if assigned_staff is None:
             raise AppError(ErrorCode.ERR_STAFF_003)
-
     selected_versions = _load_selected_versions(db, req.scale_ids)
     now = datetime.now(UTC)
     task = CareTask(
@@ -207,6 +246,10 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         creator="system",
         updator="system",
     )
+    if req.collection_mode == "ai_dialogue":
+        initialize_ai_preparation(task)
+    else:
+        initialize_traditional_preparation(task, now)
     session: InteractionSession | None = None
     try:
         db.add(task)
@@ -251,7 +294,19 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
     if session is not None:
         from app.services.agent_dispatch_service import dispatch_opening_workers
 
-        dispatch_opening_workers(db, session)
+        # AI 对话评估智能体任务派发。任务记录已提交，派发失败也要留下可重试状态。
+        try:
+            dispatch_opening_workers(db, session)
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+            _record_opening_dispatch_failure(
+                task,
+                stage=PREPARATION_STAGES[0],
+                reason=reason,
+            )
+            task.updator = "opening_pipeline"
+            db.commit()
+            logger.exception("AI 首问任务派发失败，已记录为可重试任务: session=%s", session.session_no)
 
     dto = _to_backend_task_dto(db, task)
     return CreateTaskResponse(
@@ -261,6 +316,74 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         status=task.task_status,
         task=dto,
     )
+
+
+def retry_task_preparation(
+    db: Session,
+    task_ref: str,
+    *,
+    staff_id: int,
+) -> BackendTaskDto:
+    """重试失败的 AI 首问准备任务，不重复创建业务任务。"""
+    conditions = [CareTask.task_no == task_ref]
+    if task_ref.isdigit():
+        conditions.append(CareTask.id == int(task_ref))
+    task = db.scalar(
+        select(CareTask).where(
+            or_(*conditions),
+            CareTask.deleted == 0,
+            CareTask.assigned_nurse_id == staff_id,
+        ).with_for_update()
+    )
+    if task is None:
+        raise AppError(ErrorCode.ERR_TASK_003)
+    if task.collection_mode != "ai_dialogue":
+        raise AppError(
+            ErrorCode.ERR_COMMON_003,
+            "传统问卷任务不需要 AI 首问准备",
+            http_status=409,
+        )
+    if task.preparation_status != "failed":
+        raise AppError(
+            ErrorCode.ERR_COMMON_003,
+            "当前任务不是准备失败状态，不能重复重试",
+            http_status=409,
+        )
+    session = db.scalar(
+        select(InteractionSession)
+        .where(
+            InteractionSession.task_id == task.id,
+            InteractionSession.deleted == 0,
+        )
+        .order_by(InteractionSession.id.desc())
+    )
+    if session is None:
+        raise AppError(ErrorCode.ERR_DIALOG_001)
+
+    reset_for_retry(db, task)
+    session.session_status = "pending"
+    session.ended_at = None
+    session.updator = "staff:preparation_retry"
+    db.commit()
+    db.refresh(task)
+
+    try:
+        from app.services.agent_dispatch_service import dispatch_opening_workers
+
+        dispatch_opening_workers(db, session)
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        _record_opening_dispatch_failure(
+            task,
+            stage=PREPARATION_STAGES[0],
+            reason=reason,
+        )
+        task.updator = "opening_pipeline"
+        db.commit()
+        logger.exception("AI 首问重试派发失败: session=%s", session.session_no)
+
+    db.refresh(task)
+    return _to_backend_task_dto(db, task)
 
 
 def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
@@ -393,6 +516,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
         task_type=task.task_type,
         collection_mode=task.collection_mode or "traditional_form",
         task_status=task.task_status,
+        preparation=preparation_payload(task),
         assigned_nurse_id=task.assigned_nurse_id,
         scale_ids=[scale.id for _, scale, _ in scale_rows],
         scale_names=[scale.scale_name for _, scale, _ in scale_rows],
@@ -457,6 +581,13 @@ def list_patient_tasks(
             CareTask.patient_id == patient_id,
             CareTask.encounter_id == encounter_id,
             CareTask.deleted == 0,
+            or_(
+                CareTask.collection_mode != "ai_dialogue",
+                (
+                    (CareTask.preparation_status == "ready")
+                    & CareTask.patient_visible_at.is_not(None)
+                ),
+            ),
         )
         .order_by(CareTask.create_time.desc(), CareTask.id.desc())
     ).all()

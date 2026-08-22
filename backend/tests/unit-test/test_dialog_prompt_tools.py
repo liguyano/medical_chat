@@ -27,7 +27,12 @@ def question(code="smoking", *, required=True):
 def test_system_prompt_contains_cicare_patient_and_tasks():
     """系统提示词应包含护理规范、患者信息与评估任务。"""
     prompt = build_system_prompt(
-        {"name": "张三", "gender": "男", "age": 60},
+        {
+            "name": "张三",
+            "gender": "男",
+            "age": 60,
+            "diagnosis_snapshot": {"primary": "慢性阻塞性肺疾病急性加重"},
+        },
         [question(), question("optional", required=False)],
     )
 
@@ -44,6 +49,8 @@ def test_system_prompt_contains_cicare_patient_and_tasks():
     assert "禁止照抄" in prompt
     assert "开水房" in prompt
     assert "青霉素过敏" in prompt
+    assert "慢性阻塞性肺疾病急性加重" in prompt
+    assert "不得把诊断快照当作患者自述" in prompt
 
 
 def test_system_prompt_includes_dynamic_constraints():

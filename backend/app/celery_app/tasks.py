@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(name="app.celery_app.tasks.schedule_agent_worker", bind=True)
 def schedule_agent_worker(self, session_id: str, task_config: dict):
     """Schedule Agent 后台任务
-    作用：按需创建 Schedule Agent，处理一条患者答案后立即释放实例。
+    作用：按需创建 Schedule Agent, 完成任务后立即释放实例.
     """
     import asyncio
 
@@ -29,11 +29,36 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
     from app.utils.redis_client import get_redis
     from app.workers.event_publisher import DialogEventPublisher
     from app.workers.schedule_agent_runner import ScheduleAgentRunner
+    from app.workers.schedule_task_store import ScheduleTaskStore
+
+    is_opening_prepare = not task_config.get("source_message_id")
+    if is_opening_prepare:
+        from app.services.task_preparation_service import (
+            get_preparation_status,
+            mark_stage_running,
+        )
+
+        if get_preparation_status(session_id) == "failed":
+            return {
+                "status": "skipped",
+                "session_id": session_id,
+                "reason": "preparation_failed",
+            }
+        mark_stage_running(session_id, "schedule_prepare")
 
     try:
         config = get_app_config()
         model_config = config.get_agent_model_config("schedule_agent")
         if model_config is None:
+            if is_opening_prepare:
+                from app.services.task_preparation_service import mark_stage_failure
+
+                mark_stage_failure(
+                    session_id,
+                    "schedule_prepare",
+                    reason="未配置 Schedule Agent 模型",
+                    retrying=False,
+                )
             return {"status": "failed", "reason": "llm_not_configured"}
 
         ensure_worker_runtime()
@@ -57,9 +82,46 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
         )
         if result.get("status") == "already_running":
             raise self.retry(countdown=2, max_retries=10)
+        if is_opening_prepare:
+            from app.services.task_preparation_service import (
+                mark_stage_completed,
+                mark_stage_failure,
+            )
+
+            if result.get("status") == "prepared":
+                plan = ScheduleTaskStore(get_redis()).get_plan(session_id)
+                output = {
+                    "question_count": result.get("question_count", 0),
+                    "opening_guidance": result.get("opening_guidance", ""),
+                    "questions": [
+                        item.model_dump(mode="json")
+                        for item in (plan.tasks if plan is not None else [])
+                    ],
+                }
+                mark_stage_completed(
+                    session_id,
+                    "schedule_prepare",
+                    output=output,
+                )
+            else:
+                mark_stage_failure(
+                    session_id,
+                    "schedule_prepare",
+                    reason=str(result.get("reason") or "Schedule prepare 未成功"),
+                    retrying=False,
+                )
         return result
     except Exception as exc:
         logger.exception("[Schedule Agent] Celery任务失败: session=%s", session_id)
+        if is_opening_prepare:
+            from app.services.task_preparation_service import mark_stage_failure
+
+            mark_stage_failure(
+                session_id,
+                "schedule_prepare",
+                reason=f"{type(exc).__name__}: {exc}",
+                retrying=self.request.retries < 3,
+            )
         raise self.retry(exc=exc, countdown=10, max_retries=3)
 
 
@@ -84,13 +146,39 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
 
     from app.celery_app.runtime import ensure_worker_runtime
     from app.configs.app_config import get_app_config
+    from app.services.task_preparation_service import (
+        get_preparation_status,
+        mark_stage_completed,
+        mark_stage_failure,
+        mark_stage_running,
+    )
     from app.utils.redis_client import get_redis
     from app.workers.dialog_agent_runner import DialogAgentRunner
+
+    is_opening_prepare = (
+        not task_config.get("source_message_id")
+        and not bool(task_config.get("finalize"))
+    )
+    if is_opening_prepare:
+        if get_preparation_status(session_id) == "failed":
+            return {
+                "status": "skipped",
+                "session_id": session_id,
+                "reason": "preparation_failed",
+            }
+        mark_stage_running(session_id, "dialog_opening")
 
     try:
         config = get_app_config()
         model_config = config.get_agent_model_config("dialog_agent")
         if model_config is None:
+            if is_opening_prepare:
+                mark_stage_failure(
+                    session_id,
+                    "dialog_opening",
+                    reason="未配置 Dialog Agent 模型",
+                    retrying=False,
+                )
             return {"status": "failed", "reason": "llm_not_configured"}
 
         ensure_worker_runtime()
@@ -114,9 +202,34 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
         )
         if result.get("status") == "already_running":
             raise self.retry(countdown=2, max_retries=10)
+        if is_opening_prepare:
+            if result.get("status") in {"opening_completed", "already_completed"}:
+                mark_stage_completed(
+                    session_id,
+                    "dialog_opening",
+                    output={
+                        "message_id": result.get("message_id"),
+                        "content": result.get("content", ""),
+                        "status": result.get("status"),
+                    },
+                )
+            else:
+                mark_stage_failure(
+                    session_id,
+                    "dialog_opening",
+                    reason=str(result.get("reason") or "Dialog opening 未成功"),
+                    retrying=False,
+                )
         return result
     except Exception as exc:
         logger.exception("[Dialog Agent] Celery任务失败: session=%s", session_id)
+        if is_opening_prepare:
+            mark_stage_failure(
+                session_id,
+                "dialog_opening",
+                reason=f"{type(exc).__name__}: {exc}",
+                retrying=self.request.retries < 3,
+            )
         raise self.retry(exc=exc, countdown=10, max_retries=3)
 
 
@@ -136,8 +249,22 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
     import asyncio
 
     from app.celery_app.runtime import ensure_worker_runtime
+    from app.services.task_preparation_service import (
+        get_preparation_status,
+        mark_stage_completed,
+        mark_stage_failure,
+        mark_stage_running,
+    )
     from app.utils.redis_client import get_redis
     from app.workers.schedule_task_store import ScheduleTaskStore
+
+    if get_preparation_status(session_id) == "failed":
+        return {
+            "status": "skipped",
+            "session_id": session_id,
+            "reason": "preparation_failed",
+        }
+    mark_stage_running(session_id, "dialog_preheat")
 
     async def _run_preheat():
         """异步执行预热逻辑"""
@@ -148,12 +275,24 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
             scale_codes = task_config.get("scale_codes", [])
             if not scale_codes:
                 logger.error(f"[Dialog Agent] 缺少量表编码列表: {task_config}")
+                mark_stage_failure(
+                    session_id,
+                    "dialog_preheat",
+                    reason="missing_scale_codes",
+                    retrying=False,
+                )
                 return {"status": "failed", "reason": "missing_scale_codes"}
 
             ensure_worker_runtime()
             engine_type = task_config.get("engine_type", "text")
             if engine_type != "text":
                 logger.error(f"[Dialog Agent] 未知引擎类型: {engine_type}")
+                mark_stage_failure(
+                    session_id,
+                    "dialog_preheat",
+                    reason="unknown_engine_type",
+                    retrying=False,
+                )
                 return {"status": "failed", "reason": "unknown_engine_type"}
             redis = get_redis()
             plan = ScheduleTaskStore(redis).get_plan(session_id)
@@ -161,6 +300,12 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
             if plan is None:
                 raise RuntimeError(f"Schedule Task-todo 尚未就绪: {session_id}")
             if not questions:
+                mark_stage_failure(
+                    session_id,
+                    "dialog_preheat",
+                    reason="no_questions_loaded",
+                    retrying=False,
+                )
                 return {"status": "failed", "reason": "no_questions_loaded"}
 
             logger.info(f"[Dialog Agent] 加载量表问题: {len(questions)} 项")
@@ -180,12 +325,22 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
             if not saved:
                 raise RuntimeError("Dialog Agent预热标记保存失败")
 
-            return {
+            result = {
                 "status": "preheated",
                 "session_id": session_id,
                 "engine_type": engine_type,
                 "question_count": len(questions),
             }
+            mark_stage_completed(
+                session_id,
+                "dialog_preheat",
+                output={
+                    "engine_type": engine_type,
+                    "question_count": len(questions),
+                    "opening_guidance": plan.opening_guidance if plan else "",
+                },
+            )
+            return result
 
         except Exception:
             logger.exception("[Dialog Agent] 预热失败")
@@ -199,6 +354,12 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
 
     except Exception as e:  # noqa: BLE001
         logger.error(f"[Dialog Agent] 预热任务失败: {e}")
+        mark_stage_failure(
+            session_id,
+            "dialog_preheat",
+            reason=f"{type(e).__name__}: {e}",
+            retrying=self.request.retries < 3,
+        )
         raise self.retry(exc=e, countdown=5, max_retries=3)
 
 

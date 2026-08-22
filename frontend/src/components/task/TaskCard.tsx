@@ -40,7 +40,15 @@ const modeConfig = {
 };
 
 export default function TaskCard({ task, href }: TaskCardProps) {
-  const statusInfo = statusConfig[task.taskStatus];
+  const preparationFailed = task.preparation?.status === 'failed';
+  const preparationRunning =
+    task.preparation?.status === 'queued' ||
+    task.preparation?.status === 'running';
+  const statusInfo = preparationFailed
+    ? { label: '创建失败', variant: 'danger' as const }
+    : preparationRunning
+      ? { label: '准备中', variant: 'warning' as const }
+      : statusConfig[task.taskStatus];
   const modeInfo = modeConfig[task.collectionMode];
   const ModeIcon = modeInfo.icon;
 

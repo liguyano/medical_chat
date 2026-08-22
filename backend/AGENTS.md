@@ -187,7 +187,13 @@ from medagent.configs.agent_config import get_agent_config
   `dialog_queue`、`schedule_queue`、`extraction_queue` 各启动一个独立 Worker。
 - `POST /api/tasks` 在同一数据库事务内创建 `care_task`、`interaction_session` 和每张量表
   对应的 `assessment_instance`。后台按 `Schedule prepare -> Dialog preheat -> Dialog opening`
-  生成并持久化 Task-todo、预热首问；准备期间会话为 `pending`，首问落库后转为 `active`。
+ 生成并持久化 Task-todo、预热首问；准备期间会话为 `pending`，首问落库后转为 `active`。
+  AI 任务同时持久化 `care_task.preparation_*` 阶段快照，只有首问成功落库后设置
+  `patient_visible_at`，患者任务接口不得返回准备中或失败任务；医护可通过
+  `POST /api/tasks/{task_ref}/preparation/retry` 对失败任务幂等重试。
+- Agent 的患者上下文只额外包含当前住院记录的 `diagnosis_snapshot`，用于内部评估排序和
+  风险理解；不得把它作为患者自述向患者宣告，不得据此自行诊断或调整治疗。过敏史、入院来源、
+  护理级别等字段不进入本次对话 Agent payload。
 - 患者答案进入 PostgreSQL 后，Dialog、Schedule observe、Extraction 必须独立派发。
   Dialog 不得等待另外两个 Agent；Schedule/Extraction 失败由各自 Celery 重试处理。
 - 评估完成的唯一事实来源是全部生效量表中 `required=true` 且 `derived=false` 的结构化

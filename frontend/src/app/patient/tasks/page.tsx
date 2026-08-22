@@ -96,19 +96,30 @@ export default function PatientTasksPage() {
     }
 
     const controller = new AbortController();
-    void careRepository
-      .listPatientTasks(controller.signal)
-      .then((nextTasks) => {
+    // API 模式先清理旧浏览器快照，避免后台准备中的任务在请求完成前短暂可见。
+    setTasks([]);
+    const loadTasks = async () => {
+      try {
+        const nextTasks = await careRepository.listPatientTasks(
+          controller.signal
+        );
         setTasks(nextTasks);
         setLoadError('');
-      })
-      .catch((error) => {
+      } catch (error) {
         if (controller.signal.aborted || isRequestCancelled(error)) return;
         setLoadError(
           error instanceof Error ? error.message : '任务加载失败'
         );
-      });
-    return () => abortRequest(controller);
+      }
+    };
+    void loadTasks();
+    const timer = window.setInterval(() => {
+      void loadTasks();
+    }, 3000);
+    return () => {
+      window.clearInterval(timer);
+      abortRequest(controller);
+    };
   }, [hasHydrated, router, setTasks, user]);
 
   return (

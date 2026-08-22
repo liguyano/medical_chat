@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
 )
@@ -123,6 +124,40 @@ class CareTask(BusinessBaseMixin, Base):
         comment="采集模式：traditional_form或ai_dialogue；子任务从父任务继承",
     )
     task_status: Mapped[str] = mapped_column(String(32), nullable=False, comment="任务状态")
+    preparation_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="not_required",
+        server_default="not_required",
+        comment="AI首问准备状态：not_required/queued/running/ready/failed",
+    )
+    preparation_stage: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="AI首问准备当前阶段",
+    )
+    preparation_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="AI首问准备失败原因",
+    )
+    preparation_attempt: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="AI首问准备重试次数",
+    )
+    preparation_detail: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="AI首问准备阶段快照，仅供医护端查看",
+    )
+    patient_visible_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="任务向患者端发布的时间",
+    )
     assigned_nurse_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="负责护士ID")
     planned_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -547,6 +547,17 @@ export class ApiCareRepository implements CareRepository {
     return mapTaskDto(response);
   }
 
+  async retryTaskPreparation(taskId: string, signal?: AbortSignal) {
+    const response = await apiRequest<BackendTaskDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/preparation/retry`,
+      {
+        method: 'POST',
+        signal,
+      }
+    );
+    return mapTaskDto(response);
+  }
+
   async getNursingPlan(taskId: string, signal?: AbortSignal) {
     const response = await apiRequest<NursingPlanDto | null>(
       `/api/tasks/${encodeURIComponent(taskId)}/nursing-plan`,
