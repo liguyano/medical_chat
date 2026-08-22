@@ -126,6 +126,20 @@ async def test_prepare_task_todo_uses_model_order_and_deduplicates_shared_fields
 
 
 @pytest.mark.asyncio
+async def test_prepare_task_todo_model_failure_is_retriable():
+    """首问准备阶段的模型失败不能静默降级为成功。"""
+    agent = ScheduleAgent(
+        "session-1",
+        [make_question("smoking", "您是否吸烟？")],
+        make_llm(error=RuntimeError("模型不可用")),
+        check_interval=1,
+    )
+
+    with pytest.raises(RuntimeError, match="模型不可用"):
+        await agent.prepare_task_todo({"name": "张三"})
+
+
+@pytest.mark.asyncio
 async def test_task_todo_prompt_explicitly_requests_json():
     """结构化输出提示必须显式包含 JSON，兼容 DashScope response_format 约束。"""
     from medagent.agents.service_agent.schedule_agent.prompts import (
@@ -135,6 +149,22 @@ async def test_task_todo_prompt_explicitly_requests_json():
     prompt = build_task_todo_prompt(patient_info={}, questions=[])
 
     assert "json" in prompt
+
+
+def test_task_todo_prompt_keeps_diagnosis_as_internal_context():
+    """Schedule Prompt 应携带住院诊断，但明确禁止向患者宣告。"""
+    from medagent.agents.service_agent.schedule_agent.prompts import (
+        TASK_TODO_SYSTEM_PROMPT,
+        build_task_todo_prompt,
+    )
+
+    prompt = build_task_todo_prompt(
+        patient_info={"diagnosis_snapshot": {"primary": "脑卒中后遗症"}},
+        questions=[],
+    )
+
+    assert "脑卒中后遗症" in prompt
+    assert "不得向患者宣告诊断结论" in TASK_TODO_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio

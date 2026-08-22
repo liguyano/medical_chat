@@ -63,8 +63,8 @@ class ScheduleAgent:
         patient_info: dict[str, Any],
     ) -> ScheduleTaskTodo:
         """生成会话级 Task-todo
-        作用：由 Schedule Agent 规划问题顺序；模型失败时使用确定性顺序，
-        确保首问预热不会因规划模型异常而永久阻塞。
+        作用：由 Schedule Agent 规划问题顺序；模型失败时抛出异常，
+        由应用层 Celery 重试并向医护端记录准备失败。
         """
         grouped: dict[str, list[QuestionTask]] = {}
         for task in self.task_list:
@@ -127,14 +127,8 @@ class ScheduleAgent:
                 else SchedulePlanDraft.model_validate(result)
             )
         except Exception:
-            logger.exception("[Schedule Agent] Task-todo 规划失败，使用确定性顺序")
-            return SchedulePlanDraft(
-                opening_guidance=(
-                    "按 CICARE 完成身份核实、自我介绍和流程说明后，"
-                    "自然询问第一个待评估问题。"
-                ),
-                planning_reason="模型规划失败，使用量表审核顺序",
-            )
+            logger.exception("[Schedule Agent] Task-todo 规划失败")
+            raise
 
     async def evaluate(
         self,

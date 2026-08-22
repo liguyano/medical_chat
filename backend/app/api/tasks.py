@@ -85,6 +85,26 @@ def get_task(
 
 
 @router.post(
+    "/{task_ref}/preparation/retry",
+    response_model=ApiResponse[BackendTaskDto],
+    summary="重试 AI 首问准备",
+)
+def retry_task_preparation(
+    task_ref: str,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """重试准备失败的 AI 任务，不重复创建任务记录。"""
+    return ok(
+        task_service.retry_task_preparation(
+            db,
+            task_ref,
+            staff_id=staff.id,
+        )
+    )
+
+
+@router.post(
     "/{task_ref}/handoff",
     response_model=ApiResponse[dict],
     summary="患者主动呼叫医护人员",

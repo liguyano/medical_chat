@@ -65,6 +65,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - API 模式患者登录及患者任务页刷新必须调用
   `CareRepository.listPatientTasks()` → `/api/patients/me/tasks`，只依赖患者 HttpOnly
   Cookie；患者端禁止调用医护专用 `/api/tasks`，也不得依赖旧浏览器的医护登录缓存。
+- AI 对话任务创建后，患者端只会收到后端已完成首问准备并设置可见时间的任务；医护端任务详情
+  轮询 `getTask()` 展示 `Schedule prepare`、`Dialog preheat`、`Dialog opening` 三阶段状态和
+  输出。准备失败时显示错误与重试按钮，调用 `CareRepository.retryTaskPreparation()`，不能在
+  前端自行把失败任务标记为可用。
 - `/nurse/config` 通过 `CareRepository` 管理宣教材料、拦截特征字典和评估量表：
   宣教与规则使用结构化表单，量表使用完整 JSON 查看和编辑。API 与 Mock 模式必须保持
   同一接口，页面须等待医护身份就绪后再加载配置，保存后直接生效。

@@ -4,6 +4,58 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 
+def test_session_agent_payload_contains_only_current_diagnosis_context():
+    """Agent payload 应包含当前诊断，不应混入本次明确排除的住院字段。"""
+    from datetime import date
+
+    import app.services.agent_dispatch_service as service
+    from app.models.patient_task import CareTask, Patient, PatientEncounter
+
+    class ScalarRows:
+        def all(self):
+            return ["COPD"]
+
+    class FakeDb:
+        def __init__(self):
+            self.rows = {
+                CareTask: SimpleNamespace(id=1, task_no="TASK-1"),
+                Patient: SimpleNamespace(
+                    id=2,
+                    patient_name="患者",
+                    sex="男",
+                    birthday=date(1960, 1, 1),
+                ),
+                PatientEncounter: SimpleNamespace(
+                    id=3,
+                    department_name="呼吸科",
+                    bed_no="01",
+                    diagnosis_snapshot={"primary": "慢性阻塞性肺疾病急性加重"},
+                    allergy_summary="不纳入 Agent 上下文",
+                    admission_source="急诊",
+                    nursing_level="一级护理",
+                ),
+            }
+
+        def get(self, model, _id):
+            return self.rows[model]
+
+        def scalars(self, _query):
+            return ScalarRows()
+
+    patient_info, task_config = service.build_session_agent_payload(
+        FakeDb(),
+        SimpleNamespace(task_id=1, patient_id=2, encounter_id=3),
+    )
+
+    assert patient_info["diagnosis_snapshot"] == {
+        "primary": "慢性阻塞性肺疾病急性加重"
+    }
+    assert "allergy_summary" not in patient_info
+    assert "admission_source" not in patient_info
+    assert "nursing_level" not in patient_info
+    assert task_config["scale_codes"] == ["COPD"]
+
+
 def test_answer_dispatch_does_not_chain_background_agents(monkeypatch):
     """Dialog 应立即独立派发，后台 Agent 不得成为前置依赖。"""
     import app.services.agent_dispatch_service as service

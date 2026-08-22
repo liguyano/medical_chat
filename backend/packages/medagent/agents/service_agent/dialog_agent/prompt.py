@@ -1,13 +1,13 @@
 """Dialog Agent 提示词工程
 作用：构建 system_prompt，内嵌 CICARE 六步 + 沟通风格 + 评估任务 + 工具使用说明。
 """
+import json
 import logging
 from typing import Any
 
 from ..schedule_agent import QuestionTask
 
 logger = logging.getLogger(__name__)
-
 
 # ==================== CICARE 六步模板 ====================
 
@@ -48,7 +48,7 @@ CICARE_TEMPLATE = """
 """
 
 
-# ==================== 沟通风格指南 ====================
+# ==================== 沟通风格指南 ========================
 
 COMMUNICATION_STYLE = """
 【沟通风格要求】
@@ -62,7 +62,7 @@ COMMUNICATION_STYLE = """
 """
 
 
-# ==================== 工具使用说明 ====================
+# ==================== 工具使用说明 ========================
 
 TOOL_USAGE_GUIDE = """
 【工具使用规则】
@@ -110,12 +110,15 @@ def build_system_prompt(
     patient_name = patient_info.get("name", "患者")
     patient_gender = patient_info.get("gender", "未知")
     patient_age = patient_info.get("age", "未知")
+    diagnosis_snapshot = patient_info.get("diagnosis_snapshot") or {}
 
     patient_section = f"""
 【患者信息】
 - 姓名：{patient_name}
 - 性别：{patient_gender}
 - 年龄：{patient_age}岁
+- 当前住院诊断快照（仅供内部理解和评估排序）：{json.dumps(diagnosis_snapshot, ensure_ascii=False)}
+  注意：不得把诊断快照当作患者自述向患者宣告，不得据此自行诊断或调整治疗。
 """
 
     # 2. 评估任务列表

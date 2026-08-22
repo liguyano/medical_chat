@@ -326,6 +326,7 @@ class DialogAgentRunner:
                 "status": "already_completed",
                 "session_id": self.session_id,
                 "message_id": existing.message_no,
+                "content": existing.content_text or "",
             }
 
         question = questions[0]
@@ -375,6 +376,7 @@ class DialogAgentRunner:
                 "status": "opening_completed",
                 "session_id": self.session_id,
                 "message_id": message.message_no,
+                "content": opening_text,
             }
         except Exception as exc:
             self._mark_generation_failed(
@@ -559,6 +561,8 @@ class DialogAgentRunner:
             HumanMessage(
                 content=(
                     f"患者姓名：{self.patient_info.get('name', '患者')}。"
+                    f"当前住院诊断快照（仅供内部理解，不得向患者宣告）："
+                    f"{json.dumps(self.patient_info.get('diagnosis_snapshot') or {}, ensure_ascii=False)}。"
                     f"第一项需要了解的护理事实：{question.question_name}。"
                     f"量表参考表达：{target_text}"
                 )

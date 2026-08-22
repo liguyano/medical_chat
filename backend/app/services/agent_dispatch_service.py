@@ -67,6 +67,8 @@ def build_session_agent_payload(
         "age": _calculate_age(patient.birthday),
         "department": encounter.department_name or "",
         "bed_no": encounter.bed_no or "",
+        # 当前住院临床诊断仅作为 Agent 的内部评估上下文，不向患者宣告诊断结论。
+        "diagnosis_snapshot": encounter.diagnosis_snapshot or {},
     }
     task_config = {
         "task_id": task.id,

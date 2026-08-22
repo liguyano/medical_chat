@@ -29,7 +29,7 @@ import {
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { tasks, addTask, updateTaskStatus } = useTaskStore();
+  const { tasks, upsertTask, updateTaskStatus } = useTaskStore();
   const structuredAnswersByTask = useChatStore((state) => state.structuredAnswers);
   const interactionEventsByTask = useChatStore((state) => state.events);
   const structuredAnswers = structuredAnswersByTask[id] ?? [];
@@ -44,22 +44,29 @@ export default function TaskDetailPage() {
     null;
 
   useEffect(() => {
-    if (runtimeConfig.dataMode !== 'api' || storedTask) return;
+    if (runtimeConfig.dataMode !== 'api') return;
     const controller = new AbortController();
-    void careRepository
-      .getTask(id, controller.signal)
-      .then((loadedTask) => {
-        addTask(loadedTask);
+    const loadTask = async () => {
+      try {
+        const loadedTask = await careRepository.getTask(id, controller.signal);
+        upsertTask(loadedTask);
         setTaskLoadError('');
-      })
-      .catch((loadError) => {
+      } catch (loadError) {
         if (controller.signal.aborted || isRequestCancelled(loadError)) return;
         setTaskLoadError(
           loadError instanceof Error ? loadError.message : '任务加载失败'
         );
-      });
-    return () => abortRequest(controller);
-  }, [addTask, id, storedTask]);
+      }
+    };
+    void loadTask();
+    const timer = window.setInterval(() => {
+      void loadTask();
+    }, 2000);
+    return () => {
+      window.clearInterval(timer);
+      abortRequest(controller);
+    };
+  }, [id, upsertTask]);
 
   if (!task) {
     return (
@@ -93,7 +100,15 @@ export default function TaskDetailPage() {
     return statusMap[status as keyof typeof statusMap] || statusMap.pending;
   };
 
-  const statusInfo = getStatusInfo(task.taskStatus);
+  const preparationFailed = task.preparation?.status === 'failed';
+  const preparationRunning =
+    task.preparation?.status === 'queued' ||
+    task.preparation?.status === 'running';
+  const statusInfo = preparationFailed
+    ? { label: '创建失败', variant: 'danger' as const, color: 'bg-danger' }
+    : preparationRunning
+      ? { label: '准备中', variant: 'warning' as const, color: 'bg-warning' }
+      : getStatusInfo(task.taskStatus);
   const progressCurrent = task.progress?.current ?? 0;
   const progressTotal = task.progress?.total ?? 0;
   const scaleName =
@@ -115,6 +130,21 @@ export default function TaskDetailPage() {
 
   const handleGenerateQRCode = () => {
     setShowQRCode(true);
+  };
+
+  const handleRetryPreparation = async () => {
+    setLoading(true);
+    setTaskLoadError('');
+    try {
+      const retriedTask = await careRepository.retryTaskPreparation(task.id);
+      upsertTask(retriedTask);
+    } catch (retryError) {
+      setTaskLoadError(
+        retryError instanceof Error ? retryError.message : '任务重试失败'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -261,8 +291,114 @@ export default function TaskDetailPage() {
               </CardContent>
             </Card>
 
+            {task.collectionMode === 'ai_dialogue' && task.preparation && (
+              <Card padding="lg">
+                <CardHeader>
+                  <CardTitle>AI 首问准备进度</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {[
+                      ['schedule_prepare', 'Schedule 量表问题规划'],
+                      ['dialog_preheat', 'Dialog Agent 预热'],
+                      ['dialog_opening', '首问生成'],
+                    ].map(([stage, label]) => {
+                      const snapshot = task.preparation?.stages[stage];
+                      const stageStatus = snapshot?.status ?? 'pending';
+                      const statusLabel =
+                        stageStatus === 'completed'
+                          ? '已完成'
+                          : stageStatus === 'running'
+                            ? '执行中'
+                            : stageStatus === 'failed'
+                              ? '失败'
+                              : '等待中';
+                      return (
+                        <div
+                          key={stage}
+                          className="rounded-xl border border-border p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-medium">{label}</span>
+                            <Badge
+                              variant={
+                                stageStatus === 'failed'
+                                  ? 'danger'
+                                  : stageStatus === 'completed'
+                                    ? 'success'
+                                    : stageStatus === 'running'
+                                      ? 'info'
+                                      : 'default'
+                              }
+                              size="sm"
+                            >
+                              {statusLabel}
+                            </Badge>
+                          </div>
+                          {stage === 'schedule_prepare' &&
+                            Array.isArray(snapshot?.output?.questions) && (
+                              <div className="mt-2 max-h-48 overflow-y-auto rounded-lg bg-surface-secondary p-2 text-sm">
+                                <p className="mb-1 text-foreground-muted">
+                                  已规划问题：
+                                  {snapshot.output.questions.length} 项
+                                </p>
+                                <ol className="list-decimal space-y-1 pl-5">
+                                  {snapshot.output.questions.map(
+                                    (question, index) => (
+                                      <li key={`${stage}-${index}`}>
+                                        {typeof question === 'object' &&
+                                        question !== null &&
+                                        'question_name' in question
+                                          ? String(question.question_name)
+                                          : String(question)}
+                                      </li>
+                                    )
+                                  )}
+                                </ol>
+                              </div>
+                            )}
+                          {stage === 'dialog_opening' &&
+                            typeof snapshot?.output?.content === 'string' &&
+                            snapshot.output.content.length > 0 && (
+                              <p className="mt-2 rounded-lg bg-surface-secondary p-3 text-sm leading-6">
+                                首问：{String(snapshot.output.content)}
+                              </p>
+                            )}
+                          {snapshot?.error && (
+                            <p className="mt-2 text-sm text-red-700">
+                              {snapshot.error}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+                    <span className="text-foreground-muted">
+                      {preparationFailed
+                        ? `准备失败：${task.preparation.error ?? '未知错误'}`
+                        : preparationRunning
+                          ? `当前阶段：${task.preparation.stage ?? '后台准备中'}`
+                          : task.preparation.status === 'ready'
+                            ? '首问已生成，患者端已可见'
+                            : '等待后台开始准备'}
+                    </span>
+                    {preparationFailed && (
+                      <Button
+                        size="sm"
+                        onClick={handleRetryPreparation}
+                        loading={loading}
+                      >
+                        重试准备
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* 评估进度（仅进行中状态显示） */}
-            {task.taskStatus === 'in_progress' && (
+            {task.taskStatus === 'in_progress' && !preparationRunning && !preparationFailed && (
               <Card padding="lg">
                 <CardHeader>
                   <CardTitle>评估进度</CardTitle>
@@ -353,7 +489,9 @@ export default function TaskDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {task.taskStatus === 'pending' && (
+                  {task.taskStatus === 'pending' &&
+                    !preparationRunning &&
+                    !preparationFailed && (
                     <>
                       <Button
                         onClick={handleStartTask}
@@ -373,7 +511,25 @@ export default function TaskDetailPage() {
                     </>
                   )}
 
-                  {task.taskStatus === 'in_progress' && (
+                  {preparationRunning && (
+                    <Button variant="outline" disabled className="w-full">
+                      后台准备中…
+                    </Button>
+                  )}
+
+                  {preparationFailed && (
+                    <Button
+                      onClick={handleRetryPreparation}
+                      loading={loading}
+                      className="w-full"
+                    >
+                      重试 AI 首问准备
+                    </Button>
+                  )}
+
+                  {task.taskStatus === 'in_progress' &&
+                    !preparationRunning &&
+                    !preparationFailed && (
                     <Button
                       variant="outline"
                       onClick={() => router.push(`/nurse/monitor/${task.id}`)}

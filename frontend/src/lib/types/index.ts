@@ -82,6 +82,35 @@ export interface TaskScaleProgress {
   status: 'pending' | 'collecting' | 'completed';
 }
 
+export type TaskPreparationStatus =
+  | 'not_required'
+  | 'queued'
+  | 'running'
+  | 'ready'
+  | 'failed';
+
+export type TaskPreparationStageStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed';
+
+export interface TaskPreparationStage {
+  status: TaskPreparationStageStatus;
+  output: Record<string, unknown>;
+  error?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface TaskPreparation {
+  status: TaskPreparationStatus;
+  stage?: string | null;
+  attempt: number;
+  error?: string | null;
+  patientVisibleAt?: string | null;
+  stages: Record<string, TaskPreparationStage>;
+}
+
 // 护理任务
 export interface CareTask {
   id: string;
@@ -119,6 +148,7 @@ export interface CareTask {
   educationTopics?: string[];
   plannedStartTime?: string;
   notes?: string;
+  preparation?: TaskPreparation;
   handoffRequired?: boolean;
   handoffReason?: string;
   handoffRequestId?: string;

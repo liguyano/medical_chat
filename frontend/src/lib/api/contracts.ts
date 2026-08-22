@@ -163,6 +163,22 @@ export interface TaskScaleProgressDto {
   status: 'pending' | 'collecting' | 'completed';
 }
 
+export interface TaskPreparationStageDto {
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  output?: Record<string, unknown>;
+  error?: string | null;
+  updated_at?: string | null;
+}
+
+export interface TaskPreparationDto {
+  status: 'not_required' | 'queued' | 'running' | 'ready' | 'failed';
+  stage?: string | null;
+  attempt: number;
+  error?: string | null;
+  patient_visible_at?: string | null;
+  stages: Record<string, TaskPreparationStageDto>;
+}
+
 export interface BackendTaskDto {
   id?: ApiId;
   task_id?: ApiId;
@@ -183,6 +199,7 @@ export interface BackendTaskDto {
   task_type?: string;
   collection_mode: CollectionMode;
   task_status: TaskStatus;
+  preparation?: TaskPreparationDto | null;
   nurse_id?: ApiId;
   assigned_nurse_id?: ApiId;
   assigned_nurse_name?: string;

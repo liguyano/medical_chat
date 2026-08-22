@@ -726,6 +726,16 @@ export class MockCareRepository implements CareRepository {
     throw new Error(`Mock任务 ${taskId} 应从本地Store读取`);
   }
 
+  async retryTaskPreparation(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<CareTask> {
+    await wait(signal);
+    const task = mockTasks.find((item) => item.id === taskId);
+    if (!task) throw new Error(`Mock任务 ${taskId} 不存在`);
+    return structuredClone(task);
+  }
+
   async getNursingPlan(taskId: string, signal?: AbortSignal) {
     await wait(signal);
     const current = mockNursingPlans.get(taskId);

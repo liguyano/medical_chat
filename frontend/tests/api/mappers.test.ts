@@ -74,6 +74,30 @@ describe('API mappers', () => {
       task_status: 'pending',
       assigned_nurse_id: 14,
       created_at: '2026-08-16T10:00:00Z',
+      preparation: {
+        status: 'running',
+        stage: 'dialog_preheat',
+        attempt: 1,
+        error: null,
+        stages: {
+          schedule_prepare: {
+            status: 'completed',
+            output: {
+              question_count: 3,
+              questions: [{ question_name: '跌倒风险' }],
+            },
+            updated_at: '2026-08-19T08:31:00Z',
+          },
+          dialog_preheat: {
+            status: 'running',
+            output: {},
+          },
+          dialog_opening: {
+            status: 'pending',
+            output: {},
+          },
+        },
+      },
     });
     expect(task.id).toBe('900719925474099');
     expect(task.sessionId).toBe('88');
@@ -88,6 +112,10 @@ describe('API mappers', () => {
       answeredQuestionCount: 3,
       totalQuestionCount: 6,
       status: 'collecting',
+    });
+    expect(task.preparation?.status).toBe('running');
+    expect(task.preparation?.stages.schedule_prepare.output).toMatchObject({
+      question_count: 3,
     });
   });
 
