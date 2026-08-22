@@ -20,14 +20,18 @@ export function VoiceOrb({
         ? 'warning'
         : state === 'paused' || state === 'closed'
           ? 'pause'
-          : 'sparkles';
+          : undefined;
 
   return (
     <div className={cn('flex flex-col items-center text-center', className)}>
       <div className="patient-orb" data-state={state} aria-label={copy.title}>
         <span className="patient-orb-wave" aria-hidden="true" />
-        <span className="patient-orb-face">
-          <PatientIcon name={faceIcon} className="h-8 w-8" />
+        <span className="patient-orb-face" data-state={state}>
+          {faceIcon ? (
+            <PatientIcon name={faceIcon} className="h-8 w-8" />
+          ) : (
+            <span className="patient-orb-smile" aria-hidden="true" />
+          )}
         </span>
       </div>
       <p
