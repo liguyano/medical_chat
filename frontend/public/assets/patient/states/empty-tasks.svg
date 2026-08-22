@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="暂无护理任务">
+  <rect x="22" y="18" width="52" height="62" rx="10" fill="#FFFDF9" stroke="#E8DCD1" stroke-width="3"/>
+  <path d="M34 14h28v14H34z" fill="#F2E3D6" stroke="#C4612F" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M35 42h26M35 54h18M35 66h13" stroke="#A79D95" stroke-width="4" stroke-linecap="round"/>
+  <path d="m63 57 3 5 8-9" fill="none" stroke="#4BA7A3" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

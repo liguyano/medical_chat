@@ -1,86 +1,194 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import PatientLayout from '@/components/layout/PatientLayout';
-import { Card } from '@/components/shared/Card';
-import { Badge } from '@/components/shared/Badge';
-import { useUserStore } from '@/lib/stores/useUserStore';
+import { NurseCallButton } from '@/components/patient/NurseCallButton';
 import {
-  BellAlertIcon,
-  BuildingOffice2Icon,
-  ChatBubbleLeftRightIcon,
-  MapPinIcon,
-  PhoneIcon,
-} from '@heroicons/react/24/outline';
+  PatientBrandMark,
+  PatientIcon,
+} from '@/components/patient/PatientIcon';
+import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { useUserStore } from '@/lib/stores/useUserStore';
 
 export default function PatientHomePage() {
-  const { user } = useUserStore();
+  const user = useUserStore((state) => state.user);
+  const tasks = useTaskStore((state) => state.tasks);
+  const patientTasks = tasks.filter((task) => task.patientId === user?.id);
+  const activeTask =
+    patientTasks.find(
+      (task) =>
+        task.taskStatus === 'in_progress' || task.taskStatus === 'pending'
+    ) ?? patientTasks[0];
+  const current = activeTask?.progress?.current ?? 0;
+  const total = activeTask?.progress?.total ?? 1;
+  const progress = Math.round((current / Math.max(total, 1)) * 100);
+  const taskAction =
+    activeTask?.taskStatus === 'completed' ||
+    activeTask?.taskStatus === 'pending_review'
+      ? '查看记录'
+      : current > 0
+        ? '继续评估'
+        : '开始评估';
 
   return (
-    <PatientLayout title="住院服务" showNavigation>
-      <div className="max-w-xl mx-auto p-4 space-y-5">
-        <section className="rounded-3xl bg-gradient-to-br from-primary to-primary-hover text-white p-6 shadow-sm">
-          <Badge className="mb-4 bg-white/15 text-white border-white/20">演示数据</Badge>
-          <h1 className="text-3xl mb-2">您好，{user?.name ?? '患者'}</h1>
-          <p className="text-white/85">欢迎来到心内科一病区，护理团队将协助您完成入院评估。</p>
-          <Link
-            href="/patient/tasks"
-            className="inline-flex mt-5 rounded-full bg-white text-primary px-5 py-2.5 font-medium"
+    <PatientLayout showNavigation>
+      <div className="px-[18px] pb-4 pt-7">
+        <header className="flex items-center justify-between">
+          <h1 className="text-[29px] font-black text-[#3e1f18]">住院服务</h1>
+          <button
+            type="button"
+            className="patient-touch-button relative bg-white text-foreground shadow-sm"
+            aria-label="查看通知"
           >
-            查看待完成任务
-          </Link>
+            <PatientIcon name="bell" />
+            {activeTask && activeTask.taskStatus !== 'completed' && (
+              <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white">
+                1
+              </span>
+            )}
+          </button>
+        </header>
+
+        <section className="mt-4 flex items-center gap-3">
+          <PatientBrandMark />
+          <h2 className="text-[25px] font-black">
+            您好，{user?.name ?? '患者'}
+          </h2>
         </section>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Card padding="md">
-            <MapPinIcon className="w-6 h-6 text-primary mb-3" />
-            <h2 className="text-base font-sans font-semibold">病区位置</h2>
-            <p className="text-sm text-foreground-muted mt-1">茶水间位于护士站右侧，开水设备24小时开放。</p>
-          </Card>
-          <Card padding="md">
-            <PhoneIcon className="w-6 h-6 text-primary mb-3" />
-            <h2 className="text-base font-sans font-semibold">呼叫护士</h2>
-            <p className="text-sm text-foreground-muted mt-1">身体不适或需要下床协助时，请先按床旁呼叫铃。</p>
-          </Card>
-        </div>
-
-        <Card padding="lg">
-          <div className="flex items-center gap-3 mb-4">
-            <BuildingOffice2Icon className="w-6 h-6 text-primary" />
-            <h2 className="text-xl">今日住院指南</h2>
+        <section className="patient-card mt-4 flex items-center gap-3 overflow-hidden px-4 py-3">
+          <span className="flex h-14 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#fff1df] to-[#e8f3df] text-[#d17942]">
+            <PatientIcon name="hospital" className="h-9 w-9" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[17px] font-bold">
+              {activeTask?.department ?? user?.department ?? '住院病区'}
+              {activeTask?.bedNo ? ` · ${activeTask.bedNo}` : ''}
+            </p>
+            <p className="mt-0.5 text-xs text-foreground-muted">
+              护理团队将陪伴您完成入院流程
+            </p>
           </div>
-          <div className="space-y-3 text-sm">
-            {[
-              '请保管好腕带，检查和用药前医护人员会再次核对身份。',
-              '夜间下床前请先开灯，行动不便时使用呼叫铃。',
-              '病区为无烟环境，请勿在卫生间、楼梯间吸烟。',
-            ].map((item, index) => (
-              <div key={item} className="flex gap-3 rounded-xl bg-surface-secondary p-3">
-                <span className="w-6 h-6 rounded-full bg-primary-tint text-primary flex items-center justify-center text-xs font-semibold">
-                  {index + 1}
-                </span>
-                <p className="flex-1">{item}</p>
+          <PatientIcon name="location" className="text-[#625954]" />
+        </section>
+
+        {activeTask ? (
+          <section className="patient-card-soft mt-4 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[22px] font-black">
+                    {activeTask.taskType}
+                  </h2>
+                  <span className="rounded-full bg-[#ffe0cd] px-2.5 py-1 text-xs font-bold text-primary">
+                    {activeTask.taskStatus === 'pending_review'
+                      ? '待护士复核'
+                      : activeTask.taskStatus === 'completed'
+                        ? '已完成'
+                        : '进行中'}
+                  </span>
+                </div>
+                <p className="mt-1 text-[42px] font-black leading-none text-primary">
+                  {progress}
+                  <span className="ml-0.5 text-2xl">%</span>
+                </p>
               </div>
-            ))}
-          </div>
-        </Card>
+              <div
+                className="relative grid h-[82px] w-[82px] place-items-center rounded-full"
+                style={{
+                  background: `conic-gradient(#ff6041 ${progress}%, #f1e6df ${progress}% 100%)`,
+                }}
+                aria-label={`任务完成进度 ${progress}%`}
+              >
+                <span className="grid h-[62px] w-[62px] place-items-center rounded-full bg-[#fffaf4]">
+                  <PatientIcon name="clipboard" className="h-7 w-7 text-primary" />
+                </span>
+              </div>
+            </div>
+            <div className="patient-progress-track mt-3">
+              <div
+                className="patient-progress-value"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <Link
+              href={`/patient/tasks/${activeTask.id}`}
+              className="patient-primary-button mt-3 w-full"
+            >
+              {taskAction}
+            </Link>
+          </section>
+        ) : (
+          <section className="patient-card mt-4 p-5 text-center">
+            <Image
+              src="/assets/patient/states/empty-tasks.svg"
+              alt=""
+              width={72}
+              height={72}
+              className="mx-auto h-[72px] w-[72px]"
+            />
+            <h2 className="mt-2 text-lg font-bold">当前没有护理任务</h2>
+            <p className="mt-1 text-sm text-foreground-muted">
+              新任务会在护士准备完成后显示
+            </p>
+          </section>
+        )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <Link href="/patient/tasks">
-            <Card hover padding="md" className="h-full">
-              <BellAlertIcon className="w-6 h-6 text-primary mb-2" />
-              <p className="font-medium">护理任务</p>
-              <p className="text-xs text-foreground-muted mt-1">查看评估、宣教与知情同意</p>
-            </Card>
-          </Link>
-          <Link href="/patient/assistant">
-            <Card hover padding="md" className="h-full">
-              <ChatBubbleLeftRightIcon className="w-6 h-6 text-primary mb-2" />
-              <p className="font-medium">住院AI助手</p>
-              <p className="text-xs text-foreground-muted mt-1">咨询病区生活和住院流程</p>
-            </Card>
-          </Link>
-        </div>
+        <section className="patient-card mt-4 flex min-h-[96px] items-center overflow-hidden bg-gradient-to-r from-[#fff3ee] to-[#fff8f4] px-3">
+          <Image
+            src="/assets/patient/illustrations/nurse-help.webp"
+            alt="护士呼叫帮助"
+            width={112}
+            height={112}
+            priority
+            className="h-[92px] w-[92px] shrink-0 object-contain object-bottom"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-lg font-black text-[#c83c29]">需要帮助？</p>
+            <p className="text-sm font-bold text-[#c83c29]">随时呼叫护士</p>
+          </div>
+          <NurseCallButton
+            taskId={activeTask?.id}
+            className="h-14 w-14 shrink-0 rounded-full p-0 [&_svg]:h-7 [&_svg]:w-7"
+            compact
+            iconOnly
+          />
+        </section>
+
+        <section className="mt-4 grid grid-cols-3 gap-3">
+          {[
+            {
+              href: '/patient/tasks',
+              title: '护理任务',
+              icon: 'clipboard' as const,
+              tone: 'from-[#fff1dd] to-[#fff8ed] text-[#e77c36]',
+            },
+            {
+              href: '/patient/assistant',
+              title: '住院助手',
+              icon: 'nav-assistant' as const,
+              tone: 'from-[#e8f7f6] to-[#f1fbfa] text-[#2e8d89]',
+            },
+            {
+              href: '/patient/assistant',
+              title: '病区指南',
+              icon: 'document' as const,
+              tone: 'from-[#e8f1ff] to-[#f2f7ff] text-[#4f81dc]',
+            },
+          ].map((item) => (
+            <Link
+              key={item.title}
+              href={item.href}
+              className={`flex min-h-[110px] flex-col items-center justify-center gap-2 rounded-[20px] bg-gradient-to-br ${item.tone} shadow-sm`}
+            >
+              <PatientIcon name={item.icon} className="h-9 w-9" />
+              <span className="text-sm font-black text-foreground">
+                {item.title}
+              </span>
+            </Link>
+          ))}
+        </section>
       </div>
     </PatientLayout>
   );

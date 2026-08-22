@@ -4,22 +4,13 @@ import { useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import SignaturePad from '@/components/consent/SignaturePad';
-import { Card } from '@/components/shared/Card';
-import { Button } from '@/components/shared/Button';
-import { Badge } from '@/components/shared/Badge';
-import { Progress } from '@/components/shared/Progress';
-import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { PatientIcon } from '@/components/patient/PatientIcon';
 import { careRepository } from '@/lib/repositories';
 import { createClientInvocationId } from '@/lib/clientInvocation';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
 import { toHandoffSseEnvelope } from '@/lib/transports/handoffResponse';
 import type { ConsentClause, ConsentProgress } from '@/lib/types';
-import {
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  SpeakerWaveIcon,
-} from '@heroicons/react/24/outline';
 
 const initialClauses: ConsentClause[] = [
   {
@@ -68,23 +59,27 @@ export default function PatientConsentPage() {
   const saveConsent = useTaskStore((state) => state.saveConsent);
   const updateTask = useTaskStore((state) => state.updateTask);
   const [clauses, setClauses] = useState(savedConsent?.clauses ?? initialClauses);
+  const [activeClauseIndex, setActiveClauseIndex] = useState(() => {
+    const source = savedConsent?.clauses ?? initialClauses;
+    const firstUnconfirmed = source.findIndex((clause) => !clause.confirmed);
+    return firstUnconfirmed < 0 ? source.length - 1 : firstUnconfirmed;
+  });
   const [signatureData, setSignatureData] = useState(savedConsent?.signatureData);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const handoffSubmittingRef = useRef(false);
 
   const completedCount = clauses.filter((clause) => clause.confirmed).length;
-  const currentIndex = Math.min(
-    clauses.findIndex((clause) => !clause.confirmed),
+  const safeIndex = Math.min(
+    Math.max(activeClauseIndex, 0),
     clauses.length - 1
   );
-  const safeIndex = currentIndex < 0 ? clauses.length - 1 : currentIndex;
   const current = clauses[safeIndex];
   const allConfirmed = completedCount === clauses.length;
 
   const importance = useMemo(() => {
-    if (current.importanceLevel === 'critical') return { label: '必须确认', variant: 'danger' as const };
-    return { label: '重要条款', variant: 'warning' as const };
+    if (current.importanceLevel === 'critical') return '必须确认';
+    return '重要条款';
   }, [current.importanceLevel]);
 
   const markListened = () => {
@@ -111,6 +106,7 @@ export default function PatientConsentPage() {
           : item
       )
     );
+    setActiveClauseIndex((index) => Math.min(index + 1, clauses.length - 1));
     setError('');
   };
 
@@ -194,83 +190,193 @@ export default function PatientConsentPage() {
   };
 
   return (
-    <PatientLayout title="知情同意确认" showBack>
-      <div className="max-w-xl mx-auto p-4 space-y-4">
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <Badge variant="primary" size="sm">入院须知 v1.0</Badge>
-              <h1 className="text-2xl mt-2">关键条款宣讲</h1>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <IntegrationStatus compact />
-              <span className="text-sm text-foreground-muted">{completedCount}/{clauses.length}</span>
-            </div>
+    <PatientLayout
+      title="知情同意确认"
+      showBack
+      headerRight={
+        <span className="rounded-full bg-[#fff0e8] px-3 py-1 text-sm font-black text-primary">
+          2/3
+        </span>
+      }
+    >
+      <div className="space-y-4 px-[18px] pb-8 pt-4">
+        <section className="px-2 py-1">
+          <div className="grid grid-cols-[1fr_auto_1fr_auto_1fr] items-start">
+            {[
+              { label: '1 评估', done: true },
+              { label: '2 知情同意', done: allConfirmed },
+              { label: '3 完成', done: false },
+            ].map((step, index) => (
+              <div key={step.label} className="contents">
+                <div className="flex flex-col items-center">
+                  <span
+                    className={`grid h-9 w-9 place-items-center rounded-full text-sm font-black ${
+                      index < 2
+                        ? 'bg-primary text-white'
+                        : 'bg-[#eae5df] text-foreground-muted'
+                    }`}
+                  >
+                    {step.done ? (
+                      <PatientIcon name="check-circle" className="h-5 w-5" />
+                    ) : (
+                      index + 1
+                    )}
+                  </span>
+                  <span
+                    className={`mt-2 text-xs font-bold ${
+                      index < 2 ? 'text-primary' : 'text-foreground-muted'
+                    }`}
+                  >
+                    {step.label}
+                  </span>
+                </div>
+                {index < 2 && (
+                  <span
+                    className={`mt-[18px] h-0.5 min-w-8 ${
+                      index === 0
+                        ? 'bg-primary'
+                        : 'border-t-2 border-[#ddd4cc]'
+                    }`}
+                  />
+                )}
+              </div>
+            ))}
           </div>
-          <Progress value={completedCount} max={clauses.length} size="sm" />
-          <p className="text-xs text-foreground-muted mt-3">
-            “已听完”“已理解”“已同意”和“已签名”是不同状态。本页面仅用于原型演示。
-          </p>
-        </Card>
+        </section>
 
         {!allConfirmed && (
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <Badge variant={importance.variant}>{importance.label}</Badge>
-              <span className="text-xs text-foreground-muted">第 {safeIndex + 1} 条</span>
+          <section className="patient-card-soft p-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[#ff7658] to-[#ff4f31] text-white">
+                <PatientIcon name="shield" className="h-7 w-7" />
+              </span>
+              <h1 className="min-w-0 flex-1 text-[22px] font-black">
+                {current.clauseName}
+              </h1>
+              <span className="rounded-full bg-[#ffe7e1] px-3 py-1 text-sm font-black text-danger">
+                {importance}
+              </span>
             </div>
-            <h2 className="text-xl mb-3">{current.clauseName}</h2>
-            <p className="text-base leading-8">{current.patientContent}</p>
+
+            <p className="mt-5 text-[17px] font-medium leading-8">
+              {current.patientContent}
+            </p>
+
             <button
               type="button"
               onClick={markListened}
-              className="mt-5 w-full rounded-xl bg-surface-secondary border border-border p-4 flex items-center justify-center gap-2 text-primary"
+              className="mt-5 flex min-h-[76px] w-full items-center gap-3 rounded-[18px] border border-[#f0c8a7] bg-white/75 px-4 text-left"
             >
-              <SpeakerWaveIcon className="w-5 h-5" />
-              {current.listened ? '重新播放条款' : '播放条款（原型模拟）'}
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary text-white">
+                <PatientIcon
+                  name={current.listened ? 'replay' : 'play'}
+                  className="h-6 w-6"
+                />
+              </span>
+              <span className="font-black">
+                {current.listened ? '重新播放条款' : '播放条款'}
+              </span>
+              <span className="flex h-8 flex-1 items-center justify-center gap-[3px] overflow-hidden text-primary">
+                {[10, 18, 12, 24, 15, 22, 12, 17, 25, 14, 20, 11].map(
+                  (height, index) => (
+                    <span
+                      key={`${height}-${index}`}
+                      className="w-[3px] rounded-full bg-current"
+                      style={{ height }}
+                    />
+                  )
+                )}
+              </span>
+              <span className="text-xs text-foreground-muted">01:02</span>
             </button>
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <Button
-                variant="outline"
-                loading={submitting}
-                onClick={() => void needExplanation()}
-              >
-                我不理解
-              </Button>
-              <Button onClick={confirmCurrent} disabled={!current.listened}>
-                已理解并确认
-              </Button>
-            </div>
-          </Card>
+          </section>
         )}
 
-        {allConfirmed && (
-          <Card padding="lg">
-            <div className="flex items-center gap-2 text-green-700 mb-4">
-              <CheckCircleIcon className="w-6 h-6" />
-              <span className="font-medium">所有关键条款均已理解确认</span>
-            </div>
-            <h2 className="text-xl mb-3">参与人手写签名</h2>
-            <SignaturePad onChange={setSignatureData} />
-          </Card>
+        <section className="flex items-center justify-between px-3">
+          <button
+            type="button"
+            onClick={() =>
+              setActiveClauseIndex((index) => Math.max(index - 1, 0))
+            }
+            className="patient-touch-button border border-[#efc7a9] bg-white text-primary disabled:opacity-40"
+            disabled={safeIndex === 0}
+            aria-label="上一条条款"
+          >
+            <span aria-hidden="true" className="text-2xl leading-none">‹</span>
+          </button>
+          <p className="text-[15px] font-bold">
+            {safeIndex + 1} / {clauses.length} 条款
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              setActiveClauseIndex((index) =>
+                Math.min(index + 1, clauses.length - 1)
+              )
+            }
+            className="patient-touch-button bg-primary text-white disabled:opacity-40"
+            disabled={allConfirmed || safeIndex === clauses.length - 1}
+            aria-label="下一条条款"
+          >
+            <span aria-hidden="true" className="text-2xl leading-none">›</span>
+          </button>
+        </section>
+
+        {!allConfirmed && (
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              disabled={submitting}
+              className="patient-outline-button px-2 text-[14px] disabled:opacity-50"
+                onClick={() => void needExplanation()}
+            >
+              <PatientIcon name="nurse" className="h-5 w-5" />
+              {submitting ? '正在通知' : '我不理解，请找护士'}
+            </button>
+            <button
+              type="button"
+              onClick={confirmCurrent}
+              disabled={!current.listened}
+              className="patient-primary-button px-2 text-[14px]"
+            >
+              <PatientIcon name="check-circle" className="h-5 w-5" />
+              已理解并确认
+            </button>
+          </div>
         )}
+
+        <section className="border-t border-dashed border-[#ded5cd] pt-4">
+          {allConfirmed && (
+            <div className="mb-3 flex items-center gap-2 rounded-2xl bg-[#eaf7f2] p-3 text-sm font-bold text-[#268163]">
+              <PatientIcon name="check-circle" className="h-5 w-5" />
+              所有关键条款均已理解确认
+            </div>
+          )}
+          <h2 className="mb-3 text-[17px] font-black">完成签名后提交</h2>
+          <SignaturePad
+            onChange={setSignatureData}
+            disabled={!allConfirmed}
+          />
+        </section>
 
         {error && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex gap-2 text-sm text-amber-800">
-            <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0" />
+          <div
+            role="alert"
+            className="flex gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800"
+          >
+            <PatientIcon name="warning" className="h-5 w-5 shrink-0" />
             {error}
           </div>
         )}
 
         {allConfirmed && (
-          <Button
-            className="w-full"
-            size="lg"
-            loading={submitting}
+          <button
+            className="patient-primary-button w-full"
+            disabled={submitting || !signatureData}
             onClick={() => void submit()}
           >
-            确认同意并提交
-          </Button>
+            {submitting ? '正在提交…' : '确认同意并提交'}
+          </button>
         )}
       </div>
     </PatientLayout>

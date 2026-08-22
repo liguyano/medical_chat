@@ -2,13 +2,12 @@
 
 import { ReactNode, useEffect } from 'react';
 import Link from 'next/link';
-import {
-  ArrowLeftIcon,
-  BellIcon,
-  ChatBubbleLeftRightIcon,
-  HomeIcon,
-} from '@heroicons/react/24/outline';
+import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { usePathname, useRouter } from 'next/navigation';
+import {
+  PatientIcon,
+  type PatientIconName,
+} from '@/components/patient/PatientIcon';
 import { cn } from '@/lib/utils';
 
 interface PatientLayoutProps {
@@ -17,6 +16,8 @@ interface PatientLayoutProps {
   showBack?: boolean;
   onBack?: () => void;
   showNavigation?: boolean;
+  headerRight?: ReactNode;
+  contentClassName?: string;
 }
 
 export default function PatientLayout({
@@ -25,6 +26,8 @@ export default function PatientLayout({
   showBack = false,
   onBack,
   showNavigation = false,
+  headerRight,
+  contentClassName,
 }: PatientLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -43,58 +46,78 @@ export default function PatientLayout({
   };
 
   return (
-    <div className="min-h-screen bg-background scrollbar-soft">
-      {/* 顶部标题栏（移动端优化） */}
-      {(showBack || title) && (
-        <header className="sticky top-0 z-50 bg-surface/90 backdrop-blur-md border-b border-border">
-          <div className="flex items-center h-14 px-4">
-            {showBack && (
-              <button
-                onClick={handleBack}
-                className="mr-3 p-2 -ml-2 rounded-full hover:bg-surface-secondary transition-colors"
-                aria-label="返回"
-              >
-                <ArrowLeftIcon className="w-5 h-5 text-foreground" />
-              </button>
-            )}
-            {title && (
-              <h1 className="text-lg font-medium text-foreground flex-1 text-center pr-10">
-                {title}
-              </h1>
-            )}
-          </div>
-        </header>
-      )}
-
-      {/* 主内容区 */}
-      <main className={showNavigation ? 'pb-24' : 'pb-safe'}>{children}</main>
-
-      {showNavigation && (
-        <nav className="fixed bottom-0 inset-x-0 z-50 border-t border-border bg-surface/95 backdrop-blur-md">
-          <div className="max-w-xl mx-auto grid grid-cols-3 px-3 py-2 safe-area-pb">
-            {[
-              { href: '/patient/home', label: '首页', icon: HomeIcon },
-              { href: '/patient/tasks', label: '任务', icon: BellIcon },
-              { href: '/patient/assistant', label: '住院助手', icon: ChatBubbleLeftRightIcon },
-            ].map((item) => {
-              const active = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'flex flex-col items-center gap-1 rounded-xl py-2 text-xs',
-                    active ? 'text-primary bg-primary-tint' : 'text-foreground-muted'
-                  )}
+    <div className="patient-app scrollbar-soft">
+      <div className="patient-mobile-frame">
+        {(showBack || title || headerRight) && (
+          <header className="patient-topbar">
+            <div className="flex items-center justify-start">
+              {showBack && (
+                <button
+                  onClick={handleBack}
+                  className="patient-touch-button text-foreground hover:bg-surface"
+                  aria-label="返回"
                 >
-                  <item.icon className="w-5 h-5" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
-      )}
+                  <ArrowLeftIcon className="h-6 w-6" />
+                </button>
+              )}
+            </div>
+            {title ? (
+              <h1 className="patient-topbar-title">{title}</h1>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center justify-end">
+              {headerRight}
+            </div>
+          </header>
+        )}
+
+        <main
+          className={cn(
+            'patient-page-content',
+            showNavigation ? 'pb-[calc(92px+env(safe-area-inset-bottom))]' : 'pb-safe',
+            contentClassName
+          )}
+        >
+          {children}
+        </main>
+
+        {showNavigation && (
+          <nav className="patient-bottom-nav" aria-label="患者端主导航">
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { href: '/patient/home', label: '首页', icon: 'nav-home' },
+                  { href: '/patient/tasks', label: '任务', icon: 'nav-tasks' },
+                  {
+                    href: '/patient/assistant',
+                    label: '住院助手',
+                    icon: 'nav-assistant',
+                  },
+                ] as Array<{
+                  href: string;
+                  label: string;
+                  icon: PatientIconName;
+                }>
+              ).map((item) => {
+                const active = pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="patient-nav-item"
+                    data-active={active}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    <PatientIcon name={item.icon} className="h-[23px] w-[23px]" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        )}
+      </div>
     </div>
   );
 }

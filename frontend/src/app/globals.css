@@ -121,3 +121,349 @@ h1, h2 {
   font-weight: 500;
   letter-spacing: -0.02em;
 }
+
+/* 患者端视觉系统：仅在 PatientLayout 内覆盖，避免影响医护端。 */
+.patient-app {
+  --background: #f7f4ef;
+  --surface: #ffffff;
+  --surface-secondary: #fbf9f5;
+  --foreground: #2f2925;
+  --foreground-muted: #756d66;
+  --foreground-placeholder: #a9a09a;
+  --border: #e8dcd1;
+  --primary: #ff6041;
+  --primary-hover: #df472d;
+  --primary-tint: #fff0e8;
+  --success: #3dad82;
+  --warning: #e5a146;
+  --danger: #d95a4a;
+  --info: #5b8def;
+  min-height: 100dvh;
+  color: var(--foreground);
+  background:
+    radial-gradient(circle at 8% 2%, rgb(255 255 255 / 82%), transparent 24rem),
+    #ebe6de;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+.patient-app h1,
+.patient-app h2 {
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  letter-spacing: -0.035em;
+}
+
+.patient-mobile-frame {
+  position: relative;
+  width: 100%;
+  max-width: 430px;
+  min-height: 100dvh;
+  margin-inline: auto;
+  overflow-x: clip;
+  background:
+    radial-gradient(circle at 85% 3%, rgb(255 240 227 / 70%), transparent 16rem),
+    var(--background);
+  box-shadow: 0 0 48px rgb(79 57 42 / 14%);
+}
+
+.patient-page-content {
+  width: 100%;
+  min-height: auto;
+}
+
+.patient-page-padding {
+  padding: 20px 18px;
+}
+
+.patient-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  min-height: 64px;
+  padding: max(env(safe-area-inset-top), 6px) 10px 0;
+  border-bottom: 1px solid rgb(232 220 209 / 72%);
+  background: rgb(247 244 239 / 91%);
+  backdrop-filter: blur(18px);
+}
+
+.patient-topbar-title {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-touch-button {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.patient-touch-button:active {
+  transform: scale(.96);
+}
+
+.patient-bottom-nav {
+  position: fixed;
+  z-index: 50;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-width: 430px;
+  min-height: calc(72px + env(safe-area-inset-bottom));
+  margin-inline: auto;
+  padding: 8px 16px max(8px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgb(232 220 209 / 80%);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 -10px 28px rgb(94 67 48 / 8%);
+  backdrop-filter: blur(18px);
+}
+
+.patient-nav-item {
+  display: flex;
+  min-height: 56px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 16px;
+  color: #8a837e;
+  font-size: 12px;
+  font-weight: 600;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.patient-nav-item[data-active='true'] {
+  color: var(--primary);
+  background: var(--primary-tint);
+}
+
+.patient-card {
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(94 67 48 / 8%);
+}
+
+.patient-card-soft {
+  border: 1px solid #f0d9c6;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #fffaf4 0%, #fff3e8 100%);
+  box-shadow: 0 8px 22px rgb(141 76 42 / 8%);
+}
+
+.patient-primary-button {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ff6848 0%, #ff5133 100%);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
+  box-shadow: 0 10px 20px rgb(255 86 52 / 20%);
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.patient-primary-button:hover {
+  filter: brightness(.98);
+}
+
+.patient-primary-button:active {
+  transform: scale(.985);
+}
+
+.patient-primary-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(.2);
+  opacity: .55;
+}
+
+.patient-outline-button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1.5px solid var(--primary);
+  border-radius: 16px;
+  color: var(--primary);
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.patient-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eadfd7;
+}
+
+.patient-progress-value {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff6848, #ff4f31);
+  transition: width 300ms ease;
+}
+
+.patient-field {
+  min-height: 58px;
+  border: 1.5px solid #efc9ae;
+  border-radius: 17px;
+  background: rgb(255 255 255 / 82%);
+}
+
+.patient-field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgb(255 96 65 / 11%);
+}
+
+.patient-orb {
+  --orb-color: #c4612f;
+  --orb-soft: #f6dccf;
+  position: relative;
+  display: grid;
+  width: 168px;
+  height: 168px;
+  place-items: center;
+  border-radius: 999px;
+  isolation: isolate;
+}
+
+.patient-orb::before,
+.patient-orb::after {
+  position: absolute;
+  z-index: -2;
+  border-radius: inherit;
+  content: '';
+  inset: 0;
+}
+
+.patient-orb::before {
+  border: 2px dashed color-mix(in srgb, var(--orb-color) 70%, white);
+  animation: patient-orb-breathe 2.4s ease-in-out infinite;
+}
+
+.patient-orb::after {
+  z-index: -1;
+  inset: 16px;
+  background: radial-gradient(circle at 48% 38%, #fff 0 12%, var(--orb-soft) 48%, var(--orb-color) 100%);
+  box-shadow:
+    0 0 0 12px color-mix(in srgb, var(--orb-soft) 58%, transparent),
+    0 18px 35px color-mix(in srgb, var(--orb-color) 25%, transparent);
+}
+
+.patient-orb[data-state='connecting'],
+.patient-orb[data-state='listening'],
+.patient-orb[data-state='transcribing'] {
+  --orb-color: #4ba7a3;
+  --orb-soft: #d8f3ef;
+}
+
+.patient-orb[data-state='thinking'] {
+  --orb-color: #5b8def;
+  --orb-soft: #dee8ff;
+}
+
+.patient-orb[data-state='speaking'] {
+  --orb-color: #3dad82;
+  --orb-soft: #d7f0e5;
+}
+
+.patient-orb[data-state='error'],
+.patient-orb[data-state='text_fallback'] {
+  --orb-color: #e5a146;
+  --orb-soft: #fff0d8;
+}
+
+.patient-orb[data-state='paused'] {
+  --orb-color: #5b8def;
+  --orb-soft: #dee8ff;
+}
+
+.patient-orb[data-state='closed'] {
+  --orb-color: #756d66;
+  --orb-soft: #e8e2dd;
+}
+
+.patient-orb-face {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 74%);
+  color: color-mix(in srgb, var(--orb-color) 90%, #2f2925);
+  box-shadow: inset 0 1px 2px rgb(255 255 255 / 90%), 0 8px 18px rgb(60 76 70 / 14%);
+}
+
+.patient-orb-wave {
+  position: absolute;
+  z-index: -3;
+  width: 220px;
+  height: 54px;
+  opacity: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--orb-color) 70%, transparent) 6px 8px,
+    transparent 8px 14px
+  );
+  mask-image: radial-gradient(ellipse at center, #000, transparent 72%);
+}
+
+.patient-orb[data-state='speaking'] .patient-orb-wave,
+.patient-orb[data-state='listening'] .patient-orb-wave {
+  opacity: .68;
+  animation: patient-orb-wave 1.6s ease-in-out infinite;
+}
+
+@keyframes patient-orb-breathe {
+  0%,
+  100% { transform: scale(1); opacity: .72; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@keyframes patient-orb-wave {
+  0%,
+  100% { transform: scaleY(.5); }
+  50% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patient-orb::before,
+  .patient-orb-wave {
+    animation: none !important;
+  }
+}
+
+@media (min-width: 520px) {
+  .patient-mobile-frame {
+    min-height: calc(100dvh - 32px);
+    margin-block: 16px;
+    border: 1px solid rgb(255 255 255 / 85%);
+    border-radius: 34px;
+  }
+
+  .patient-mobile-frame:has(.patient-bottom-nav) {
+    padding-bottom: 0;
+  }
+
+  .patient-bottom-nav {
+    bottom: 16px;
+    border-radius: 0 0 34px 34px;
+  }
+}
