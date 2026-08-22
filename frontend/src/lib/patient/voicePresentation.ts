@@ -23,7 +23,7 @@ export const VOICE_PRESENTATIONS: Record<
   idle: {
     title: '点击开始说话',
     detail: '点击后才会使用麦克风',
-    color: '#c4612f',
+    color: '#2e9893',
   },
   connecting: {
     title: '正在连接',

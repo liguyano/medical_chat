@@ -188,10 +188,14 @@ h1, h2 {
   backdrop-filter: blur(18px);
 }
 
+.patient-topbar-with-right {
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+}
+
 .patient-topbar-title {
   overflow: hidden;
   color: var(--foreground);
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 800;
   line-height: 1.2;
   text-align: center;
@@ -246,7 +250,7 @@ h1, h2 {
 
 .patient-nav-item[data-active='true'] {
   color: var(--primary);
-  background: var(--primary-tint);
+  background: transparent;
 }
 
 .patient-card {
@@ -332,12 +336,12 @@ h1, h2 {
 }
 
 .patient-orb {
-  --orb-color: #c4612f;
-  --orb-soft: #f6dccf;
+  --orb-color: #4ba7a3;
+  --orb-soft: #d8f3ef;
   position: relative;
   display: grid;
-  width: 168px;
-  height: 168px;
+  width: 184px;
+  height: 184px;
   place-items: center;
   border-radius: 999px;
   isolation: isolate;
@@ -401,8 +405,8 @@ h1, h2 {
 
 .patient-orb-face {
   display: grid;
-  width: 62px;
-  height: 62px;
+  width: 72px;
+  height: 72px;
   place-items: center;
   border-radius: 999px;
   background: rgb(255 255 255 / 74%);
@@ -465,5 +469,21 @@ h1, h2 {
   .patient-bottom-nav {
     bottom: 16px;
     border-radius: 0 0 34px 34px;
+  }
+}
+
+@media (max-width: 519px) {
+  /*
+   * 移动端使用覆盖式滚动条，不能让稳定 gutter 挤窄 390px 原型画布。
+   * 桌面端仍保留细滚动条，便于长页面识别当前滚动位置。
+   */
+  html.patient-scrollbar {
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+
+  html.patient-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 }

@@ -4,10 +4,7 @@ import { Suspense, useState } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
-import {
-  PatientBrandMark,
-  PatientIcon,
-} from '@/components/patient/PatientIcon';
+import { PatientIcon } from '@/components/patient/PatientIcon';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
@@ -147,8 +144,11 @@ function PatientVerifyContent() {
           }}
         />
 
-        <div className="relative z-10 text-center">
-          <PatientBrandMark className="mx-auto h-[74px] w-[74px] rounded-[26px] [&_svg]:h-11 [&_svg]:w-11" />
+        <div className="relative z-10 pt-2 text-center">
+          <PatientIcon
+            name="brand-heart-cross"
+            className="mx-auto h-[92px] w-[92px] text-primary"
+          />
           <h1 className="mt-5 text-[32px] font-black leading-tight text-[#4a241c]">
             进入护理服务
           </h1>
@@ -159,17 +159,6 @@ function PatientVerifyContent() {
           </div>
 
           <div className="patient-card mt-6 overflow-hidden p-4">
-            <div className="mb-5 flex items-start gap-3 rounded-2xl bg-[#fff8f2] p-4 text-left">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ffe8da] text-primary">
-                <PatientIcon name="shield" className="h-6 w-6" />
-              </span>
-              <p className="pt-0.5 text-[15px] leading-7 text-foreground-muted">
-                为保障您的隐私与安全，
-                <br />
-                请核验身份后进入护理服务。
-              </p>
-            </div>
-
             <form onSubmit={handleVerify} className="space-y-5">
               <div className="grid grid-cols-2 rounded-2xl border border-[#f0d6c3] bg-[#fffaf5] p-1">
                 {(
@@ -210,7 +199,7 @@ function PatientVerifyContent() {
 
               <label className="patient-field flex items-center gap-3 px-4">
                 <PatientIcon name="user" className="text-[#8e745f]" />
-                <span className="shrink-0 text-[16px] font-bold">
+                <span className="shrink-0 text-[17px] font-bold">
                   {apiMode ? '身份证号' : '证件号后四位'}
                 </span>
                 <input
