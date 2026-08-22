@@ -1,6 +1,173 @@
 # Install.md
 本文档记录系统启动的完整部署/启动指南, 用户可按照本文档的步骤, 完整启动项目. 依赖中间件全部使用 Docker 容器启动.
 > 暂时默认 本地环境部署 启动项目, 先不使用 Docker 打包部署启动项目.
+> 公网正式环境请先阅读第 0 节；第 1 节及之后保留为本地开发联调指南。
+
+# 0. Linux 公网正式部署（宝塔 + Docker）
+
+本节用于生产环境。宝塔宿主机 Nginx 负责域名、HTTPS 和反向代理；
+Docker Compose 负责前端、后端、PostgreSQL、Redis、Celery Worker 和 Beat。
+宝塔 Nginx 不与 Compose 重复启动，避免争抢 `80/443` 端口。
+
+## 0.1 服务器准备
+
+服务器需要安装：
+
+- Linux（推荐 Ubuntu 22.04/24.04）
+- Docker Engine 和 Docker Compose v2
+- 宝塔面板及 Nginx
+- `git`、`openssl`
+
+在云服务器安全组和宝塔防火墙中只开放：
+
+```text
+22/tcp   SSH（建议限制来源 IP）
+80/tcp   HTTP（用于证书签发和跳转 HTTPS）
+443/tcp  HTTPS
+```
+
+PostgreSQL、Redis、前端和后端端口不应对公网开放。
+
+## 0.2 域名和宝塔证书
+
+1. 将域名 `A` 记录指向服务器公网 IP。
+2. 在宝塔中创建站点，例如 `app.example.com`。
+3. 在站点的“SSL”中申请 Let’s Encrypt 证书。
+4. 开启“强制 HTTPS”。
+5. 将本目录的 `baota-reverse-proxy.conf` 内容合并到该站点的
+   HTTPS `server { ... }` 配置中，然后保存并重载 Nginx。
+
+配置中使用两个本机端口：
+
+```text
+前端：127.0.0.1:13000
+后端：127.0.0.1:18000
+```
+
+SSE 和 WebSocket 的代理配置不能省略，否则实时对话和语音功能会断开。
+
+## 0.3 准备项目配置
+
+在服务器上执行：
+
+```bash
+git clone <项目地址> medical-evaluate
+cd medical-evaluate/deploy
+cp .env.production.example .env.production
+cp config.production.example.yaml config.production.yaml
+chmod 600 .env.production config.production.yaml
+```
+
+编辑 `.env.production`，至少修改：
+
+```dotenv
+PUBLIC_ORIGIN=https://app.example.com
+POSTGRES_PASSWORD=随机强密码
+REDIS_APP_PASSWORD=随机强密码
+REDIS_CELERY_PASSWORD=随机强密码
+PATIENT_IDENTITY_SECRET=随机长密钥
+DASHSCOPE_API_KEY=真实模型密钥
+```
+
+编辑 `config.production.yaml`，确认语音模型中的 `{WorkspaceId}` 已替换为
+真实工作空间 ID。禁止提交 `.env.production` 和 `config.production.yaml`。
+
+## 0.4 一键启动
+
+首次启动前先校验 Compose 配置：
+
+```bash
+./deploy.sh config
+```
+
+构建镜像、执行数据库迁移并启动全部服务：
+
+```bash
+./deploy.sh up
+```
+
+查看状态和日志：
+
+```bash
+./deploy.sh ps
+./deploy.sh logs
+```
+
+首次生产初始化不会导入演示患者和演示密码。需要显式创建首个医护账号，
+例如：
+
+```bash
+export BOOTSTRAP_STAFF_NO=ADMIN001
+export BOOTSTRAP_STAFF_NAME="系统护士"
+export BOOTSTRAP_STAFF_PASSWORD="至少12位的强密码"
+export BOOTSTRAP_STAFF_ROLE=nurse
+export BOOTSTRAP_STAFF_DEPARTMENT="护理部"
+./deploy.sh bootstrap
+unset BOOTSTRAP_STAFF_NO BOOTSTRAP_STAFF_NAME BOOTSTRAP_STAFF_PASSWORD
+unset BOOTSTRAP_STAFF_ROLE BOOTSTRAP_STAFF_DEPARTMENT
+```
+
+`bootstrap` 会导入正式量表和交互规则，但不会创建演示患者。
+
+## 0.5 部署验证
+
+```bash
+curl -I https://app.example.com
+curl -fsS https://app.example.com/health
+docker compose --env-file .env.production -f docker-compose.yaml ps
+```
+
+浏览器访问：
+
+- 医护端：`https://app.example.com/nurse`
+- 患者端：`https://app.example.com/patient`
+
+确认浏览器开发者工具中 API、SSE 和 WebSocket 均使用当前 HTTPS 域名，
+不能出现 `localhost:8000`。
+
+## 0.6 更新和停止
+
+拉取新代码后执行：
+
+```bash
+cd medical-evaluate/deploy
+git pull
+./deploy.sh update
+```
+
+停止应用但保留数据库和 Redis 数据卷：
+
+```bash
+./deploy.sh down
+```
+
+禁止执行 `docker compose down -v`，除非确认要删除全部数据。
+
+## 0.7 数据备份
+
+至少定期备份：
+
+- PostgreSQL 数据库；
+- `medical_evaluate_app_storage` 中的音频和签名；
+- Compose 环境文件和生产配置（保存到受控密钥存储，不要提交 Git）。
+
+PostgreSQL 示例：
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yaml exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > backup-$(date +%F).sql
+```
+
+备份文件必须存放到服务器之外，并定期验证可恢复性。
+
+## 0.8 生产安全要求
+
+- 禁止执行 `seed_demo`，禁止使用 `123456`。
+- 只开放 SSH、HTTP、HTTPS，数据库和 Redis 仅在 Docker 内部网络通信。
+- 定期更新宝塔、Nginx、Docker 基础镜像和系统安全补丁。
+- `PATIENT_IDENTITY_SECRET`、数据库密码、Redis 密码和模型 API Key 必须使用随机
+  密钥，并限制文件权限。
+- 签名和音频使用 Docker 数据卷持久化，不能依赖容器临时文件系统。
 
 # 1. 数据库部署指南
 

@@ -1,16 +1,16 @@
+# 导入所有模型以支持autogenerate
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-# 导入所有模型以支持autogenerate
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # 导入统一模型包，确保批次 A 的全部模型注册到 Base.metadata。
+from app.configs.app_config import get_app_config
 from app.models import Base
 
 # this is the Alembic Config object, which provides
@@ -29,6 +29,17 @@ AUTOGENERATE_PLUGINS = [
     "alembic.autogenerate.*",
     "~alembic.autogenerate.comments",
 ]
+
+
+def _resolve_database_url() -> str:
+    """读取应用统一数据库配置，避免容器迁移连接宿主机 localhost。"""
+    return get_app_config().database.url
+
+
+config.set_main_option(
+    "sqlalchemy.url",
+    _resolve_database_url().replace("%", "%%"),
+)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

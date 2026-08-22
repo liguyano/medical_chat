@@ -562,7 +562,7 @@ def _save_signature_file(signature_data: str) -> tuple[str, bytes]:
     suffix = "jpg" if image_format == "jpeg" else "png"
     filename = f"{uuid.uuid4().hex}.{suffix}"
     (_SIGNATURE_DIRECTORY / filename).write_bytes(raw)
-    return f"/media/consent-signatures/{filename}", raw
+    return f"/api/consent-forms/signatures/{filename}", raw
 
 
 def submit_consent(
