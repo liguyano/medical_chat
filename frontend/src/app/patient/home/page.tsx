@@ -38,7 +38,7 @@ export default function PatientHomePage() {
           <h1 className="text-[29px] font-black text-[#3e1f18]">住院服务</h1>
           <button
             type="button"
-            className="patient-touch-button relative bg-white text-foreground shadow-sm"
+            className="patient-touch-button relative text-foreground"
             aria-label="查看通知"
           >
             <PatientIcon name="bell" />
@@ -126,6 +126,7 @@ export default function PatientHomePage() {
               alt=""
               width={72}
               height={72}
+              priority
               className="mx-auto h-[72px] w-[72px]"
             />
             <h2 className="mt-2 text-lg font-bold">当前没有护理任务</h2>

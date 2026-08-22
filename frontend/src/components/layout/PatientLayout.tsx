@@ -49,7 +49,12 @@ export default function PatientLayout({
     <div className="patient-app scrollbar-soft">
       <div className="patient-mobile-frame">
         {(showBack || title || headerRight) && (
-          <header className="patient-topbar">
+          <header
+            className={cn(
+              'patient-topbar',
+              headerRight && 'patient-topbar-with-right'
+            )}
+          >
             <div className="flex items-center justify-start">
               {showBack && (
                 <button

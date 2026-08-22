@@ -831,6 +831,7 @@ export default function PatientDialoguePage() {
             alt=""
             width={96}
             height={96}
+            priority
             className="mx-auto h-24 w-24"
           />
           <p className="mt-4 font-bold">任务不存在或已经失效</p>
@@ -849,10 +850,11 @@ export default function PatientDialoguePage() {
           type="button"
           onClick={() => void askNurse()}
           disabled={isHandoffSubmitting}
-          className="patient-touch-button bg-primary text-white disabled:opacity-50"
+          className="patient-touch-button min-w-[78px] gap-1 rounded-full bg-primary px-3 text-white disabled:opacity-50"
           aria-label={isHandoffSubmitting ? '正在呼叫护士' : '找护士'}
         >
           <PatientIcon name="nurse" className="h-5 w-5" />
+          <span className="text-sm font-bold">找护士</span>
         </button>
       }
     >
