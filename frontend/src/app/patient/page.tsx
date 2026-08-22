@@ -49,6 +49,7 @@ function PatientVerifyContent() {
   const { login } = useUserStore();
   const [taskNo, setTaskNo] = useState(() => searchParams.get('taskNo') ?? '');
   const [idCardNo, setIdCardNo] = useState('');
+  const [phone, setPhone] = useState('');
   const [participantType, setParticipantType] = useState<'patient' | 'family'>('patient');
   const [relationship, setRelationship] = useState('女儿');
   const [loading, setLoading] = useState(false);
@@ -76,9 +77,9 @@ function PatientVerifyContent() {
 
     if (apiMode) {
       try {
-        const portal = await careRepository.verifyPatientTask({
-          taskNo: taskNo.trim(),
-          idCardSuffix: idCardNo.trim(),
+        const portal = await careRepository.loginPatient({
+          idCardNo: idCardNo.trim(),
+          phone: phone.trim(),
         });
         setTasks(portal.tasks);
         login({
@@ -208,7 +209,8 @@ function PatientVerifyContent() {
                 ))}
               </div>
 
-              <label className="patient-field flex items-center gap-3 px-4">
+              {!apiMode && (
+                <label className="patient-field flex items-center gap-3 px-4">
                   <PatientIcon name="clipboard" className="text-[#8e745f]" />
                   <span className="shrink-0 text-[16px] font-bold">任务编号</span>
                   <input
@@ -218,22 +220,38 @@ function PatientVerifyContent() {
                     className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-foreground-placeholder"
                     required
                   />
-              </label>
+                </label>
+              )}
 
               <label className="patient-field flex items-center gap-3 px-4">
                 <PatientIcon name="user" className="text-[#8e745f]" />
                 <span className="shrink-0 text-[17px] font-bold">
-                  证件号后四位
+                  {apiMode ? '身份证号' : '证件号后四位'}
                 </span>
                 <input
                   value={idCardNo}
                   onChange={(event) => setIdCardNo(event.target.value)}
-                  placeholder="请输入后四位"
-                  maxLength={4}
+                  placeholder={apiMode ? '请输入身份证号' : '请输入后四位'}
+                  maxLength={apiMode ? 18 : 4}
                   className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-foreground-placeholder"
                   required
                 />
               </label>
+
+              {apiMode && (
+                <label className="patient-field flex items-center gap-3 px-4">
+                  <PatientIcon name="phone" className="text-[#8e745f]" />
+                  <span className="shrink-0 text-[16px] font-bold">手机号</span>
+                  <input
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value)}
+                    placeholder="请输入登记手机号"
+                    maxLength={20}
+                    className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-foreground-placeholder"
+                    required
+                  />
+                </label>
+              )}
 
               {participantType === 'family' && (
                 <label className="patient-field flex items-center gap-3 px-4">
@@ -287,7 +305,8 @@ function PatientVerifyContent() {
                       key={account.idCardNo}
                       type="button"
                       onClick={() => {
-                        setIdCardNo(account.idCardNo.slice(-4));
+                        setIdCardNo(account.idCardNo);
+                        setPhone(account.phone);
                         setError('');
                       }}
                       className="patient-outline-button min-h-11 text-sm"
@@ -307,7 +326,8 @@ function PatientVerifyContent() {
                           key={account.idCardNo}
                           type="button"
                           onClick={() => {
-                            setIdCardNo(account.idCardNo.slice(-4));
+                            setIdCardNo(account.idCardNo);
+                            setPhone(account.phone);
                             setError('');
                           }}
                           className="min-h-10 rounded-xl border border-[#efc9ae] bg-white px-2 text-xs font-bold text-primary"
@@ -387,7 +407,7 @@ function PatientVerifyContent() {
 
           {apiMode && (
             <div className="mt-3 rounded-2xl bg-[#edf6ff] p-3 text-left text-xs leading-5 text-[#3c6594]">
-              任务编号和证件后四位仅用于确认本次在院身份；登录后由患者专用接口加载本人护理任务。
+              身份证号和手机号仅用于确认本次住院身份；登录后由患者专用接口加载本人护理任务。
             </div>
           )}
         </div>
