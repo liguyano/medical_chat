@@ -318,3 +318,19 @@ from medagent.configs.agent_config import get_agent_config
 - 任务进入 `pending_review` 后异步派发护理计划生成；医护端也可调用同步生成接口。
   护士确认前必须处理全部计划项，且不得全部拒绝。
 
+## 传统问卷评估边界
+
+- 传统问卷任务的 `collection_mode` 为 `traditional_form`，创建后直接对患者可见，
+  不创建 `interaction_session`，也不进入 AI 首问准备流水线。
+- 问卷只读取任务 `assessment_instance` 绑定的量表版本和题目快照；患者提交使用
+  `assessment_submission.submission_type=patient_self`，草稿为 `in_progress`，正式提交为
+  `submitted`，护士最终确认后由既有复核服务写入 `final_confirmed`。
+- `GET /api/tasks/{task_ref}/questionnaire` 允许当前患者或责任护士只读访问；
+  `PUT .../questionnaire/draft` 与 `POST .../questionnaire/submit` 仅允许当前患者，
+  后端重新校验题目归属、题型、选项、数值/日期和全部必填非派生题。
+- 选项标签、值和计分在 `assessment_answer_option` 中保存快照；内部选项编码只能用于
+  审计和提交，不得作为患者或医护端展示文本。问卷任务进度只统计每个实例最新的
+  `patient_self` 提交，避免退回重填的历史版本重复计数。
+- 护士复核 `returned` 会把任务和实例恢复到可填写态，下一次患者保存/提交创建新的
+  患者提交版本；`confirmed` 将任务置为 `completed`。传统问卷不生成 AI/护士虚假对比。
+

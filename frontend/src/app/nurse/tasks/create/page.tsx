@@ -333,9 +333,7 @@ function CreateTaskContent() {
                       : '文字/语音模拟、实时抽取与宣教',
                   },
                   { value: 'traditional_form', label: '传统问卷', detail: '分组填写、自动保存与断点续答' },
-                ]
-                  .filter((item) => !apiMode || item.value === 'ai_dialogue')
-                  .map((item) => (
+                ].map((item) => (
                   <button
                     key={item.value}
                     type="button"
@@ -418,7 +416,9 @@ function CreateTaskContent() {
 
               {apiMode && (
                 <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-                  当前真实接口为第一期文本问诊闭环；知情同意、宣教、语音和传统问卷将在后续接口开放后启用。
+                  {collectionMode === 'traditional_form'
+                    ? '传统问卷将按已发布量表逐组填写，答案自动保存并提交后等待护士复核。'
+                    : 'AI 对话任务会先完成首问准备，患者端只会看到准备完成后的任务。'}
                 </div>
               )}
 

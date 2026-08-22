@@ -63,7 +63,7 @@ export default function PatientTaskDetailPage() {
           <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-xl bg-surface-secondary p-3">
               <ClockIcon className="w-5 h-5 text-primary mb-1" />
-              预计10—15分钟
+              {task.collectionMode === 'ai_dialogue' ? '预计10—15分钟' : '按分组逐题填写'}
             </div>
             <div className="rounded-xl bg-surface-secondary p-3">
               <ShieldCheckIcon className="w-5 h-5 text-primary mb-1" />
@@ -98,8 +98,14 @@ export default function PatientTaskDetailPage() {
           <h2 className="text-xl mb-3">开始前说明</h2>
           <ul className="space-y-2 text-sm text-foreground-muted">
             <li>• 当前参与人：{task.participantName ?? task.patientName}</li>
-            <li>• AI是护理评估助手，不能替代医生诊断。</li>
-            <li>• 您可以暂停、纠正回答或随时联系护士。</li>
+            {task.collectionMode === 'ai_dialogue' ? (
+              <>
+                <li>• AI是护理评估助手，不能替代医生诊断。</li>
+                <li>• 您可以暂停、纠正回答或随时联系护士。</li>
+              </>
+            ) : (
+              <li>• 问卷答案会自动保存，提交前可以返回修改。</li>
+            )}
             <li>• 所有结果提交后均由护士确认。</li>
           </ul>
         </Card>

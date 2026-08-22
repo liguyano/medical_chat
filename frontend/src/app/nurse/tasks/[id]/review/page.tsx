@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import NurseLayout from '@/components/layout/NurseLayout';
@@ -10,6 +10,7 @@ import { Button } from '@/components/shared/Button';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { prototypeQuestions } from '@/lib/mock/assessment';
 import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type { AssessmentReview } from '@/lib/types';
@@ -37,8 +38,38 @@ export default function NurseReviewPage() {
   const structuredAnswers = useChatStore((state) => state.structuredAnswers);
   const aiAnswers = structuredAnswers[taskId];
   const session = useChatStore((state) => state.sessions[taskId]);
+  const apiMode = runtimeConfig.dataMode === 'api';
+  const [questionnaire, setQuestionnaire] = useState<
+    Awaited<ReturnType<typeof careRepository.getQuestionnaire>> | null
+  >(null);
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(
+    apiMode && task?.collectionMode === 'traditional_form'
+  );
+
+  useEffect(() => {
+    if (!apiMode || !task || task.collectionMode !== 'traditional_form') return;
+    const controller = new AbortController();
+    void careRepository
+      .getQuestionnaire(taskId, controller.signal)
+      .then(setQuestionnaire)
+      .catch(() => {
+        if (!controller.signal.aborted) setQuestionnaire(null);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setQuestionnaireLoading(false);
+      });
+    return () => controller.abort();
+  }, [apiMode, task, taskId]);
 
   const sourceAnswers = useMemo(() => {
+    if (apiMode && task?.collectionMode === 'traditional_form' && questionnaire) {
+      return Object.fromEntries(
+        questionnaire.answers.map((answer) => [
+          answer.questionId,
+          answer.displayValue ?? answer.selectedOptionLabels.join('、') ?? '',
+        ])
+      );
+    }
     if (task?.collectionMode === 'ai_dialogue') {
       return Object.fromEntries(
         (aiAnswers ?? []).map((answer) => [
@@ -50,17 +81,20 @@ export default function NurseReviewPage() {
     return Object.fromEntries(
       Object.entries(formSubmission ?? {}).map(([key, value]) => [key, answerText(value)])
     );
-  }, [aiAnswers, formSubmission, task?.collectionMode]);
+  }, [aiAnswers, apiMode, formSubmission, questionnaire, task?.collectionMode]);
 
-  const reviewQuestions = useMemo(
-    () =>
-      prototypeQuestions.filter((question) =>
+  const reviewQuestions = useMemo(() => {
+    if (apiMode && task?.collectionMode === 'traditional_form' && questionnaire) {
+      return questionnaire.questions.filter((question) =>
         Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
-      ),
-    [sourceAnswers]
-  );
+      );
+    }
+    return prototypeQuestions.filter((question) =>
+      Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
+    );
+  }, [apiMode, questionnaire, sourceAnswers, task?.collectionMode]);
   const [nurseAnswers, setNurseAnswers] = useState<Record<string, string>>(
-    existingReview?.nurseAnswers ?? sourceAnswers
+    existingReview?.nurseAnswers ?? {}
   );
   const [reasons, setReasons] = useState<Record<string, string>>(
     existingReview?.correctionReasons ?? {}
@@ -71,12 +105,20 @@ export default function NurseReviewPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const effectiveNurseAnswers =
+    Object.keys(nurseAnswers).length > 0 ? nurseAnswers : sourceAnswers;
+
   if (!task) {
     return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
   }
 
+  if (questionnaireLoading) {
+    return <NurseLayout><Card padding="lg">正在加载问卷提交结果…</Card></NurseLayout>;
+  }
+
   const differences = reviewQuestions.filter(
-    (question) => nurseAnswers[question.id] !== sourceAnswers[question.id]
+    (question) =>
+      effectiveNurseAnswers[question.id] !== sourceAnswers[question.id]
   );
 
   const persistReview = async (status: AssessmentReview['status']) => {
@@ -87,8 +129,8 @@ export default function NurseReviewPage() {
     }
     const review: AssessmentReview = {
       taskId,
-      nurseAnswers,
-      finalAnswers: nurseAnswers,
+      nurseAnswers: effectiveNurseAnswers,
+      finalAnswers: effectiveNurseAnswers,
       correctionReasons: reasons,
       supplementaryInquiry,
       status,
@@ -143,12 +185,26 @@ export default function NurseReviewPage() {
         </Card>
       )}
 
+      {questionnaire?.scores.length ? (
+        <Card padding="md" className="mb-4">
+          <p className="text-xs text-foreground-muted mb-2">规则计分结果</p>
+          <div className="flex flex-wrap gap-2">
+            {questionnaire.scores.map((score) => (
+              <Badge key={score.scaleId} variant="info">
+                {score.scaleName}：{score.totalScore ?? '—'} 分
+                {score.resultSummary ? ` · ${score.resultSummary}` : ''}
+              </Badge>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       <div className="space-y-4">
         {reviewQuestions.map((question) => {
           const source = sourceAnswers[question.id] ?? '';
-          const nurse = nurseAnswers[question.id] ?? '';
+          const nurse = effectiveNurseAnswers[question.id] ?? '';
           const different = source !== nurse;
-          const sourceMessages = aiAnswers.find((answer) => answer.questionId === question.id)?.sourceMessageIds;
+          const sourceMessages = aiAnswers?.find((answer) => answer.questionId === question.id)?.sourceMessageIds;
           return (
             <Card key={question.id} padding="lg" className={different ? 'border-amber-300' : ''}>
               <div className="flex items-start justify-between gap-3 mb-4">

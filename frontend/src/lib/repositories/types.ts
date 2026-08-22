@@ -22,6 +22,7 @@ import type {
   InteractionRuleUpdate,
   NursingPlan,
   NursingPlanUpdate,
+  QuestionnaireSnapshot,
   User,
 } from '@/lib/types';
 
@@ -245,6 +246,10 @@ export interface CareRepository {
     answers: Record<string, PrototypeAnswerValue>,
     signal?: AbortSignal
   ): Promise<void>;
+  getQuestionnaire(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<QuestionnaireSnapshot>;
   pauseDialogue(sessionId: string, signal?: AbortSignal): Promise<void>;
   resumeDialogue(sessionId: string, signal?: AbortSignal): Promise<void>;
   requestHandoff(

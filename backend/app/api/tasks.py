@@ -9,7 +9,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import require_patient, require_staff
+from app.api.dependencies import (
+    require_patient,
+    require_staff,
+    require_staff_or_patient,
+)
 from app.models.base import get_db
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
@@ -24,9 +28,13 @@ from app.schemas.nursing_plan import (
     NursingPlanGenerateRequest,
     NursingPlanUpdateRequest,
 )
+from app.schemas.questionnaire import (
+    QuestionnaireAnswersRequest,
+    QuestionnaireDto,
+)
 from app.schemas.response import ApiResponse, ok
 from app.schemas.task import BackendTaskDto, CreateTaskRequest, CreateTaskResponse
-from app.services import task_service
+from app.services import questionnaire_service, task_service
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -82,6 +90,93 @@ def get_task(
         - BackendTaskDto: 任务详情（裸载荷）
     """
     return ok(task_service.get_task(db, task_ref))
+
+
+@router.get(
+    "/{task_ref}/questionnaire",
+    response_model=ApiResponse[QuestionnaireDto],
+    summary="查询传统问卷",
+)
+def get_questionnaire(
+    task_ref: str,
+    db: DbSession,
+    access: Annotated[
+        StaffAccount | tuple[Patient, PatientEncounter],
+        Depends(require_staff_or_patient),
+    ],
+) -> dict:
+    """查询当前任务绑定的传统问卷及患者最新提交。"""
+    if isinstance(access, tuple):
+        patient, encounter = access
+        return ok(
+            questionnaire_service.get_questionnaire(
+                db,
+                task_ref,
+                patient_id=patient.id,
+                encounter_id=encounter.id,
+            )
+        )
+    return ok(
+        questionnaire_service.get_questionnaire(
+            db,
+            task_ref,
+            staff_id=access.id,
+        )
+    )
+
+
+@router.put(
+    "/{task_ref}/questionnaire/draft",
+    response_model=ApiResponse[QuestionnaireDto],
+    summary="保存传统问卷草稿",
+)
+def save_questionnaire_draft(
+    task_ref: str,
+    req: QuestionnaireAnswersRequest,
+    db: DbSession,
+    patient_context: Annotated[
+        tuple[Patient, PatientEncounter],
+        Depends(require_patient),
+    ],
+) -> dict:
+    """保存患者传统问卷草稿，支持刷新和断点续答。"""
+    patient, encounter = patient_context
+    return ok(
+        questionnaire_service.save_draft(
+            db,
+            task_ref,
+            req,
+            patient_id=patient.id,
+            encounter_id=encounter.id,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/questionnaire/submit",
+    response_model=ApiResponse[QuestionnaireDto],
+    summary="提交传统问卷",
+)
+def submit_questionnaire(
+    task_ref: str,
+    req: QuestionnaireAnswersRequest,
+    db: DbSession,
+    patient_context: Annotated[
+        tuple[Patient, PatientEncounter],
+        Depends(require_patient),
+    ],
+) -> dict:
+    """校验所有必填题并正式提交患者传统问卷。"""
+    patient, encounter = patient_context
+    return ok(
+        questionnaire_service.submit_questionnaire(
+            db,
+            task_ref,
+            req,
+            patient_id=patient.id,
+            encounter_id=encounter.id,
+        )
+    )
 
 
 @router.post(

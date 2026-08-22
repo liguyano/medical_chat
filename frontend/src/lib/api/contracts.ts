@@ -294,6 +294,79 @@ export interface CreateTaskResponse {
   task?: BackendTaskDto;
 }
 
+export interface QuestionnaireOptionDto {
+  id: ApiId;
+  option_code: string;
+  option_label: string;
+  option_value: string;
+  clinical_score?: number | null;
+  requires_follow_up?: boolean;
+  extra_input_type?: string | null;
+  extra_input_unit?: string | null;
+}
+
+export interface QuestionnaireQuestionDto {
+  id: ApiId;
+  scale_id: ApiId;
+  scale_name: string;
+  scale_version_id: ApiId;
+  section_id?: ApiId | null;
+  section_name?: string | null;
+  question_code: string;
+  question_text: string;
+  question_type: string;
+  value_type: string;
+  required: boolean;
+  scored: boolean;
+  derived: boolean;
+  unit?: string | null;
+  value_precision?: number | null;
+  allow_other?: boolean;
+  validation_rule?: Record<string, unknown> | null;
+  sort_no: number;
+  options?: QuestionnaireOptionDto[];
+}
+
+export interface QuestionnaireAnswerDto {
+  question_id: ApiId;
+  question_code: string;
+  answer_type: string;
+  answer_text?: string | null;
+  answer_number?: number | null;
+  answer_boolean?: boolean | null;
+  answer_date?: string | null;
+  selected_options?: string[];
+  selected_option_labels?: string[];
+  selected_option_values?: string[];
+  display_value?: string | null;
+  clinical_score?: number | null;
+}
+
+export interface QuestionnaireScoreDto {
+  scale_id: ApiId;
+  scale_name: string;
+  total_score?: number | null;
+  risk_level?: string | null;
+  result_summary?: string | null;
+}
+
+export interface QuestionnaireDto {
+  task_id: ApiId;
+  task_no: string;
+  collection_mode: 'traditional_form';
+  status:
+    | 'not_started'
+    | 'in_progress'
+    | 'submitted'
+    | 'returned'
+    | 'confirmed';
+  questions: QuestionnaireQuestionDto[];
+  answers: QuestionnaireAnswerDto[];
+  scores: QuestionnaireScoreDto[];
+  submitted_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface SendDialogMessageRequest {
   session_id: string;
   task_id: string;

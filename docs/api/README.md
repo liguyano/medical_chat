@@ -143,9 +143,61 @@ AI 对话任务创建后会先进入后台准备流程。医护端通过任务�
 
 该接口只允许责任护士重试 `preparation.status=failed` 的原任务，不会重复创建任务。
 
+### 1.3 传统问卷评估
+
+传统问卷任务创建后直接对患者可见，不创建 AI 交互会话，也不经过首问准备流程。
+量表题目和选项始终来自任务创建时绑定的量表版本快照，患者端不能自行切换量表或
+修改评分规则。问卷提交使用 `patient_self` 提交版本，护士复核继续复用
+`/api/tasks/{task_ref}/review`。
+
+#### 查询问卷
+
+**接口**: `GET /api/tasks/{task_ref}/questionnaire`
+
+**身份**: 患者本人或该任务责任护士。
+
+返回题目分组、题型、必填/派生标记、校验规则、选项标签与值、患者当前草稿或最新
+提交、规则计分和风险解释。`selected_options` 中的编码仅用于提交和审计，页面应优先
+展示 `selected_option_labels`、`selected_option_values` 或 `display_value`。
+
+#### 保存草稿
+
+**接口**: `PUT /api/tasks/{task_ref}/questionnaire/draft`
+
+**身份**: 当前患者会话。
+
+```json
+{
+  "task_id": "TASK-20260816-A1B2C3",
+  "answers": {
+    "fall_history": "history_yes",
+    "10028": false
+  }
+}
+```
+
+`answers` 的键支持题目编码或题目数字 ID；单选使用选项编码，多选使用编码数组，
+数字/日期/布尔/文本分别使用对应 JSON 类型。重复保存会更新同一份可编辑草稿；把
+已有题目值传为空字符串、`null` 或空数组会清除该题及其选项快照。
+
+#### 正式提交
+
+**接口**: `POST /api/tasks/{task_ref}/questionnaire/submit`
+
+**身份**: 当前患者会话。
+
+请求体与草稿保存相同。后端在事务内重新校验所有必填且非派生题，缺题或题型、选项、
+数值/日期范围不合法时拒绝提交；成功后保存分数和风险结果，任务进入
+`pending_review`，患者端变为只读。重复提交直接返回当前已提交结果，不产生新的患者
+提交版本。
+
+护士复核状态为 `returned` 时，任务回到 `in_progress`，患者可以继续填写；再次提交
+会创建新的 `patient_self` 版本，历史提交仍保留用于审计。护士最终 `confirmed` 后任务
+进入 `completed`，问卷状态变为 `confirmed`。
+
 ---
 
-### 1.3 取消任务
+### 1.4 取消任务
 
 **接口**: `POST /api/tasks/{task_id}/cancel`
 
@@ -175,7 +227,7 @@ AI 对话任务创建后会先进入后台准备流程。医护端通过任务�
 
 ---
 
-### 1.4 查询任务列表
+### 1.5 查询任务列表
 
 **接口**: `GET /api/tasks`
 

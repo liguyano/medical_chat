@@ -11,10 +11,13 @@ import type {
   MessageRatingDto,
   PatientLoginResponse,
   QualityReviewDto,
+  QuestionnaireDto,
   StaffLoginResponse,
 } from '@/lib/api/contracts';
 import type {
   AssessmentScale,
+  AssessmentQuestion,
+  AssessmentOption,
   CareTask,
   CollectionMode,
   InteractionMessage,
@@ -23,6 +26,7 @@ import type {
   Patient,
   PatientEncounter,
   QualityReview,
+  QuestionnaireSnapshot,
   StructuredAnswer,
   TaskPreparation,
   User,
@@ -182,6 +186,121 @@ export function mapTaskDto(dto: BackendTaskDto): CareTask {
             total: dto.total_question_count,
           }
         : undefined,
+  };
+}
+
+function mapQuestionType(value: string): AssessmentQuestion['questionType'] {
+  if (value === 'number' || value === 'integer' || value === 'decimal') return 'number';
+  if (value === 'date' || value === 'datetime') return 'date';
+  if (value === 'boolean') return 'boolean';
+  if (value === 'multiple_choice') return 'multiple_choice';
+  if (value === 'single_choice' || value === 'grouped_choice') return 'single_choice';
+  return 'text';
+}
+
+function mapQuestionnaireValue(
+  answer: QuestionnaireDto['answers'][number]
+): import('@/lib/types').PrototypeAnswerValue {
+  if (answer.selected_options?.length) {
+    return answer.answer_type === 'multiple_choice'
+      ? answer.selected_options
+      : answer.selected_options[0];
+  }
+  if (answer.answer_text !== null && answer.answer_text !== undefined) {
+    return answer.answer_text;
+  }
+  if (answer.answer_number !== null && answer.answer_number !== undefined) {
+    return answer.answer_number;
+  }
+  if (answer.answer_boolean !== null && answer.answer_boolean !== undefined) {
+    return answer.answer_boolean;
+  }
+  if (answer.answer_date !== null && answer.answer_date !== undefined) {
+    return answer.answer_date;
+  }
+  return null;
+}
+
+export function mapQuestionnaireDto(dto: QuestionnaireDto): QuestionnaireSnapshot {
+  const questions = dto.questions.map((question) => {
+    const validation = question.validation_rule ?? {};
+    const options: AssessmentOption[] = (question.options ?? []).map((option) => ({
+      id: id(option.id),
+      optionCode: option.option_code,
+      optionLabel: option.option_label,
+      displayOrder: undefined,
+      clinicalScore: option.clinical_score ?? undefined,
+      requiresFollowUp: option.requires_follow_up ?? false,
+    }));
+    return {
+      id: id(question.id),
+      questionCode: question.question_code,
+      sectionId:
+        question.section_id === null || question.section_id === undefined
+          ? undefined
+          : id(question.section_id),
+      sectionName: question.section_name ?? undefined,
+      questionText: question.question_text,
+      questionType: mapQuestionType(question.question_type),
+      required: question.required,
+      scored: question.scored,
+      derived: question.derived,
+      displayOrder: question.sort_no,
+      unit: question.unit ?? undefined,
+      options,
+      validationRule: {
+        min: typeof validation.min === 'number' ? validation.min : undefined,
+        max: typeof validation.max === 'number' ? validation.max : undefined,
+        minLength:
+          typeof validation.min_length === 'number'
+            ? validation.min_length
+            : typeof validation.minLength === 'number'
+              ? validation.minLength
+              : undefined,
+        maxLength:
+          typeof validation.max_length === 'number'
+            ? validation.max_length
+            : typeof validation.maxLength === 'number'
+              ? validation.maxLength
+              : undefined,
+      },
+    };
+  });
+  const answers = dto.answers.map((answer) => ({
+    questionId: id(answer.question_id),
+    questionCode: answer.question_code,
+    answerType: answer.answer_type,
+    answerText: answer.answer_text ?? undefined,
+    answerNumber: answer.answer_number ?? undefined,
+    answerBoolean: answer.answer_boolean ?? undefined,
+    answerDate: answer.answer_date ?? undefined,
+    selectedOptions: answer.selected_options ?? [],
+    selectedOptionLabels: answer.selected_option_labels ?? [],
+    selectedOptionValues: answer.selected_option_values ?? [],
+    displayValue: answer.display_value ?? undefined,
+    clinicalScore: answer.clinical_score ?? undefined,
+  }));
+  return {
+    taskId: id(dto.task_id),
+    taskNo: dto.task_no,
+    status: dto.status,
+    questions,
+    answers,
+    answerValues: Object.fromEntries(
+      dto.answers.map((answer) => [
+        answer.question_code,
+        mapQuestionnaireValue(answer),
+      ])
+    ),
+    scores: dto.scores.map((score) => ({
+      scaleId: id(score.scale_id),
+      scaleName: score.scale_name,
+      totalScore: score.total_score ?? undefined,
+      riskLevel: score.risk_level ?? undefined,
+      resultSummary: score.result_summary ?? undefined,
+    })),
+    submittedAt: dto.submitted_at ?? undefined,
+    updatedAt: dto.updated_at ?? undefined,
   };
 }
 

@@ -129,7 +129,7 @@ export default function PatientTasksPage() {
           <h1 className="text-2xl mb-1">任务中心</h1>
           <p className="text-sm text-foreground-muted">
             {runtimeConfig.dataMode === 'api'
-              ? '请选择医护端发布的任务，完成 AI 文本问诊后等待护士复核。'
+              ? '请选择医护端发布的任务，完成传统问卷或 AI 对话后等待护士复核。'
               : '请按顺序完成评估、宣教与知情同意，提交后由护士复核。'}
           </p>
         </div>

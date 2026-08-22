@@ -39,6 +39,13 @@ export default function QuestionCard({
   };
 
   const renderInput = () => {
+    if (question.derived) {
+      return (
+        <div className="rounded-xl border border-dashed border-border bg-surface-secondary px-4 py-3 text-sm text-foreground-muted">
+          此项由系统根据前序答案计算，提交后自动生成
+        </div>
+      );
+    }
     switch (question.questionType) {
       case 'single_choice':
         return (
@@ -195,6 +202,29 @@ export default function QuestionCard({
           />
         );
 
+      case 'boolean':
+        return (
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { value: true, label: '是' },
+              { value: false, label: '否' },
+            ].map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => onChange(option.value)}
+                className={`rounded-xl border-2 px-4 py-3 text-left ${
+                  value === option.value
+                    ? 'border-primary bg-primary-tint'
+                    : 'border-border bg-surface'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        );
+
       default:
         return null;
     }
@@ -202,22 +232,17 @@ export default function QuestionCard({
 
   const CardContent = (
     <Card padding="lg" className={error ? 'border-2 border-danger' : ''}>
-      {/* 题目编号和必填标记 */}
-      <div className="flex items-center justify-between mb-3">
-        <Badge variant="default" size="sm">
-          {question.questionCode}
-        </Badge>
+      {/* 题目编码仅用于接口和审计，不向用户展示；必填标记与题目同行，避免顶部产生空白区域 */}
+      <div className="flex items-start gap-3 mb-4">
+        <h3 className="min-w-0 flex-1 text-base font-medium text-foreground leading-relaxed">
+          {question.questionText}
+        </h3>
         {question.required && (
           <Badge variant="danger" size="sm">
             必填
           </Badge>
         )}
       </div>
-
-      {/* 题目文本 */}
-      <h3 className="text-base font-medium text-foreground mb-4 leading-relaxed">
-        {question.questionText}
-      </h3>
 
       {/* 题目描述 */}
       {question.description && (

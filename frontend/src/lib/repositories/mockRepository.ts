@@ -4,6 +4,7 @@ import {
   mockScales,
   mockTasks,
 } from '@/lib/mock/data';
+import { getVisibleQuestions } from '@/lib/mock/assessment';
 import type {
   AssessmentScaleConfigDetail,
   AssessmentScaleConfigSummary,
@@ -13,6 +14,7 @@ import type {
   InteractionSession,
   NursingPlan,
   NursingPlanUpdate,
+  QuestionnaireSnapshot,
   User,
 } from '@/lib/types';
 import type {
@@ -845,6 +847,24 @@ export class MockCareRepository implements CareRepository {
     signal?: AbortSignal
   ) {
     await wait(signal);
+  }
+
+  async getQuestionnaire(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<QuestionnaireSnapshot> {
+    await wait(signal);
+    const task = mockTasks.find((item) => item.id === taskId);
+    const questions = getVisibleQuestions({}, task?.scaleIds);
+    return {
+      taskId,
+      taskNo: task?.taskNo ?? taskId,
+      status: task?.taskStatus === 'completed' ? 'confirmed' : 'not_started',
+      questions,
+      answers: [],
+      answerValues: {},
+      scores: [],
+    };
   }
 
   async pauseDialogue(_sessionId: string, signal?: AbortSignal) {

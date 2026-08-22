@@ -259,6 +259,48 @@ export interface AssessmentOption {
   requiresFollowUp?: boolean;
 }
 
+export interface QuestionnaireAnswer {
+  questionId: string;
+  questionCode: string;
+  answerType: string;
+  answerText?: string;
+  answerNumber?: number;
+  answerBoolean?: boolean;
+  answerDate?: string;
+  selectedOptions: string[];
+  selectedOptionLabels: string[];
+  selectedOptionValues: string[];
+  displayValue?: string;
+  clinicalScore?: number;
+}
+
+export interface QuestionnaireScore {
+  scaleId: string;
+  scaleName: string;
+  totalScore?: number;
+  riskLevel?: string;
+  resultSummary?: string;
+}
+
+export type QuestionnaireStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'submitted'
+  | 'returned'
+  | 'confirmed';
+
+export interface QuestionnaireSnapshot {
+  taskId: string;
+  taskNo: string;
+  status: QuestionnaireStatus;
+  questions: AssessmentQuestion[];
+  answers: QuestionnaireAnswer[];
+  answerValues: Record<string, PrototypeAnswerValue>;
+  scores: QuestionnaireScore[];
+  submittedAt?: string;
+  updatedAt?: string;
+}
+
 // CICARE 阶段
 export type CicareStage =
   | 'connect'

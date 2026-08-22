@@ -184,7 +184,18 @@ def submit_assessment_review(
             )
         )
 
-    if request.status == "confirmed":
+    if request.status == "returned":
+        # 退回后患者需要在原任务中继续填写。保留本次患者提交和护士复核
+        # 历史记录，下一次保存草稿时由问卷服务创建新的 patient_self 版本。
+        task.task_status = "in_progress"
+        task.completed_at = None
+        task.updator = str(staff_id)
+        for instance in instances:
+            instance.instance_status = "collecting"
+            instance.assessed_at = None
+            instance.confirmed_at = None
+            instance.updator = str(staff_id)
+    elif request.status == "confirmed":
         task.task_status = "completed"
         task.completed_at = datetime.now(UTC)
         task.updator = str(staff_id)

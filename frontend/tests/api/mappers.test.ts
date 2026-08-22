@@ -4,6 +4,7 @@ import {
   mapMessageRating,
   mapExtractedField,
   mapPatientPortal,
+  mapQuestionnaireDto,
   mapQualityReview,
   mapTaskDto,
   toCollectionMode,
@@ -205,5 +206,56 @@ describe('API mappers', () => {
     expect(answer.displayValue).toBe('10年以上');
     expect(answer.selectedOptionLabels).toEqual(['10年以上']);
     expect(answer.selectedOptions).toEqual(['option_3']);
+  });
+
+  it('映射传统问卷题目、布尔题和患者草稿答案', () => {
+    const questionnaire = mapQuestionnaireDto({
+      task_id: 21,
+      task_no: 'TASK-Q-21',
+      collection_mode: 'traditional_form',
+      status: 'in_progress',
+      questions: [
+        {
+          id: 100,
+          scale_id: 9,
+          scale_name: '跌倒风险',
+          scale_version_id: 12,
+          section_id: 3,
+          section_name: '基本情况',
+          question_code: 'fall_history',
+          question_text: '近期是否发生跌倒？',
+          question_type: 'boolean',
+          value_type: 'boolean',
+          required: true,
+          scored: true,
+          derived: false,
+          sort_no: 1,
+          options: [],
+        },
+      ],
+      answers: [
+        {
+          question_id: 100,
+          question_code: 'fall_history',
+          answer_type: 'boolean',
+          answer_boolean: false,
+          selected_options: [],
+          selected_option_labels: [],
+          selected_option_values: [],
+          display_value: '否',
+        },
+      ],
+      scores: [],
+    });
+
+    expect(questionnaire.taskId).toBe('21');
+    expect(questionnaire.questions[0]).toMatchObject({
+      id: '100',
+      questionType: 'boolean',
+      sectionName: '基本情况',
+      required: true,
+    });
+    expect(questionnaire.answerValues.fall_history).toBe(false);
+    expect(questionnaire.answers[0].displayValue).toBe('否');
   });
 });

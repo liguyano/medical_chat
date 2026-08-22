@@ -14,6 +14,7 @@ import type {
   PatientRecordDto,
   QualityReviewDto,
   AssessmentScaleConfigSummaryDto,
+  QuestionnaireDto,
   SseEnvelope,
   StaffLoginResponse,
 } from '@/lib/api/contracts';
@@ -29,6 +30,7 @@ import {
   mapPatientPortal,
   mapPatientRecord,
   mapQualityReview,
+  mapQuestionnaireDto,
   mapStaffUser,
   mapTaskDto,
   toReviewerId,
@@ -731,6 +733,14 @@ export class ApiCareRepository implements CareRepository {
         signal,
       }
     );
+  }
+
+  async getQuestionnaire(taskId: string, signal?: AbortSignal) {
+    const response = await apiRequest<QuestionnaireDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/questionnaire`,
+      { signal }
+    );
+    return mapQuestionnaireDto(response);
   }
 
   async pauseDialogue(sessionId: string, signal?: AbortSignal) {

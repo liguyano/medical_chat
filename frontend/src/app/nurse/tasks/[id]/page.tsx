@@ -411,8 +411,10 @@ export default function TaskDetailPage() {
                     size="md"
                     showLabel
                   />
-                  <p className="text-xs text-foreground-muted mt-3">
-                    患者正在进行 AI 问诊，已完成 {progressCurrent}/{progressTotal}
+                    <p className="text-xs text-foreground-muted mt-3">
+                    患者正在进行
+                    {task.collectionMode === 'ai_dialogue' ? ' AI 问诊' : '传统问卷填写'}，
+                    已完成 {progressCurrent}/{progressTotal}
                   </p>
                 </CardContent>
               </Card>
@@ -427,26 +429,38 @@ export default function TaskDetailPage() {
                 <CardContent>
                   <div className="space-y-4">
                     <div className="p-4 bg-surface-secondary rounded-xl">
-                      <h4 className="text-sm font-medium text-foreground mb-2">AI评估摘要</h4>
-                      <p className="text-sm leading-6">
-                        {task.aiSummary ?? '患者已完成采集，等待护士查看原始回答并确认最终结果。'}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge variant="info" size="sm">{structuredAnswers.length}项结构化答案</Badge>
-                        <Badge variant={interactionEvents.some((event) => event.priority === 'high') ? 'danger' : 'warning'} size="sm">
-                          {interactionEvents.length}项风险/宣教事件
-                        </Badge>
+                        <h4 className="text-sm font-medium text-foreground mb-2">
+                          {task.collectionMode === 'ai_dialogue' ? 'AI评估摘要' : '患者问卷提交'}
+                        </h4>
+                        <p className="text-sm leading-6">
+                          {task.aiSummary ?? '患者已完成采集，等待护士查看原始回答并确认最终结果。'}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                        {task.collectionMode === 'ai_dialogue' ? (
+                          <>
+                            <Badge variant="info" size="sm">{structuredAnswers.length}项结构化答案</Badge>
+                            <Badge variant={interactionEvents.some((event) => event.priority === 'high') ? 'danger' : 'warning'} size="sm">
+                              {interactionEvents.length}项风险/宣教事件
+                            </Badge>
+                          </>
+                        ) : (
+                          <Badge variant="info" size="sm">
+                            {progressCurrent}/{progressTotal}项必填题
+                          </Badge>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center space-x-3">
-                      <Button
-                        variant="outline"
-                        onClick={() => router.push(`/nurse/monitor/${task.id}`)}
-                        className="flex-1"
-                      >
-                        查看完整记录
-                      </Button>
+                      {task.collectionMode === 'ai_dialogue' && (
+                        <Button
+                          variant="outline"
+                          onClick={() => router.push(`/nurse/monitor/${task.id}`)}
+                          className="flex-1"
+                        >
+                          查看完整记录
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
@@ -527,17 +541,23 @@ export default function TaskDetailPage() {
                     </Button>
                   )}
 
-                  {task.taskStatus === 'in_progress' &&
-                    !preparationRunning &&
-                    !preparationFailed && (
-                    <Button
-                      variant="outline"
-                      onClick={() => router.push(`/nurse/monitor/${task.id}`)}
-                      className="w-full"
-                    >
-                      查看实时进度
-                    </Button>
-                  )}
+                   {task.taskStatus === 'in_progress' &&
+                     !preparationRunning &&
+                     !preparationFailed && (
+                     <Button
+                       variant="outline"
+                       onClick={() =>
+                         router.push(
+                           task.collectionMode === 'ai_dialogue'
+                             ? `/nurse/monitor/${task.id}`
+                             : `/nurse/tasks/${task.id}/review`
+                         )
+                       }
+                       className="w-full"
+                     >
+                       {task.collectionMode === 'ai_dialogue' ? '查看实时进度' : '查看问卷结果'}
+                     </Button>
+                   )}
 
                   {task.taskStatus === 'completed' && (
                     <>

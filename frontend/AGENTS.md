@@ -72,6 +72,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `/nurse/config` 通过 `CareRepository` 管理宣教材料、拦截特征字典和评估量表：
   宣教与规则使用结构化表单，量表使用完整 JSON 查看和编辑。API 与 Mock 模式必须保持
   同一接口，页面须等待医护身份就绪后再加载配置，保存后直接生效。
+- 传统问卷任务在 API 模式通过 `CareRepository.getQuestionnaire()` 加载本次任务绑定的
+  真实量表题目、分组、选项和服务端草稿；草稿与正式提交分别调用
+  `PUT /api/tasks/{task_ref}/questionnaire/draft` 和
+  `POST /api/tasks/{task_ref}/questionnaire/submit`。页面必须以服务端题目/提交状态为准，
+  正式提交后只读，退回后允许继续填写，不能用 `prototypeQuestions` 补齐 API 数据。
+- 传统问卷患者进度只统计必填且非派生题；派生题只读展示。医护复核页展示患者答案真实标签、
+  计分和风险解释，不渲染 AI 证据或虚构的人机差异。API 与 Mock Repository 保持同一问卷
+  接口，后端返回的选项编码仅用于请求和审计，用户界面优先展示标签/值。
 - `/nurse/tasks/[id]/nursing-plan` 通过 `CareRepository` 查询和生成患者画像与护理计划，
   支持摘要编辑、计划项接受/修改/拒绝、护士备注和最终确认；API 与 Mock 模式保持同一
   闭环。真实模型生成接口单独使用 120 秒超时，避免普通请求超时提前中断结果展示。

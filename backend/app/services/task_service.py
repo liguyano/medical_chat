@@ -189,7 +189,8 @@ def _build_instance(
         assessment_scene=assessment_scene,
         instance_status="collecting",
         started_at=started_at,
-        assessor_type="ai",
+        assessor_type="ai" if task.collection_mode == "ai_dialogue" else "patient",
+        assessor_id=patient.id if task.collection_mode != "ai_dialogue" else None,
         patient_name_snapshot=patient.patient_name,
         sex_snapshot=patient.sex,
         age_snapshot=_calculate_age(patient.birthday),
@@ -425,24 +426,58 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
             )
             or 0
         )
-    answered_questions = 0
+    # AI 任务按当前会话统计；传统问卷按每个量表实例最新的患者提交统计，
+    # 避免退回重填后把历史版本的答案重复计入进度。
     if session is not None:
-        answered_questions = int(
-            db.scalar(
-                select(func.count(func.distinct(AssessmentAnswer.question_id)))
-                .join(
-                    AssessmentSubmission,
-                    AssessmentSubmission.id == AssessmentAnswer.submission_id,
-                )
-                .where(
-                    AssessmentSubmission.interaction_session_id == session.id,
-                    AssessmentSubmission.deleted == 0,
-                    AssessmentAnswer.deleted == 0,
-                    valid_assessment_answer_condition(),
-                )
+        answer_scope = AssessmentSubmission.interaction_session_id == session.id
+    else:
+        latest_patient_submissions = (
+            select(
+                func.max(AssessmentSubmission.id).label("latest_submission_id")
             )
-            or 0
+            .join(
+                AssessmentInstance,
+                AssessmentInstance.id == AssessmentSubmission.assessment_instance_id,
+            )
+            .where(
+                AssessmentInstance.task_id == task.id,
+                AssessmentSubmission.submission_type == "patient_self",
+                AssessmentSubmission.deleted == 0,
+            )
+            .group_by(AssessmentSubmission.assessment_instance_id)
+            .subquery()
         )
+        answer_scope = AssessmentSubmission.id.in_(
+            select(latest_patient_submissions.c.latest_submission_id)
+        )
+    answered_questions = 0
+    answered_questions = int(
+        db.scalar(
+            select(func.count(func.distinct(AssessmentAnswer.question_id)))
+            .join(
+                AssessmentSubmission,
+                AssessmentSubmission.id == AssessmentAnswer.submission_id,
+            )
+            .join(
+                AssessmentInstance,
+                AssessmentInstance.id == AssessmentSubmission.assessment_instance_id,
+            )
+            .join(
+                AssessmentQuestion,
+                AssessmentQuestion.id == AssessmentAnswer.question_id,
+            )
+            .where(
+                AssessmentInstance.task_id == task.id,
+                answer_scope,
+                AssessmentSubmission.deleted == 0,
+                AssessmentAnswer.deleted == 0,
+                AssessmentQuestion.required.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                valid_assessment_answer_condition(),
+            )
+        )
+        or 0
+    )
 
     scale_progress: list[TaskScaleProgressDto] = []
     collecting_assigned = False
@@ -459,24 +494,29 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
             or 0
         )
         scale_answered = 0
-        if session is not None:
-            scale_answered = int(
-                db.scalar(
-                    select(func.count(func.distinct(AssessmentAnswer.question_id)))
-                    .join(
-                        AssessmentSubmission,
-                        AssessmentSubmission.id == AssessmentAnswer.submission_id,
-                    )
-                    .where(
-                        AssessmentSubmission.assessment_instance_id == instance.id,
-                        AssessmentSubmission.interaction_session_id == session.id,
-                        AssessmentSubmission.deleted == 0,
-                        AssessmentAnswer.deleted == 0,
-                        valid_assessment_answer_condition(),
-                    )
+        scale_answered = int(
+            db.scalar(
+                select(func.count(func.distinct(AssessmentAnswer.question_id)))
+                .join(
+                    AssessmentSubmission,
+                    AssessmentSubmission.id == AssessmentAnswer.submission_id,
                 )
-                or 0
+                .join(
+                    AssessmentQuestion,
+                    AssessmentQuestion.id == AssessmentAnswer.question_id,
+                )
+                .where(
+                    AssessmentSubmission.assessment_instance_id == instance.id,
+                    answer_scope,
+                    AssessmentSubmission.deleted == 0,
+                    AssessmentAnswer.deleted == 0,
+                    AssessmentQuestion.required.is_(True),
+                    AssessmentQuestion.derived.is_(False),
+                    valid_assessment_answer_condition(),
+                )
             )
+            or 0
+        )
         scale_status = _resolve_scale_progress_status(
             total=scale_total,
             answered=scale_answered,

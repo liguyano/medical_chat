@@ -4,14 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import QuestionCard from '@/components/assessment/QuestionCard';
+import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
 import { Badge } from '@/components/shared/Badge';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { getVisibleQuestions, prototypeQuestions } from '@/lib/mock/assessment';
-import type { PrototypeAnswerValue } from '@/lib/types';
+import type { PrototypeAnswerValue, QuestionnaireSnapshot } from '@/lib/types';
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -25,6 +27,7 @@ const EMPTY_FORM_ANSWERS: Record<string, PrototypeAnswerValue> = {};
 export default function PatientFormPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const router = useRouter();
+  const apiMode = runtimeConfig.dataMode === 'api';
   const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
   const formDrafts = useTaskStore((state) => state.formDrafts);
   const answers = formDrafts[taskId] ?? EMPTY_FORM_ANSWERS;
@@ -38,8 +41,44 @@ export default function PatientFormPage() {
     'idle' | 'saving' | 'saved' | 'error'
   >('idle');
   const [submitError, setSubmitError] = useState('');
+  const [questionnaire, setQuestionnaire] = useState<QuestionnaireSnapshot | null>(null);
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(apiMode);
 
   useEffect(() => {
+    if (!apiMode || !task) return;
+    const controller = new AbortController();
+    void careRepository
+      .getQuestionnaire(taskId, controller.signal)
+      .then((snapshot) => {
+        setQuestionnaire(snapshot);
+        for (const question of snapshot.questions) {
+          const value = snapshot.answerValues[question.questionCode];
+          if (
+            value !== undefined &&
+            !Object.prototype.hasOwnProperty.call(useTaskStore.getState().formDrafts[taskId] ?? {}, question.id)
+          ) {
+            saveFormAnswer(taskId, question.id, value);
+          }
+        }
+        if (snapshot.status === 'submitted' || snapshot.status === 'confirmed') {
+          updateTask(taskId, {
+            taskStatus: snapshot.status === 'confirmed' ? 'completed' : 'pending_review',
+          });
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setSubmitError(error instanceof Error ? error.message : '问卷加载失败，请重试');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setQuestionnaireLoading(false);
+      });
+    return () => controller.abort();
+  }, [apiMode, task, taskId, saveFormAnswer, updateTask]);
+
+  useEffect(() => {
+    if (apiMode && !questionnaire) return;
     if (!Object.keys(answers).length) return;
     const controller = new AbortController();
     const timer = globalThis.setTimeout(() => {
@@ -55,15 +94,19 @@ export default function PatientFormPage() {
       globalThis.clearTimeout(timer);
       controller.abort();
     };
-  }, [answers, taskId]);
+  }, [answers, apiMode, questionnaire, taskId]);
 
   const visibleQuestions = useMemo(
-    () =>
-      getVisibleQuestions(
+    () => {
+      if (apiMode) {
+        return questionnaire?.questions ?? [];
+      }
+      return getVisibleQuestions(
         answers,
         task?.scaleIds ?? (task?.scaleId ? [task.scaleId] : undefined)
-      ),
-    [answers, task]
+      );
+    },
+    [answers, apiMode, questionnaire, task]
   );
   const sections = useMemo(
     () =>
@@ -77,7 +120,9 @@ export default function PatientFormPage() {
   const sectionNames = Object.keys(sections);
   const safeSectionIndex = Math.min(currentSection, Math.max(sectionNames.length - 1, 0));
   const currentQuestions = sections[sectionNames[safeSectionIndex]] ?? [];
-  const requiredQuestions = visibleQuestions.filter((question) => question.required);
+  const requiredQuestions = visibleQuestions.filter(
+    (question) => question.required && !question.derived
+  );
   const answeredCount = requiredQuestions.filter((question) => {
     const answer = answers[question.id];
     return Array.isArray(answer) ? answer.length > 0 : answer !== undefined && answer !== null && answer !== '';
@@ -157,7 +202,14 @@ export default function PatientFormPage() {
     setIsSubmitting(true);
     setSubmitError('');
     try {
-      await careRepository.submitQuestionnaire(taskId, answers);
+      const backendAnswers = apiMode
+        ? Object.fromEntries(
+            visibleQuestions
+              .filter((question) => answers[question.id] !== undefined)
+              .map((question) => [question.id, answers[question.id]])
+          )
+        : answers;
+      await careRepository.submitQuestionnaire(taskId, backendAnswers);
       submitForm(taskId, requiredQuestions.length);
       if (task?.consentRequired) {
         updateTask(taskId, { taskStatus: 'in_progress' });
@@ -179,6 +231,40 @@ export default function PatientFormPage() {
     return (
       <PatientLayout title="传统问卷" showBack>
         <div className="p-6 text-center">任务不存在</div>
+      </PatientLayout>
+    );
+  }
+
+  if (questionnaireLoading) {
+    return (
+      <PatientLayout title="传统问卷评估" showBack>
+        <div className="max-w-xl mx-auto p-6 text-center text-foreground-muted">
+          正在加载本次任务的量表题目…
+        </div>
+      </PatientLayout>
+    );
+  }
+
+  if (
+    apiMode &&
+    questionnaire &&
+    (questionnaire.status === 'submitted' || questionnaire.status === 'confirmed')
+  ) {
+    return (
+      <PatientLayout title="传统问卷评估" showBack onBack={() => router.push(`/patient/tasks/${taskId}`)}>
+        <div className="max-w-xl mx-auto p-4">
+          <Card padding="lg" className="text-center">
+            <CheckCircleIcon className="w-10 h-10 mx-auto text-primary mb-3" />
+            <p className="font-medium">
+              {questionnaire.status === 'confirmed'
+                ? '问卷结果已由护士确认'
+                : '问卷已提交，等待护士复核'}
+            </p>
+            <Button className="mt-5 w-full" onClick={() => router.push(`/patient/tasks/${taskId}`)}>
+              返回任务详情
+            </Button>
+          </Card>
+        </div>
       </PatientLayout>
     );
   }
