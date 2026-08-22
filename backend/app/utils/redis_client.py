@@ -193,6 +193,17 @@ class RedisClient:
             logger.error(f"Redis GET失败: {key} -> {e}")
             return None
 
+    def get_and_delete(self, key: str) -> Any | None:
+        """原子读取并删除一个缓存值，供一次性令牌消费。"""
+        try:
+            data = self.client.getdel(key)
+            if data is None:
+                return None
+            return pickle.loads(data)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Redis GETDEL失败: {key} -> {e}")
+            return None
+
     def delete(self, *keys: str) -> int:
         """删除缓存
         Args:

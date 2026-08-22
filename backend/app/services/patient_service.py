@@ -440,18 +440,10 @@ def login_patient(
     if encounter is None:
         raise AppError(ErrorCode.ERR_PATIENT_002)
 
-    token = secrets.token_urlsafe(32)
-    config = get_app_config()
-    session_saved = get_redis().set(
-        _session_key(token),
-        {
-            "patient_id": patient.id,
-            "encounter_id": encounter.id,
-        },
-        ex=config.security.patient_session_ttl_seconds,
+    token = create_patient_session(
+        patient_id=patient.id,
+        encounter_id=encounter.id,
     )
-    if not session_saved:
-        raise AppError(ErrorCode.ERR_PATIENT_004)
 
     return (
         PatientLoginResponse(
@@ -465,6 +457,23 @@ def login_patient(
         ),
         token,
     )
+
+
+def create_patient_session(*, patient_id: int, encounter_id: int) -> str:
+    """为已完成身份核验的患者创建统一 HttpOnly 会话。"""
+    token = secrets.token_urlsafe(32)
+    config = get_app_config()
+    session_saved = get_redis().set(
+        _session_key(token),
+        {
+            "patient_id": patient_id,
+            "encounter_id": encounter_id,
+        },
+        ex=config.security.patient_session_ttl_seconds,
+    )
+    if not session_saved:
+        raise AppError(ErrorCode.ERR_PATIENT_004)
+    return token
 
 
 def get_patient_context(

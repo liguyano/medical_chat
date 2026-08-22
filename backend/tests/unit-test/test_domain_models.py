@@ -38,6 +38,22 @@ EXPECTED_TABLES = {
     "patient_profile_snapshot",
     "nursing_plan",
     "nursing_plan_item",
+    "patient_notification",
+    "ward_guide",
+    "patient_assistant_session",
+    "patient_assistant_message",
+    "consent_document",
+    "consent_document_version",
+    "consent_clause",
+    "consent_record",
+    "consent_clause_record",
+    "consent_record_item",
+    "consent_participant",
+    "consent_authorization",
+    "consent_signature",
+    "content_delivery_session",
+    "content_delivery_item",
+    "content_playback_event",
 }
 
 OBSOLETE_TABLES = {
@@ -54,7 +70,7 @@ OBSOLETE_TABLES = {
 
 
 def test_quality_review_registers_all_domain_tables():
-    """核心、质量评价、医护账号、宣教配置与护理计划域应准确注册 33 张领域表。"""
+    """核心、患者门户、质量评价与护理计划域应准确注册全部领域表。"""
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert OBSOLETE_TABLES.isdisjoint(Base.metadata.tables)
 

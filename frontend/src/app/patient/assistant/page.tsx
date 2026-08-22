@@ -1,15 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { NurseCallButton } from '@/components/patient/NurseCallButton';
 import PatientLayout from '@/components/layout/PatientLayout';
 import { PatientIcon } from '@/components/patient/PatientIcon';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
+import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
+import { createClientInvocationId } from '@/lib/clientInvocation';
+import type { PatientAssistantSession } from '@/lib/repositories/types';
 
 interface AssistantMessage {
-  id: number;
+  id: string | number;
   role: 'assistant' | 'patient';
   content: string;
 }
@@ -26,6 +30,10 @@ const quickQuestions = ['开水房在哪里？', '如何呼叫护士？', '探�
 export default function PatientAssistantPage() {
   const [input, setInput] = useState('');
   const [voiceHint, setVoiceHint] = useState(false);
+  const [assistantSession, setAssistantSession] =
+    useState<PatientAssistantSession>();
+  const [configuredQuestions, setConfiguredQuestions] =
+    useState(runtimeConfig.dataMode === 'api' ? [] : quickQuestions);
   const user = useUserStore((state) => state.user);
   const task = useTaskStore((state) =>
     state.tasks.find(
@@ -44,9 +52,84 @@ export default function PatientAssistantPage() {
     },
   ]);
 
-  const send = (content: string) => {
+  useEffect(() => {
+    if (runtimeConfig.dataMode !== 'api') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [session, guides] = await Promise.all([
+          careRepository.createPatientAssistantSession('text'),
+          careRepository.listPatientWardGuide(),
+        ]);
+        if (cancelled) return;
+        setAssistantSession(session);
+        if (guides.length) {
+          setConfiguredQuestions(guides.slice(0, 3).map((guide) => guide.title));
+        }
+        const history = session.messages
+          .filter((item) => item.role !== 'system')
+          .map((item) => ({
+            id: item.messageNo,
+            role:
+              item.role === 'patient'
+                ? ('patient' as const)
+                : ('assistant' as const),
+            content: item.content,
+          }));
+        if (history.length) setMessages(history);
+      } catch {
+        if (!cancelled) {
+          setConfiguredQuestions([]);
+          setMessages([
+            {
+              id: 'assistant-unavailable',
+              role: 'assistant',
+              content:
+                '当前病区生活指南暂不可用，请先联系护士确认。文字输入仍会保留，超出范围的问题不会由助手自行回答。',
+            },
+          ]);
+          setVoiceHint(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const send = async (content: string) => {
     const text = content.trim();
     if (!text) return;
+    if (runtimeConfig.dataMode === 'api') {
+      if (!assistantSession) {
+        setVoiceHint(true);
+        return;
+      }
+      try {
+        const next = await careRepository.sendPatientAssistantMessage(
+          assistantSession.sessionNo,
+          text,
+          createClientInvocationId('assistant-message')
+        );
+        setAssistantSession(next);
+        setMessages(
+          next.messages
+            .filter((item) => item.role !== 'system')
+            .map((item) => ({
+              id: item.messageNo,
+              role:
+                item.role === 'patient'
+                  ? ('patient' as const)
+                  : ('assistant' as const),
+              content: item.content,
+            }))
+        );
+      } catch {
+        setVoiceHint(true);
+      }
+      setInput('');
+      return;
+    }
     const matched = Object.entries(answers).find(([keyword]) =>
       text.includes(keyword)
     );
@@ -126,11 +209,11 @@ export default function PatientAssistantPage() {
             <div className="patient-card ml-[68px] p-3">
               <p className="mb-2 text-sm text-foreground-muted">您可以问我：</p>
               <div className="space-y-2">
-                {quickQuestions.map((question, index) => (
+                {configuredQuestions.map((question, index) => (
                   <button
                     key={question}
                     type="button"
-                    onClick={() => send(question)}
+                    onClick={() => void send(question)}
                     className="flex min-h-[52px] w-full items-center gap-3 rounded-2xl border border-[#f0d1ba] bg-[#fffaf5] px-3 text-left text-[15px] font-bold"
                   >
                     <span className="grid h-8 w-8 place-items-center rounded-full bg-[#ffe8da] text-primary">
@@ -175,13 +258,13 @@ export default function PatientAssistantPage() {
             placeholder="输入住院生活问题"
             className="min-h-12 min-w-0 flex-1 rounded-full border border-[#efcdb5] bg-[#fffdfb] px-4 text-[15px] outline-none focus:border-primary"
             onKeyDown={(event) => {
-              if (event.key === 'Enter') send(input);
+                if (event.key === 'Enter') void send(input);
             }}
           />
           {input.trim() ? (
             <button
               type="button"
-              onClick={() => send(input)}
+              onClick={() => void send(input)}
               className="patient-touch-button bg-primary text-white"
               aria-label="发送"
             >

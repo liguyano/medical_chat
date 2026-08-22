@@ -23,6 +23,11 @@ import type {
   DialogueSnapshot,
   PatientListFilters,
   PatientLoginInput,
+  PatientTaskVerifyInput,
+  PatientNotification,
+  WardGuide,
+  PatientAssistantSession,
+  ConsentSnapshot,
   PatientRecordInput,
   PatientWithEncounter,
   SendMessageInput,
@@ -685,6 +690,144 @@ export class MockCareRepository implements CareRepository {
       encounter: mockEncounters[0],
       tasks: mockTasks.filter((task) => task.patientId === mockPatients[0].id),
     };
+  }
+
+  async verifyPatientTask(
+    _input: PatientTaskVerifyInput,
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    return {
+      patient: mockPatients[0],
+      encounter: mockEncounters[0],
+      tasks: mockTasks.filter((task) => task.patientId === mockPatients[0].id),
+    };
+  }
+
+  async verifyPatientScanToken(_token: string, signal?: AbortSignal) {
+    await wait(signal);
+    return {
+      patient: mockPatients[0],
+      encounter: mockEncounters[0],
+      tasks: mockTasks.filter((task) => task.patientId === mockPatients[0].id),
+    };
+  }
+
+  async listPatientNotifications(
+    _unreadOnly = false,
+    signal?: AbortSignal
+  ): Promise<{ items: PatientNotification[]; unreadCount: number }> {
+    void _unreadOnly;
+    await wait(signal);
+    return { items: [], unreadCount: 0 };
+  }
+
+  async markPatientNotificationRead(
+    notificationId: string,
+    signal?: AbortSignal
+  ): Promise<PatientNotification> {
+    await wait(signal);
+    return {
+      id: notificationId,
+      notificationNo: notificationId,
+      notificationType: 'general',
+      title: '',
+      content: '',
+      priority: 'normal',
+      payload: {},
+      readAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async listPatientWardGuide(signal?: AbortSignal): Promise<WardGuide[]> {
+    await wait(signal);
+    return [];
+  }
+
+  async createPatientAssistantSession(
+    channelType: 'text' | 'voice' = 'text',
+    signal?: AbortSignal
+  ): Promise<PatientAssistantSession> {
+    await wait(signal);
+    return {
+      sessionNo: `MOCK-ASSISTANT-${Date.now()}`,
+      channelType,
+      sessionStatus: 'active',
+      handoffRequired: false,
+      messages: [],
+    };
+  }
+
+  async getPatientAssistantSession(
+    sessionNo: string,
+    signal?: AbortSignal
+  ): Promise<PatientAssistantSession> {
+    await wait(signal);
+    return {
+      sessionNo,
+      channelType: 'text',
+      sessionStatus: 'active',
+      handoffRequired: false,
+      messages: [],
+    };
+  }
+
+  async sendPatientAssistantMessage(
+    sessionNo: string,
+    content: string,
+    _clientMessageId?: string,
+    signal?: AbortSignal
+  ): Promise<PatientAssistantSession> {
+    await wait(signal);
+    return {
+      sessionNo,
+      channelType: 'text',
+      sessionStatus: 'active',
+      handoffRequired: false,
+      messages: [
+        {
+          messageNo: `MOCK-${Date.now()}-P`,
+          role: 'patient',
+          content,
+          occurredAt: new Date().toISOString(),
+        },
+        {
+          messageNo: `MOCK-${Date.now()}-A`,
+          role: 'assistant',
+          content: '请以病区实际通知为准，如需帮助请联系护士。',
+          resultStatus: 'handoff_required',
+          occurredAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  async getConsentSnapshot(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<ConsentSnapshot> {
+    await wait(signal);
+    throw new Error(`Mock任务 ${taskId} 使用页面内置知情同意演示`);
+  }
+
+  async recordConsentPlayback(
+    _taskId: string,
+    _input: Parameters<CareRepository['recordConsentPlayback']>[1],
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    return { status: 'mock' };
+  }
+
+  async confirmConsentClause(
+    _taskId: string,
+    _clauseId: number,
+    _input: Parameters<CareRepository['confirmConsentClause']>[2],
+    signal?: AbortSignal
+  ) {
+    await wait(signal);
+    return { status: 'mock' };
   }
 
   async loginStaff(input: StaffLoginInput, signal?: AbortSignal) {

@@ -49,11 +49,12 @@ function PatientVerifyContent() {
   const { login } = useUserStore();
   const [taskNo, setTaskNo] = useState(() => searchParams.get('taskNo') ?? '');
   const [idCardNo, setIdCardNo] = useState('');
-  const [phone, setPhone] = useState('');
   const [participantType, setParticipantType] = useState<'patient' | 'family'>('patient');
   const [relationship, setRelationship] = useState('女儿');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [scanToken, setScanToken] = useState('');
+  const [scanOpen, setScanOpen] = useState(false);
 
   const fillDemo = (mode: 'ai' | 'form') => {
     const task = tasks.find((item) =>
@@ -75,9 +76,9 @@ function PatientVerifyContent() {
 
     if (apiMode) {
       try {
-        const portal = await careRepository.loginPatient({
-          idCardNo: idCardNo.trim(),
-          phone: phone.trim(),
+        const portal = await careRepository.verifyPatientTask({
+          taskNo: taskNo.trim(),
+          idCardSuffix: idCardNo.trim(),
         });
         setTasks(portal.tasks);
         login({
@@ -132,6 +133,30 @@ function PatientVerifyContent() {
     router.push('/patient/tasks');
   };
 
+  const handleScanVerify = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!scanToken.trim()) return;
+    setError('');
+    setLoading(true);
+    try {
+      const portal = await careRepository.verifyPatientScanToken(scanToken.trim());
+      setTasks(portal.tasks);
+      login({
+        id: portal.patient.id,
+        role: 'patient',
+        name: portal.patient.name,
+        department: portal.encounter.department,
+      });
+      router.push('/patient/tasks');
+    } catch (scanError) {
+      setError(
+        scanError instanceof Error ? scanError.message : '扫码核验失败，请重新扫码'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <PatientLayout>
       <div className="relative min-h-screen overflow-hidden px-[18px] pb-8 pt-9">
@@ -183,8 +208,7 @@ function PatientVerifyContent() {
                 ))}
               </div>
 
-              {!apiMode && (
-                <label className="patient-field flex items-center gap-3 px-4">
+              <label className="patient-field flex items-center gap-3 px-4">
                   <PatientIcon name="clipboard" className="text-[#8e745f]" />
                   <span className="shrink-0 text-[16px] font-bold">任务编号</span>
                   <input
@@ -194,38 +218,22 @@ function PatientVerifyContent() {
                     className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-foreground-placeholder"
                     required
                   />
-                </label>
-              )}
+              </label>
 
               <label className="patient-field flex items-center gap-3 px-4">
                 <PatientIcon name="user" className="text-[#8e745f]" />
                 <span className="shrink-0 text-[17px] font-bold">
-                  {apiMode ? '身份证号' : '证件号后四位'}
+                  证件号后四位
                 </span>
                 <input
                   value={idCardNo}
                   onChange={(event) => setIdCardNo(event.target.value)}
-                  placeholder={apiMode ? '请输入身份证号' : '请输入后四位'}
-                  maxLength={apiMode ? 18 : 4}
+                  placeholder="请输入后四位"
+                  maxLength={4}
                   className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-foreground-placeholder"
                   required
                 />
               </label>
-
-              {apiMode && (
-                <label className="patient-field flex items-center gap-3 px-4">
-                  <PatientIcon name="phone" className="text-[#8e745f]" />
-                  <span className="shrink-0 text-[16px] font-bold">手机号</span>
-                  <input
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                    placeholder="请输入登记手机号"
-                    maxLength={20}
-                    className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-foreground-placeholder"
-                    required
-                  />
-                </label>
-              )}
 
               {participantType === 'family' && (
                 <label className="patient-field flex items-center gap-3 px-4">
@@ -274,13 +282,12 @@ function PatientVerifyContent() {
             {apiMode ? (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  {patientDemoAccounts.slice(0, 2).map((account) => (
+                {patientDemoAccounts.slice(0, 2).map((account) => (
                     <button
                       key={account.idCardNo}
                       type="button"
                       onClick={() => {
-                        setIdCardNo(account.idCardNo);
-                        setPhone(account.phone);
+                        setIdCardNo(account.idCardNo.slice(-4));
                         setError('');
                       }}
                       className="patient-outline-button min-h-11 text-sm"
@@ -300,8 +307,7 @@ function PatientVerifyContent() {
                           key={account.idCardNo}
                           type="button"
                           onClick={() => {
-                            setIdCardNo(account.idCardNo);
-                            setPhone(account.phone);
+                            setIdCardNo(account.idCardNo.slice(-4));
                             setError('');
                           }}
                           className="min-h-10 rounded-xl border border-[#efc9ae] bg-white px-2 text-xs font-bold text-primary"
@@ -335,11 +341,43 @@ function PatientVerifyContent() {
             <button
               type="button"
               className="patient-outline-button mt-3 w-full"
-              onClick={() => setError('扫码进入功能由院内二维码入口提供')}
+              onClick={() => {
+                setScanOpen((current) => !current);
+                setError('');
+              }}
             >
               <PatientIcon name="qr" />
-              扫码进入
+              {scanOpen ? '关闭扫码核验' : '扫码进入'}
             </button>
+
+            {scanOpen && (
+              <form
+                onSubmit={handleScanVerify}
+                className="mt-3 rounded-2xl border border-[#f0d6c3] bg-[#fffaf5] p-3 text-left"
+              >
+                <label className="text-sm font-bold text-foreground-muted">
+                  扫码后粘贴院内一次性令牌
+                  <input
+                    value={scanToken}
+                    onChange={(event) => setScanToken(event.target.value)}
+                    placeholder="等待二维码内容…"
+                    className="patient-field mt-2 w-full px-3 text-sm outline-none"
+                    minLength={24}
+                    required
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="patient-primary-button mt-3 w-full"
+                >
+                  {loading ? '正在核验…' : '核验扫码令牌'}
+                </button>
+                <p className="mt-2 text-xs leading-5 text-foreground-muted">
+                  相机权限未开启时可粘贴二维码内容；令牌只能使用一次，过期后请联系护士重新生成。
+                </p>
+              </form>
+            )}
           </div>
 
           <p className="mt-4 flex items-center justify-center gap-2 text-sm text-foreground-muted">
@@ -349,7 +387,7 @@ function PatientVerifyContent() {
 
           {apiMode && (
             <div className="mt-3 rounded-2xl bg-[#edf6ff] p-3 text-left text-xs leading-5 text-[#3c6594]">
-              身份证号和手机号仅用于确认本次住院身份；登录后由患者专用接口加载本人护理任务。
+              任务编号和证件后四位仅用于确认本次在院身份；登录后由患者专用接口加载本人护理任务。
             </div>
           )}
         </div>

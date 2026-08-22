@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 
 
 VOICE_GRACE_SECONDS = 180
+TRANSCRIPT_DRAFT_TTL_SECONDS = 900
+TRANSCRIPT_PENDING_KEY_PREFIX = "voice_transcript_pending:"
 MAX_AUDIO_BUFFER_BYTES = 12 * 1024 * 1024
 INPUT_PRE_ROLL_BYTES = 32_000
 
@@ -110,6 +112,15 @@ class VoiceSession:
     receive_task: Any | None = None
     close_task: Any | None = None
     closed: bool = False
+    # 患者端真实连接要求先展示转写草稿，后台无 WebSocket 的历史单测兼容旧自动确认。
+    require_transcript_confirmation: bool = False
+    pending_transcript_id: str | None = None
+    pending_transcript_text: str | None = None
+    pending_transcript_turn_no: int = 0
+    pending_transcript_message_id: str | None = None
+    pending_transcript_audio_url: str | None = None
+    confirmed_transcript_id: str | None = None
+    discarded_transcript_ids: set[str] = field(default_factory=set)
 
 
 class VoiceGateway:
@@ -191,6 +202,7 @@ class VoiceGateway:
                 audio_store=DialogAudioStore(),
                 publisher=DialogEventPublisher(session_no),
                 turn_detection=turn_detection,
+                require_transcript_confirmation=True,
             )
             self._sessions[session_no] = gateway_session
             gateway_session.receive_task = asyncio.create_task(
@@ -213,6 +225,49 @@ class VoiceGateway:
             },
         )
         await self._send_json(websocket, {"type": "state", "state": "listening"})
+        self._restore_pending_transcript(session)
+        if session.pending_transcript_id and session.pending_transcript_text:
+            await self._send_json(
+                websocket,
+                {
+                    "type": "transcript_ready",
+                    "transcript_id": session.pending_transcript_id,
+                    "text": session.pending_transcript_text,
+                    "turn_no": session.pending_transcript_turn_no,
+                    "message_id": session.pending_transcript_message_id,
+                    "audio_url": session.pending_transcript_audio_url,
+                    "is_final": True,
+                },
+            )
+
+    @staticmethod
+    def _restore_pending_transcript(session: VoiceSession) -> None:
+        """从 Redis 恢复进程内不存在的转写草稿索引。"""
+        if not session.require_transcript_confirmation or session.pending_transcript_id:
+            return
+        transcript_id = session.redis.get(
+            f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
+        )
+        if not transcript_id:
+            return
+        transcript_id = str(transcript_id)
+        draft = session.redis.get(
+            f"voice_transcript_draft:{session.session_no}:{transcript_id}"
+        )
+        if not isinstance(draft, dict):
+            session.redis.delete(
+                f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
+            )
+            return
+        session.pending_transcript_id = transcript_id
+        session.pending_transcript_text = str(draft.get("text") or "")
+        session.pending_transcript_turn_no = int(draft.get("turn_no") or 0)
+        session.pending_transcript_message_id = str(
+            draft.get("message_id") or ""
+        ) or None
+        session.pending_transcript_audio_url = str(
+            draft.get("audio_url") or ""
+        ) or None
 
     async def detach(self, session: VoiceSession, websocket: WebSocket) -> None:
         """解绑患者端；保留上游连接一段宽限期以支持重连。"""
@@ -271,6 +326,84 @@ class VoiceGateway:
         """取消当前模型响应并停止客户端播放。"""
         session.audio_suppressed = True
         await session.client.cancel_response()
+
+    async def confirm_transcript(self, session: VoiceSession, transcript_id: str) -> None:
+        """确认患者可见的转写草稿后，才写正式消息并派发结构化处理。"""
+        if session.confirmed_transcript_id == transcript_id:
+            return
+        if session.pending_transcript_id != transcript_id:
+            draft = session.redis.get(
+                f"voice_transcript_draft:{session.session_no}:{transcript_id}"
+            )
+            if isinstance(draft, dict):
+                session.pending_transcript_id = transcript_id
+                session.pending_transcript_text = str(draft.get("text") or "")
+                session.pending_transcript_turn_no = int(draft.get("turn_no") or 0)
+                session.pending_transcript_message_id = str(
+                    draft.get("message_id") or ""
+                ) or None
+                session.pending_transcript_audio_url = str(
+                    draft.get("audio_url") or ""
+                ) or None
+            else:
+                raise ValueError("转写草稿不存在或已过期")
+        text = session.pending_transcript_text or ""
+        if not text:
+            raise ValueError("转写草稿为空")
+        await self._commit_transcript(session, text)
+        session.confirmed_transcript_id = transcript_id
+        session.pending_transcript_id = None
+        session.pending_transcript_text = None
+        session.pending_transcript_turn_no = 0
+        session.pending_transcript_message_id = None
+        session.pending_transcript_audio_url = None
+        session.redis.delete(
+            f"voice_transcript_draft:{session.session_no}:{transcript_id}"
+        )
+        session.redis.delete(
+            f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
+        )
+        await self._broadcast_json(
+            session,
+            {"type": "transcript_confirmed", "transcript_id": transcript_id},
+        )
+
+    async def retry_transcript(self, session: VoiceSession, transcript_id: str) -> None:
+        """废弃旧草稿并清理当前音频，等待患者重新录制。"""
+        if transcript_id in session.discarded_transcript_ids:
+            return
+        if session.pending_transcript_id not in {None, transcript_id}:
+            raise ValueError("转写草稿已被新的录音替换")
+        if session.pending_transcript_id is None:
+            draft = session.redis.get(
+                f"voice_transcript_draft:{session.session_no}:{transcript_id}"
+            )
+            if not isinstance(draft, dict):
+                raise ValueError("转写草稿不存在或已过期")
+        session.pending_transcript_id = None
+        session.pending_transcript_text = None
+        session.pending_transcript_turn_no = 0
+        session.pending_transcript_message_id = None
+        session.pending_transcript_audio_url = None
+        session.discarded_transcript_ids.add(transcript_id)
+        session.redis.delete(
+            f"voice_transcript_draft:{session.session_no}:{transcript_id}"
+        )
+        session.redis.delete(
+            f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
+        )
+        session.transcript_received = False
+        session.input_audio.clear()
+        session.input_pre_roll.clear()
+        session.input_committed = False
+        session.input_message_id = None
+        session.input_audio_url = None
+        session.input_turn_no = 0
+        await self._broadcast_json(
+            session,
+            {"type": "transcript_discarded", "transcript_id": transcript_id},
+        )
+        await self._broadcast_state(session, "listening")
 
     async def close(self, session_no: str) -> None:
         """关闭业务会话和上游连接。"""
@@ -427,6 +560,16 @@ class VoiceGateway:
         """按官方 server_vad 事件开始一轮患者语音并处理打断。"""
         if session.speech_active:
             return
+        if session.pending_transcript_id:
+            await self._broadcast_json(
+                session,
+                {
+                    "type": "error",
+                    "code": "TRANSCRIPT_CONFIRM_REQUIRED",
+                    "message": "请先确认或重新录制当前转写",
+                },
+            )
+            return
         session.speech_active = True
         session.input_turn_no, session.input_message_id = self._next_patient_message(
             session.session_no
@@ -435,6 +578,11 @@ class VoiceGateway:
         session.input_pre_roll.clear()
         session.input_audio_url = None
         session.transcript_received = False
+        session.pending_transcript_id = None
+        session.pending_transcript_text = None
+        session.pending_transcript_message_id = None
+        session.pending_transcript_audio_url = None
+        session.pending_transcript_turn_no = 0
         session.input_committed = False
         await self._refresh_schedule_guidance(session)
         if session.responding:
@@ -476,6 +624,77 @@ class VoiceGateway:
         session.transcript_received = True
         message_id = session.input_message_id or f"MSG-PATIENT-{uuid.uuid4().hex.upper()}"
         turn_no = session.input_turn_no or self._next_patient_message(session.session_no)[0]
+        transcript_id = f"TRANSCRIPT-{uuid.uuid4().hex.upper()}"
+        session.pending_transcript_id = transcript_id
+        session.pending_transcript_text = text
+        session.pending_transcript_turn_no = turn_no
+        session.pending_transcript_message_id = message_id
+        session.pending_transcript_audio_url = session.input_audio_url
+        if session.require_transcript_confirmation:
+            saved = session.redis.set(
+                f"voice_transcript_draft:{session.session_no}:{transcript_id}",
+                {
+                    "text": text,
+                    "turn_no": turn_no,
+                    "message_id": message_id,
+                    "audio_url": session.input_audio_url,
+                },
+                ex=TRANSCRIPT_DRAFT_TTL_SECONDS,
+            )
+            if not saved:
+                await self._broadcast_json(
+                    session,
+                    {
+                        "type": "error",
+                        "code": "TRANSCRIPT_DRAFT_UNAVAILABLE",
+                        "message": "转写暂时无法保存，请重新录制",
+                    },
+                )
+                return
+            pending_saved = session.redis.set(
+                f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}",
+                transcript_id,
+                ex=TRANSCRIPT_DRAFT_TTL_SECONDS,
+            )
+            if not pending_saved:
+                session.redis.delete(
+                    f"voice_transcript_draft:{session.session_no}:{transcript_id}"
+                )
+                await self._broadcast_json(
+                    session,
+                    {
+                        "type": "error",
+                        "code": "TRANSCRIPT_DRAFT_UNAVAILABLE",
+                        "message": "转写暂时无法保存，请重新录制",
+                    },
+                )
+                return
+            await self._broadcast_json(
+                session,
+                {
+                    "type": "transcript_ready",
+                    "transcript_id": transcript_id,
+                    "text": text,
+                    "turn_no": turn_no,
+                    "message_id": message_id,
+                    "audio_url": session.input_audio_url,
+                    "is_final": True,
+                },
+            )
+            return
+        await self._commit_transcript(session, text)
+        session.confirmed_transcript_id = transcript_id
+        session.pending_transcript_id = None
+        session.pending_transcript_text = None
+        session.pending_transcript_turn_no = 0
+        session.pending_transcript_message_id = None
+        session.pending_transcript_audio_url = None
+
+    async def _commit_transcript(self, session: VoiceSession, text: str) -> None:
+        """把已确认转写写入正式历史并派发后台 Worker。"""
+        message_id = session.pending_transcript_message_id or session.input_message_id or f"MSG-PATIENT-{uuid.uuid4().hex.upper()}"
+        turn_no = session.pending_transcript_turn_no or session.input_turn_no or self._next_patient_message(session.session_no)[0]
+        audio_url = session.pending_transcript_audio_url or session.input_audio_url
         history = DialogHistoryManager()
         await history.save_message(
             session.session_no,
@@ -484,7 +703,7 @@ class VoiceGateway:
             role_type="患者",
             message_type="语音",
             content_text=text,
-            audio_url=session.input_audio_url,
+            audio_url=audio_url,
             asr_text=text,
             creator="patient",
         )

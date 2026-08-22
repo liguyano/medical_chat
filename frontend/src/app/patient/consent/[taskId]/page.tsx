@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import SignaturePad from '@/components/consent/SignaturePad';
 import { PatientIcon } from '@/components/patient/PatientIcon';
 import { careRepository } from '@/lib/repositories';
+import { runtimeConfig } from '@/lib/runtime/config';
 import { createClientInvocationId } from '@/lib/clientInvocation';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { applyRealtimeEvent } from '@/lib/transports/applyRealtimeEvent';
@@ -58,16 +59,86 @@ export default function PatientConsentPage() {
   const savedConsent = useTaskStore((state) => state.consents[taskId]);
   const saveConsent = useTaskStore((state) => state.saveConsent);
   const updateTask = useTaskStore((state) => state.updateTask);
-  const [clauses, setClauses] = useState(savedConsent?.clauses ?? initialClauses);
+  const initialClauseState =
+    runtimeConfig.dataMode === 'api'
+      ? []
+      : (savedConsent?.clauses ?? initialClauses);
+  const [clauses, setClauses] = useState(initialClauseState);
   const [activeClauseIndex, setActiveClauseIndex] = useState(() => {
-    const source = savedConsent?.clauses ?? initialClauses;
+    const source = initialClauseState;
     const firstUnconfirmed = source.findIndex((clause) => !clause.confirmed);
     return firstUnconfirmed < 0 ? source.length - 1 : firstUnconfirmed;
   });
   const [signatureData, setSignatureData] = useState(savedConsent?.signatureData);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [remoteRecordId, setRemoteRecordId] = useState<number>();
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const handoffSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    if (runtimeConfig.dataMode !== 'api') return;
+    let cancelled = false;
+    void careRepository
+      .getConsentSnapshot(taskId)
+      .then((snapshot) => {
+        if (cancelled) return;
+        setRemoteRecordId(snapshot.recordId);
+        const remoteClauses: ConsentClause[] = snapshot.clauses.map((raw, index) => {
+          const id = String(raw.id ?? raw.clause_id ?? `consent-${index + 1}`);
+          const confirmation = snapshot.confirmations.find(
+            (item) => String(item.clause_id ?? '') === id
+          );
+          const result = String(confirmation?.confirmation_result ?? '');
+          return {
+            id,
+            clauseCode: String(raw.clause_code ?? id),
+            clauseName: String(raw.title ?? raw.clause_title ?? '知情同意条款'),
+            patientContent: String(raw.patient_content ?? raw.original_content ?? ''),
+            audioUrl:
+              typeof raw.audio_url === 'string' ? raw.audio_url : undefined,
+            audioDurationSeconds:
+              typeof raw.audio_duration_seconds === 'number'
+                ? raw.audio_duration_seconds
+                : undefined,
+            importanceLevel:
+              raw.importance_level === 'critical' ? 'critical' : 'important',
+            mandatoryDelivery: Boolean(raw.confirmation_required ?? true),
+            explicitConfirmationRequired: Boolean(raw.confirmation_required ?? true),
+            deliveryStatus: confirmation ? 'delivered' : 'pending',
+            listened: snapshot.playback.some(
+              (item) =>
+                String(item.clause_id ?? '') === id &&
+                item.playback_status === 'completed'
+            ),
+            confirmed: result === '已理解并确认',
+            understandingStatus:
+              result === '已理解并确认'
+                ? 'understood'
+                : result
+                  ? 'not_understood'
+                  : undefined,
+          };
+        });
+        setClauses(remoteClauses);
+        const firstUnconfirmed = remoteClauses.findIndex(
+          (clause) => !clause.confirmed
+        );
+        setActiveClauseIndex(
+          firstUnconfirmed < 0 ? remoteClauses.length - 1 : firstUnconfirmed
+        );
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setClauses([]);
+          setError(loadError instanceof Error ? loadError.message : '知情同意内容加载失败');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
 
   const completedCount = clauses.filter((clause) => clause.confirmed).length;
   const safeIndex = Math.min(
@@ -78,11 +149,13 @@ export default function PatientConsentPage() {
   const allConfirmed = completedCount === clauses.length;
 
   const importance = useMemo(() => {
+    if (!current) return '内容暂不可用';
     if (current.importanceLevel === 'critical') return '必须确认';
     return '重要条款';
-  }, [current.importanceLevel]);
+  }, [current]);
 
   const markListened = () => {
+    if (!current) return;
     setClauses((items) =>
       items.map((item) =>
         item.id === current.id
@@ -90,9 +163,84 @@ export default function PatientConsentPage() {
           : item
       )
     );
+    if (runtimeConfig.dataMode === 'api' && remoteRecordId) {
+      const clauseId = Number(current.id);
+      if (Number.isSafeInteger(clauseId)) {
+        void careRepository.recordConsentPlayback(taskId, {
+          clauseId,
+          eventType: 'complete',
+          positionSeconds: 0,
+          clientInvocationId: createClientInvocationId('consent-playback'),
+        });
+      }
+    }
   };
 
-  const confirmCurrent = () => {
+  const handlePlayback = async () => {
+    if (!current) return;
+    if (current.audioUrl && runtimeConfig.dataMode === 'api') {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      const audio = new Audio(current.audioUrl);
+      audioRef.current = audio;
+      setPlaying(true);
+      const clauseId = Number(current.id);
+      if (remoteRecordId && Number.isSafeInteger(clauseId)) {
+        void careRepository.recordConsentPlayback(taskId, {
+          clauseId,
+          eventType: current.listened ? 'replay' : 'start',
+          positionSeconds: 0,
+          clientInvocationId: createClientInvocationId('consent-playback'),
+        });
+      }
+      audio.addEventListener('ended', () => {
+        setPlaying(false);
+        audioRef.current = null;
+        markListened();
+      });
+      audio.addEventListener('error', () => {
+        setPlaying(false);
+        audioRef.current = null;
+        setError('条款音频暂时无法播放，请稍后重试或联系护士');
+      });
+      try {
+        await audio.play();
+      } catch {
+        setPlaying(false);
+        audioRef.current = null;
+        setError('浏览器未能播放条款音频，请点击重试');
+      }
+      return;
+    }
+    markListened();
+  };
+
+  const formatDuration = (seconds?: number) => {
+    if (!seconds || seconds <= 0) return '—';
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+  };
+
+  if (!current) {
+    return (
+      <PatientLayout title="知情同意确认" showBack>
+        <div className="px-[18px] py-8">
+          <div
+            role="alert"
+            className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800"
+          >
+            <PatientIcon name="warning" className="mr-2 inline h-5 w-5" />
+            {error || '知情同意内容暂不可用，请联系护士处理。'}
+          </div>
+        </div>
+      </PatientLayout>
+    );
+  }
+
+  const confirmCurrent = async () => {
     setClauses((items) =>
       items.map((item) =>
         item.id === current.id
@@ -106,6 +254,14 @@ export default function PatientConsentPage() {
           : item
       )
     );
+    if (runtimeConfig.dataMode === 'api') {
+      const clauseId = Number(current.id);
+      if (Number.isSafeInteger(clauseId)) {
+        await careRepository.confirmConsentClause(taskId, clauseId, {
+          confirmationResult: '已理解并确认',
+        });
+      }
+    }
     setActiveClauseIndex((index) => Math.min(index + 1, clauses.length - 1));
     setError('');
   };
@@ -132,6 +288,15 @@ export default function PatientConsentPage() {
         requestedAction: 'explain_consent',
         clientInvocationId: createClientInvocationId('patient-handoff'),
       });
+      if (runtimeConfig.dataMode === 'api') {
+        const clauseId = Number(current.id);
+        if (Number.isSafeInteger(clauseId)) {
+          await careRepository.confirmConsentClause(taskId, clauseId, {
+            confirmationResult: '未理解',
+            patientReply: reason,
+          });
+        }
+      }
       applyRealtimeEvent(
         toHandoffSseEnvelope(response, {
           taskId,
@@ -264,7 +429,7 @@ export default function PatientConsentPage() {
 
             <button
               type="button"
-              onClick={markListened}
+              onClick={() => void handlePlayback()}
               className="mt-5 flex min-h-[76px] w-full items-center gap-3 rounded-[18px] border border-[#f0c8a7] bg-white/75 px-4 text-left"
             >
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary text-white">
@@ -274,7 +439,11 @@ export default function PatientConsentPage() {
                 />
               </span>
               <span className="font-black">
-                {current.listened ? '重新播放条款' : '播放条款'}
+                {playing
+                  ? '正在播放条款'
+                  : current.listened
+                    ? '重新播放条款'
+                    : '播放条款'}
               </span>
               <span className="flex h-8 flex-1 items-center justify-center gap-[3px] overflow-hidden text-primary">
                 {[10, 18, 12, 24, 15, 22, 12, 17, 25, 14, 20, 11].map(
@@ -287,7 +456,11 @@ export default function PatientConsentPage() {
                   )
                 )}
               </span>
-              <span className="text-xs text-foreground-muted">01:02</span>
+              <span className="text-xs text-foreground-muted">
+                {formatDuration(current.audioDurationSeconds) === '—'
+                  ? '01:02'
+                  : formatDuration(current.audioDurationSeconds)}
+              </span>
             </button>
           </section>
         )}
@@ -335,7 +508,7 @@ export default function PatientConsentPage() {
             </button>
             <button
               type="button"
-              onClick={confirmCurrent}
+              onClick={() => void confirmCurrent()}
               disabled={!current.listened}
               className="patient-primary-button px-2 text-[14px]"
             >

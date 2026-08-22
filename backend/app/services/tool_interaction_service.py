@@ -29,6 +29,7 @@ from app.models.interaction import (
     InteractionSession,
 )
 from app.models.patient_task import CareTask, Patient, PatientEncounter
+from app.models.patient_portal import PatientNotification
 from app.schemas.events import (
     BaseEvent,
     ConsentStatusUpdatedEvent,
@@ -412,6 +413,20 @@ def request_handoff(
         creator="patient",
         source_invocation_id=source_key,
     )
+    db.add(
+        PatientNotification(
+            notification_no=f"PN-{uuid.uuid4().hex.upper()}",
+            patient_id=patient.id,
+            encounter_id=encounter.id if encounter else None,
+            notification_type="handoff",
+            title="护士协助请求已提交",
+            content="护士已收到您的请求，请在床旁等待处理。",
+            priority="high" if request.urgency == "urgent" else "normal",
+            payload={"request_id": event.request_id, "task_id": task.id},
+            creator="patient",
+            updator="patient",
+        )
+    )
     db.commit()
     publisher = DialogEventPublisher(session.session_no)
     publisher.publish(event)
@@ -644,6 +659,28 @@ def submit_consent(
         task.need_manual_intervention = True
         task.intervention_reason = session.handoff_reason
     db.commit()
+    # 批次 B 结构化知情同意记录与旧 interaction_event 同步写入。
+    # 历史任务可能尚未配置文档模板，保留旧接口兼容并由快照接口返回明确不可用。
+    try:
+        from app.services.patient_portal_service import attach_consent_signature
+
+        attach_consent_signature(
+            db,
+            task_ref=task_ref,
+            patient_id=patient_id,
+            encounter_id=task.encounter_id,
+            participant_name=request.participant_name,
+            participant_type="患者",
+            signature_file_url=signature_file_url,
+            signed_content_hash=signed_content_hash,
+        )
+    except AppError as exc:
+        if exc.code != ErrorCode.ERR_PATIENT_009:
+            raise
+        logger.warning(
+            "任务尚未配置结构化知情同意文档，保留旧事件签署结果: task=%s",
+            task.task_no,
+        )
     DialogEventPublisher(session.session_no).publish(event)
     return payload
 

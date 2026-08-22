@@ -26,6 +26,14 @@ export interface VoiceSocketOptions {
   sessionId: string;
   onStateChange?: (state: VoiceConnectionState) => void;
   onError?: (message: string) => void;
+  onTranscriptReady?: (transcript: {
+    transcriptId: string;
+    text: string;
+    turnNo: number;
+    messageId?: string;
+    audioUrl?: string | null;
+  }) => void;
+  onTranscriptDiscarded?: (transcriptId: string) => void;
 }
 
 class MicrophonePcmCapture {
@@ -217,6 +225,18 @@ export class VoiceSocketClient {
         decodeBase64ToArrayBuffer(message.audio_base64),
         message.sample_rate
       );
+    } else if (message.type === 'transcript_ready') {
+      this.options.onTranscriptReady?.({
+        transcriptId: message.transcript_id,
+        text: message.text,
+        turnNo: message.turn_no,
+        messageId: message.message_id,
+        audioUrl: message.audio_url,
+      });
+      this.setState('transcribing');
+    } else if (message.type === 'transcript_discarded') {
+      this.options.onTranscriptDiscarded?.(message.transcript_id);
+      this.setState('listening');
     } else if (message.type === 'error') {
       this.completePendingResponse();
       this.options.onError?.(message.message);
@@ -265,6 +285,14 @@ export class VoiceSocketClient {
     await this.capture.stop();
     this.sendControl({ type: 'commit' });
     this.setState('transcribing');
+  }
+
+  confirmTranscript(transcriptId: string): void {
+    this.sendControl({ type: 'confirm_transcript', transcript_id: transcriptId });
+  }
+
+  retryTranscript(transcriptId: string): void {
+    this.sendControl({ type: 'retry_transcript', transcript_id: transcriptId });
   }
 
   interrupt(): void {

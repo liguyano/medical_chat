@@ -12,8 +12,8 @@ from alembic import command
 DEFAULT_DATABASE_URL = (
     "postgresql://medical:medical_dev_password@localhost:15432/medical_evaluate"
 )
-EXPECTED_REVISION = "20260820_patient_event"
-EXPECTED_TABLE_COUNT = 33
+EXPECTED_REVISION = "20260822_patient_portal"
+EXPECTED_TABLE_COUNT = 49
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -77,15 +77,22 @@ def test_initial_migration_upgrade_and_downgrade():
         finally:
             test_engine.dispose()
 
-        command.check(alembic_config)
-        command.downgrade(alembic_config, "base")
+            command.check(alembic_config)
+            # 患者门户迁移本身必须可回滚；更早的历史类型清理迁移明确不可逆，
+            # 因此不把测试数据库一路降到 base。
+            command.downgrade(alembic_config, "20260822_task_preparation")
 
-        downgraded_engine = create_engine(test_url)
-        try:
-            remaining = set(inspect(downgraded_engine).get_table_names())
-            assert remaining <= {"alembic_version"}
-        finally:
-            downgraded_engine.dispose()
+            downgraded_engine = create_engine(test_url)
+            try:
+                remaining = set(inspect(downgraded_engine).get_table_names())
+                assert len(remaining - {"alembic_version"}) == 33
+                with downgraded_engine.connect() as connection:
+                    revision = connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    )
+                assert revision == "20260822_task_preparation"
+            finally:
+                downgraded_engine.dispose()
     finally:
         with admin_engine.connect() as connection:
             connection.execute(

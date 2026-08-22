@@ -32,7 +32,18 @@ AUTOGENERATE_PLUGINS = [
 
 
 def _resolve_database_url() -> str:
-    """读取应用统一数据库配置，避免容器迁移连接宿主机 localhost。"""
+    """解析迁移连接串。
+
+    生产默认仍从统一应用配置读取；当调用方显式覆写 Alembic 配置中的
+    ``sqlalchemy.url``（例如临时测试库、发布流水线）时必须尊重该连接串，
+    否则迁移会误跑到默认库而让调用方误以为目标库已升级。
+    """
+    configured = config.get_main_option("sqlalchemy.url")
+    default_ini_url = (
+        "postgresql://medical:medical_dev_password@localhost:15432/medical_evaluate"
+    )
+    if configured and configured != default_ini_url:
+        return configured
     return get_app_config().database.url
 
 

@@ -84,6 +84,70 @@ export interface PatientLoginInput {
   phone: string;
 }
 
+export interface PatientTaskVerifyInput {
+  taskNo: string;
+  idCardSuffix: string;
+}
+
+export interface PatientNotification {
+  id: string;
+  notificationNo: string;
+  notificationType: string;
+  title: string;
+  content: string;
+  priority: string;
+  payload: Record<string, unknown>;
+  readAt?: string;
+  createdAt: string;
+}
+
+export interface WardGuide {
+  id: string;
+  guideCode: string;
+  category: string;
+  title: string;
+  content: string;
+  departmentName?: string;
+  wardName?: string;
+  sortNo: number;
+}
+
+export interface PatientAssistantMessage {
+  messageNo: string;
+  role: 'patient' | 'assistant' | 'system';
+  content: string;
+  resultStatus?: string;
+  sourceGuideId?: string;
+  occurredAt: string;
+}
+
+export interface PatientAssistantSession {
+  sessionNo: string;
+  channelType: string;
+  sessionStatus: string;
+  handoffRequired: boolean;
+  handoffReason?: string;
+  messages: PatientAssistantMessage[];
+}
+
+export interface ConsentSnapshot {
+  taskNo: string;
+  recordId: number;
+  consentCode: string;
+  consentName: string;
+  consentType: string;
+  documentVersion: string;
+  fullText: string;
+  recordStatus: string;
+  patientConfirmed: boolean;
+  participantType: string;
+  clauses: Array<Record<string, unknown>>;
+  confirmations: Array<Record<string, unknown>>;
+  playback: Array<Record<string, unknown>>;
+  participants: Array<Record<string, unknown>>;
+  signatures: Array<Record<string, unknown>>;
+}
+
 export interface StaffLoginInput {
   staffNo: string;
   password: string;
@@ -194,6 +258,60 @@ export interface CareRepository {
     input: PatientLoginInput,
     signal?: AbortSignal
   ): Promise<PatientPortal>;
+  verifyPatientTask(
+    input: PatientTaskVerifyInput,
+    signal?: AbortSignal
+  ): Promise<PatientPortal>;
+  verifyPatientScanToken(
+    token: string,
+    signal?: AbortSignal
+  ): Promise<PatientPortal>;
+  listPatientNotifications(
+    unreadOnly?: boolean,
+    signal?: AbortSignal
+  ): Promise<{ items: PatientNotification[]; unreadCount: number }>;
+  markPatientNotificationRead(
+    notificationId: string,
+    signal?: AbortSignal
+  ): Promise<PatientNotification>;
+  listPatientWardGuide(signal?: AbortSignal): Promise<WardGuide[]>;
+  createPatientAssistantSession(
+    channelType?: 'text' | 'voice',
+    signal?: AbortSignal
+  ): Promise<PatientAssistantSession>;
+  getPatientAssistantSession(
+    sessionNo: string,
+    signal?: AbortSignal
+  ): Promise<PatientAssistantSession>;
+  sendPatientAssistantMessage(
+    sessionNo: string,
+    content: string,
+    clientMessageId?: string,
+    signal?: AbortSignal
+  ): Promise<PatientAssistantSession>;
+  getConsentSnapshot(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<ConsentSnapshot>;
+  recordConsentPlayback(
+    taskId: string,
+    input: {
+      clauseId: number;
+      eventType: 'start' | 'pause' | 'resume' | 'complete' | 'replay';
+      positionSeconds: number;
+      clientInvocationId?: string;
+    },
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>>;
+  confirmConsentClause(
+    taskId: string,
+    clauseId: number,
+    input: {
+      confirmationResult: '已理解并确认' | '未理解' | '拒绝' | '不确定';
+      patientReply?: string;
+    },
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>>;
   loginStaff(input: StaffLoginInput, signal?: AbortSignal): Promise<User>;
   getCurrentStaff(signal?: AbortSignal): Promise<User>;
   logoutStaff(signal?: AbortSignal): Promise<void>;

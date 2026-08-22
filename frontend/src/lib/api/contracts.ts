@@ -74,6 +74,65 @@ export interface PatientLoginResponse {
   tasks: BackendTaskDto[];
 }
 
+export interface PatientNotificationDto {
+  id: ApiId;
+  notification_no: string;
+  notification_type: string;
+  title: string;
+  content: string;
+  priority: string;
+  payload: Record<string, unknown>;
+  read_at?: string | null;
+  created_at: string;
+}
+
+export interface WardGuideDto {
+  id: ApiId;
+  guide_code: string;
+  category: string;
+  title: string;
+  content: string;
+  department_name?: string | null;
+  ward_name?: string | null;
+  sort_no: number;
+}
+
+export interface PatientAssistantMessageDto {
+  message_no: string;
+  role: 'patient' | 'assistant' | 'system';
+  content: string;
+  result_status?: string | null;
+  source_guide_id?: ApiId | null;
+  occurred_at: string;
+}
+
+export interface PatientAssistantSessionDto {
+  session_no: string;
+  channel_type: string;
+  session_status: string;
+  handoff_required: boolean;
+  handoff_reason?: string | null;
+  messages: PatientAssistantMessageDto[];
+}
+
+export interface ConsentSnapshotDto {
+  task_no: string;
+  record_id: number;
+  consent_code: string;
+  consent_name: string;
+  consent_type: string;
+  document_version: string;
+  full_text: string;
+  record_status: string;
+  patient_confirmed: boolean;
+  participant_type: string;
+  clauses: Array<Record<string, unknown>>;
+  confirmations: Array<Record<string, unknown>>;
+  playback: Array<Record<string, unknown>>;
+  participants: Array<Record<string, unknown>>;
+  signatures: Array<Record<string, unknown>>;
+}
+
 export interface StaffDto {
   id: ApiId;
   staff_no: string;
@@ -545,6 +604,8 @@ export type VoiceClientMessage =
   | { type: 'interrupt' }
   | { type: 'pause' }
   | { type: 'resume' }
+  | { type: 'confirm_transcript'; transcript_id: string }
+  | { type: 'retry_transcript'; transcript_id: string }
   | { type: 'close' };
 
 export type VoiceServerMessage =
@@ -564,5 +625,16 @@ export type VoiceServerMessage =
         | 'paused';
     }
   | { type: 'audio'; sequence: number; sample_rate: number; audio_base64: string }
+  | {
+      type: 'transcript_ready';
+      transcript_id: string;
+      text: string;
+      turn_no: number;
+      message_id?: string;
+      audio_url?: string | null;
+      is_final: boolean;
+    }
+  | { type: 'transcript_confirmed'; transcript_id: string }
+  | { type: 'transcript_discarded'; transcript_id: string }
   | { type: 'error'; code?: string; message: string }
   | { type: 'closed' };

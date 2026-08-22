@@ -251,6 +251,7 @@ export default function PatientDialoguePage() {
   const [manualInterventionReason, setManualInterventionReason] = useState('');
   const [messageDraft, setMessageDraft] = useState('');
   const [pendingVoiceTranscript, setPendingVoiceTranscript] = useState('');
+  const [pendingVoiceTranscriptId, setPendingVoiceTranscriptId] = useState('');
 
   const dialogueSnapshotKey = task
     ? buildDialogueSnapshotKey(taskId, task.sessionId)
@@ -698,6 +699,7 @@ export default function PatientDialoguePage() {
 
   const startVoice = async () => {
     setPendingVoiceTranscript('');
+    setPendingVoiceTranscriptId('');
     if (runtimeConfig.dataMode === 'mock') {
       setIsRecording(true);
       setVoiceState('listening');
@@ -729,6 +731,17 @@ export default function PatientDialoguePage() {
         );
       },
       onError: setConnectionError,
+      onTranscriptReady: (transcript) => {
+        setPendingVoiceTranscript(transcript.text);
+        setPendingVoiceTranscriptId(transcript.transcriptId);
+        setVoiceState('transcribing');
+      },
+      onTranscriptDiscarded: (transcriptId) => {
+        if (transcriptId === pendingVoiceTranscriptId) {
+          setPendingVoiceTranscript('');
+          setPendingVoiceTranscriptId('');
+        }
+      },
     });
     voiceClientRef.current = client;
     try {
@@ -767,6 +780,7 @@ export default function PatientDialoguePage() {
     if (runtimeConfig.dataMode === 'mock') {
       setVoiceState('transcribing');
       setPendingVoiceTranscript('我目前感觉还可以，没有特别不舒服。');
+      setPendingVoiceTranscriptId('mock-transcript');
       return;
     }
     try {
@@ -784,10 +798,33 @@ export default function PatientDialoguePage() {
   const confirmVoiceTranscript = async () => {
     const transcript = pendingVoiceTranscript.trim();
     if (!transcript) return;
+    if (
+      runtimeConfig.dataMode !== 'mock' &&
+      pendingVoiceTranscriptId
+    ) {
+      voiceClientRef.current?.confirmTranscript(pendingVoiceTranscriptId);
+      setPendingVoiceTranscript('');
+      setPendingVoiceTranscriptId('');
+      setVoiceState('thinking');
+      return;
+    }
     setPendingVoiceTranscript('');
+    setPendingVoiceTranscriptId('');
     setVoiceState('thinking');
     await handleSendMessage(transcript);
     setVoiceState('idle');
+  };
+
+  const retryVoiceTranscript = async () => {
+    if (
+      runtimeConfig.dataMode !== 'mock' &&
+      pendingVoiceTranscriptId
+    ) {
+      voiceClientRef.current?.retryTranscript(pendingVoiceTranscriptId);
+    }
+    setPendingVoiceTranscript('');
+    setPendingVoiceTranscriptId('');
+    await startVoice();
   };
 
   const interruptVoice = () => {
@@ -1005,7 +1042,7 @@ export default function PatientDialoguePage() {
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => void startVoice()}
+                  onClick={() => void retryVoiceTranscript()}
                   className="patient-outline-button min-h-11 text-sm"
                 >
                   <PatientIcon name="replay" className="h-5 w-5" />

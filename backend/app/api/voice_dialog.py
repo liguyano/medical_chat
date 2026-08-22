@@ -121,6 +121,32 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
                 await websocket.send_json({"type": "state", "state": "paused"})
             elif message_type == "resume":
                 await websocket.send_json({"type": "state", "state": "listening"})
+            elif message_type == "confirm_transcript":
+                transcript_id = str(payload.get("transcript_id") or "")
+                if not transcript_id:
+                    await websocket.send_json(
+                        {"type": "error", "code": "INVALID_MESSAGE", "message": "缺少 transcript_id"}
+                    )
+                    continue
+                try:
+                    await voice_gateway.confirm_transcript(session, transcript_id)
+                except ValueError as exc:
+                    await websocket.send_json(
+                        {"type": "error", "code": "TRANSCRIPT_STATE_INVALID", "message": str(exc)}
+                    )
+            elif message_type == "retry_transcript":
+                transcript_id = str(payload.get("transcript_id") or "")
+                if not transcript_id:
+                    await websocket.send_json(
+                        {"type": "error", "code": "INVALID_MESSAGE", "message": "缺少 transcript_id"}
+                    )
+                    continue
+                try:
+                    await voice_gateway.retry_transcript(session, transcript_id)
+                except ValueError as exc:
+                    await websocket.send_json(
+                        {"type": "error", "code": "TRANSCRIPT_STATE_INVALID", "message": str(exc)}
+                    )
             elif message_type == "close":
                 await voice_gateway.close(session_no)
                 break

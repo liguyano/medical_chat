@@ -11,6 +11,10 @@ import type {
   MessageRatingListResponse,
   NursingPlanDto,
   PatientLoginResponse,
+  PatientAssistantSessionDto,
+  PatientNotificationDto,
+  WardGuideDto,
+  ConsentSnapshotDto,
   PatientRecordDto,
   QualityReviewDto,
   AssessmentScaleConfigSummaryDto,
@@ -49,6 +53,11 @@ import type {
   CareRepository,
   CreateTaskInput,
   PatientLoginInput,
+  PatientTaskVerifyInput,
+  PatientNotification,
+  WardGuide,
+  PatientAssistantSession,
+  ConsentSnapshot,
   PatientListFilters,
   PatientRecordInput,
   PatientWithEncounter,
@@ -73,6 +82,77 @@ function mapEducationMaterial(
     requiresAcknowledgement: item.requires_acknowledgement,
     autoPlay: item.auto_play,
     enabled: item.enabled,
+  };
+}
+
+function mapPatientNotification(dto: PatientNotificationDto): PatientNotification {
+  return {
+    id: String(dto.id),
+    notificationNo: dto.notification_no,
+    notificationType: dto.notification_type,
+    title: dto.title,
+    content: dto.content,
+    priority: dto.priority,
+    payload: dto.payload ?? {},
+    readAt: dto.read_at ?? undefined,
+    createdAt: dto.created_at,
+  };
+}
+
+function mapWardGuide(dto: WardGuideDto): WardGuide {
+  return {
+    id: String(dto.id),
+    guideCode: dto.guide_code,
+    category: dto.category,
+    title: dto.title,
+    content: dto.content,
+    departmentName: dto.department_name ?? undefined,
+    wardName: dto.ward_name ?? undefined,
+    sortNo: dto.sort_no,
+  };
+}
+
+function mapAssistantSession(
+  dto: PatientAssistantSessionDto
+): PatientAssistantSession {
+  return {
+    sessionNo: dto.session_no,
+    channelType: dto.channel_type,
+    sessionStatus: dto.session_status,
+    handoffRequired: dto.handoff_required,
+    handoffReason: dto.handoff_reason ?? undefined,
+    messages: dto.messages.map((message) => ({
+      messageNo: message.message_no,
+      role: message.role,
+      content: message.content,
+      resultStatus: message.result_status ?? undefined,
+      sourceGuideId:
+        message.source_guide_id === null ||
+        message.source_guide_id === undefined
+          ? undefined
+          : String(message.source_guide_id),
+      occurredAt: message.occurred_at,
+    })),
+  };
+}
+
+function mapConsentSnapshot(dto: ConsentSnapshotDto): ConsentSnapshot {
+  return {
+    taskNo: dto.task_no,
+    recordId: dto.record_id,
+    consentCode: dto.consent_code,
+    consentName: dto.consent_name,
+    consentType: dto.consent_type,
+    documentVersion: dto.document_version,
+    fullText: dto.full_text,
+    recordStatus: dto.record_status,
+    patientConfirmed: dto.patient_confirmed,
+    participantType: dto.participant_type,
+    clauses: dto.clauses ?? [],
+    confirmations: dto.confirmations ?? [],
+    playback: dto.playback ?? [],
+    participants: dto.participants ?? [],
+    signatures: dto.signatures ?? [],
   };
 }
 
@@ -473,6 +553,166 @@ export class ApiCareRepository implements CareRepository {
       }
     );
     return mapPatientPortal(response);
+  }
+
+  async verifyPatientTask(
+    input: PatientTaskVerifyInput,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<PatientLoginResponse>(
+      '/api/patients/verify-task',
+      {
+        method: 'POST',
+        body: {
+          task_no: input.taskNo,
+          id_card_suffix: input.idCardSuffix,
+        },
+        signal,
+      }
+    );
+    return mapPatientPortal(response);
+  }
+
+  async verifyPatientScanToken(token: string, signal?: AbortSignal) {
+    const response = await apiRequest<PatientLoginResponse>(
+      '/api/patients/scan/verify',
+      {
+        method: 'POST',
+        body: { token },
+        signal,
+      }
+    );
+    return mapPatientPortal(response);
+  }
+
+  async listPatientNotifications(
+    unreadOnly = false,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<{
+      items: PatientNotificationDto[];
+      unread_count: number;
+    }>(
+      `/api/patient-notifications?unread_only=${String(unreadOnly)}`,
+      { signal }
+    );
+    return {
+      items: response.items.map(mapPatientNotification),
+      unreadCount: response.unread_count,
+    };
+  }
+
+  async markPatientNotificationRead(
+    notificationId: string,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<PatientNotificationDto>(
+      `/api/patient-notifications/${encodeURIComponent(notificationId)}/read`,
+      { method: 'POST', signal }
+    );
+    return mapPatientNotification(response);
+  }
+
+  async listPatientWardGuide(signal?: AbortSignal) {
+    const response = await apiRequest<WardGuideDto[]>(
+      '/api/patient-ward-guide',
+      { signal }
+    );
+    return response.map(mapWardGuide);
+  }
+
+  async createPatientAssistantSession(
+    channelType: 'text' | 'voice' = 'text',
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<PatientAssistantSessionDto>(
+      '/api/patient-assistant/sessions',
+      { method: 'POST', body: { channel_type: channelType }, signal }
+    );
+    return mapAssistantSession(response);
+  }
+
+  async getPatientAssistantSession(
+    sessionNo: string,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<PatientAssistantSessionDto>(
+      `/api/patient-assistant/sessions/${encodeURIComponent(sessionNo)}`,
+      { signal }
+    );
+    return mapAssistantSession(response);
+  }
+
+  async sendPatientAssistantMessage(
+    sessionNo: string,
+    content: string,
+    clientMessageId?: string,
+    signal?: AbortSignal
+  ) {
+    const response = await apiRequest<PatientAssistantSessionDto>(
+      `/api/patient-assistant/sessions/${encodeURIComponent(sessionNo)}/messages`,
+      {
+        method: 'POST',
+        body: { content, client_message_id: clientMessageId },
+        signal,
+      }
+    );
+    return mapAssistantSession(response);
+  }
+
+  async getConsentSnapshot(taskId: string, signal?: AbortSignal) {
+    const response = await apiRequest<ConsentSnapshotDto>(
+      `/api/consent-forms/${encodeURIComponent(taskId)}/snapshot`,
+      { signal }
+    );
+    return mapConsentSnapshot(response);
+  }
+
+  async recordConsentPlayback(
+    taskId: string,
+    input: {
+      clauseId: number;
+      eventType: 'start' | 'pause' | 'resume' | 'complete' | 'replay';
+      positionSeconds: number;
+      clientInvocationId?: string;
+    },
+    signal?: AbortSignal
+  ) {
+    return apiRequest<Record<string, unknown>>(
+      `/api/consent-forms/${encodeURIComponent(taskId)}/playback`,
+      {
+        method: 'POST',
+        body: {
+          clause_id: input.clauseId,
+          event_type: input.eventType,
+          position_seconds: input.positionSeconds,
+          client_invocation_id: input.clientInvocationId,
+        },
+        signal,
+      }
+    );
+  }
+
+  async confirmConsentClause(
+    taskId: string,
+    clauseId: number,
+    input: {
+      confirmationResult: '已理解并确认' | '未理解' | '拒绝' | '不确定';
+      patientReply?: string;
+    },
+    signal?: AbortSignal
+  ) {
+    return apiRequest<Record<string, unknown>>(
+      `/api/consent-forms/${encodeURIComponent(taskId)}/clauses/${clauseId}/confirm`,
+      {
+        method: 'POST',
+        body: {
+          confirmation_result: input.confirmationResult,
+          patient_reply: input.patientReply,
+        },
+        signal,
+      }
+    );
   }
 
   async loginStaff(input: StaffLoginInput, signal?: AbortSignal) {

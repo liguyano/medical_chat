@@ -97,6 +97,7 @@ def create_app() -> FastAPI:
         dialog,
         extraction,
         patients,
+        patient_portal,
         quality,
         scales,
         sse,
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(dialog.router)
     app.include_router(sse.router)
     app.include_router(patients.router)
+    app.include_router(patient_portal.router)
     app.include_router(scales.router)
     app.include_router(system_config.router)
     app.include_router(extraction.router)

@@ -425,6 +425,8 @@ export interface ConsentClause {
   clauseCode: string;
   clauseName: string;
   patientContent: string;
+  audioUrl?: string;
+  audioDurationSeconds?: number;
   importanceLevel: 'normal' | 'important' | 'critical';
   mandatoryDelivery: boolean;
   explicitConfirmationRequired: boolean;
