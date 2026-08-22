@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from medagent.agents.factory import create_dialog_agent
 from medagent.agents.service_agent.dialog_agent.agent import GENERIC_ERROR_MESSAGE
 from medagent.agents.service_agent.dialog_agent.engine import TextChatEngine
+from medagent.agents.service_agent.dialog_agent.prompt import suggest_patient_salutation
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
 from sqlalchemy import func, select
 
@@ -269,17 +270,19 @@ class DialogAgentRunner:
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """生成符合 CICARE Exit 的自然结束语。"""
+        salutation = suggest_patient_salutation(self.patient_info)
         messages = [
             SystemMessage(
                 content=(
                     "你是住院病区的 AI 护理助手。系统已经确认全部必填护理评估信息完整。"
                     "请按 CICARE Exit 用两到三句自然中文结束：感谢患者配合，"
                     "说明护士会复核记录并告知下一步护理安排，提醒仍有不适可及时呼叫医护人员。"
-                    "不要重复量表内容，不要夸大诊断，不要使用客服式套话。"
+                    "不要重复量表内容，不要夸大诊断，不要使用客服式套话，"
+                    "优先使用自然礼貌昵称，不要反复直呼患者全名。"
                 )
             ),
             HumanMessage(
-                content=f"患者称呼参考：{self.patient_info.get('name', '患者')}",
+                content=f"患者建议称呼：{salutation}。患者姓名仅供身份背景，不要在每轮回复中重复。",
             ),
         ]
         chunks: list[str] = []
@@ -547,12 +550,14 @@ class DialogAgentRunner:
             model_name,
             question.question_code,
         )
+        salutation = suggest_patient_salutation(self.patient_info)
         messages = [
             SystemMessage(
                 content=(
                     "你是住院病区的 AI 护理助手，正在按 CICARE 开始护理评估。"
                     "开场需要自然完成：使用患者称呼、简短慰问、自我介绍、说明职责和评估配合方式。"
                     "称呼可能不合适时请允许患者纠正，但不要连续抛出身份核实问题。"
+                    "开场最多一次使用姓名加礼貌昵称，后续使用昵称或“您”，不要每轮重复全名。"
                     "随后自然过渡到一个护理评估问题。整段应像真人护士交流，"
                     "不要念量表名称，不要使用“您的某某情况是怎样的”这类问卷句式，"
                     "不要一次询问多个评估主题。"
@@ -560,7 +565,8 @@ class DialogAgentRunner:
             ),
             HumanMessage(
                 content=(
-                    f"患者姓名：{self.patient_info.get('name', '患者')}。"
+                    f"患者建议称呼：{salutation}。"
+                    f"患者姓名仅供身份背景：{self.patient_info.get('name', '患者')}。"
                     f"当前住院诊断快照（仅供内部理解，不得向患者宣告）："
                     f"{json.dumps(self.patient_info.get('diagnosis_snapshot') or {}, ensure_ascii=False)}。"
                     f"第一项需要了解的护理事实：{question.question_name}。"

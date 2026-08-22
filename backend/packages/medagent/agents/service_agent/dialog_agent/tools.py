@@ -248,6 +248,8 @@ async def get_education_material(
         "priority": material["priority"],
         "requires_acknowledgement": True,
         "auto_play": True,
+        "teachback_required": True,
+        "teachback_prompt": "请在宣教后邀请患者用自己的话复述最重要的提醒，确认理解后再继续评估。",
         "clinical_review_status": "pending_hospital_review",
     }
 

@@ -255,6 +255,8 @@ def get_education_tool_result(
         "priority": dto.priority,
         "requires_acknowledgement": dto.requires_acknowledgement,
         "auto_play": dto.auto_play,
+        "teachback_required": True,
+        "teachback_prompt": "请在宣教后邀请患者用自己的话复述最重要的提醒，确认理解后再继续评估。",
         "clinical_review_status": "demo_config",
     }
 

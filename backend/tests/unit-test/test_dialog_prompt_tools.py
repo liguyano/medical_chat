@@ -51,6 +51,26 @@ def test_system_prompt_contains_cicare_patient_and_tasks():
     assert "青霉素过敏" in prompt
     assert "慢性阻塞性肺疾病急性加重" in prompt
     assert "不得把诊断快照当作患者自述" in prompt
+    assert "建议礼貌称呼：叔叔" in prompt
+    assert "禁止每轮重复完整姓名" in prompt
+    assert "teach-back" in prompt
+    assert "用自己的话说说" in prompt
+
+
+def test_system_prompt_uses_safe_gender_and_age_salutation():
+    """高龄女性应使用奶奶等自然昵称，未知性别不能武断猜称呼。"""
+    elderly_prompt = build_system_prompt(
+        {"name": "王奶奶", "gender": "女", "age": 80},
+        [question()],
+    )
+    unknown_prompt = build_system_prompt(
+        {"name": "患者", "gender": "未知", "age": 60},
+        [question()],
+    )
+
+    assert "建议礼貌称呼：奶奶" in elderly_prompt
+    assert "建议礼貌称呼：您" in unknown_prompt
+    assert "您好，患者您" not in unknown_prompt
 
 
 def test_system_prompt_includes_dynamic_constraints():
@@ -108,6 +128,8 @@ async def test_education_material_returns_real_structured_content_and_validates(
     assert result["patient_content"]
     assert result["spoken_content"]
     assert result["auto_play"] is True
+    assert result["teachback_required"] is True
+    assert "复述" in result["teachback_prompt"]
     assert invalid_category["success"] is False
     assert invalid_level["success"] is False
 

@@ -9,6 +9,36 @@ from ..schedule_agent import QuestionTask
 
 logger = logging.getLogger(__name__)
 
+
+def suggest_patient_salutation(patient_info: dict[str, Any]) -> str:
+    """根据患者偏好、年龄和性别生成自然且保守的礼貌称呼。"""
+    preferred = str(
+        patient_info.get("preferred_salutation")
+        or patient_info.get("preferred_name")
+        or ""
+    ).strip()
+    if preferred:
+        return preferred
+
+    gender = str(patient_info.get("gender") or "").strip()
+    try:
+        age = int(patient_info.get("age"))
+    except (TypeError, ValueError):
+        age = -1
+    if gender not in {"男", "男性", "女", "女性"}:
+        return "您"
+    is_male = gender in {"男", "男性"}
+    if age >= 75:
+        return "爷爷" if is_male else "奶奶"
+    if age >= 50:
+        return "叔叔" if is_male else "阿姨"
+    if age >= 18:
+        return "哥哥" if is_male else "姐姐"
+    if age >= 0:
+        return "弟弟" if is_male else "妹妹"
+    return "您"
+
+
 # ==================== CICARE 六步模板 ====================
 
 CICARE_TEMPLATE = """
@@ -40,6 +70,7 @@ CICARE_TEMPLATE = """
    - 回答患者问题并提供护理措施、护理指导和入院生活帮助
    - 对开水房、茶水室、微波炉等病区位置，不掌握真实位置时请患者向本病区护士确认，禁止编造
    - 只有患者确实表达情绪或困难时才共情，禁止模板化重复“我理解”
+   - 称呼要自然、有礼貌、有情感，优先使用“叔叔、阿姨、爷爷、奶奶、哥哥、姐姐、弟弟、妹妹”等合适昵称
 
 6. **Exit（礼貌离开）**
    - 只有系统确认全部必填评估进度完成后，才可宣布评估完成
@@ -58,6 +89,8 @@ COMMUNICATION_STYLE = """
 - **变化**：根据上下文变化措辞，避免每轮都用“好的”“感谢您告诉我”“我理解”
 - **节奏**：一句回应加一个问题通常足够，不催促、不堆叠问题
 - **追问**：药物过敏→追问具体药物；抽烟/饮酒→追问频率与量；手术史→追问时间与类型
+- **称呼**：开场最多一次使用“姓名 + 礼貌昵称”；确认后续统一使用昵称或“您”，禁止每轮重复完整姓名
+- **情感**：根据患者的语气和处境表达关心、鼓励或安抚，避免机械播报和过度夸张的亲昵称呼
 - **禁忌**：不得跳过患者问题直接念量表；不得编造病区信息；不得给出诊断结论；一次只问一个主题
 """
 
@@ -86,6 +119,13 @@ TOOL_USAGE_GUIDE = """
 6. **原生调用要求**：需要工具时必须输出原生 function call，禁止只回复
    “我将调用工具”“正在调用工具”或把工具名称、JSON 参数直接展示给患者。
    工具返回后，简短说明已展示材料、已发起签署或已通知护士，再继续自然对话。
+
+7. **宣教 teach-back 闭环**：调用 `get_education_material` 并展示/播报材料后，宣教不能直接算完成
+   - 先用患者听得懂的短句解释重点，再温和反问：“您能用自己的话说说，刚才最重要的提醒是什么吗？”
+   - 必须等待患者下一轮回答，并根据患者复述判断是否真正理解；不要把点开卡片、听完播报或说“知道了”直接当成理解成功
+   - 患者复述正确或基本覆盖核心风险和行动要求后，先肯定并明确说明“您理解得对”，再恢复评估
+   - 患者复述错误、遗漏关键点、表示不清楚或拒绝复述时，重新解释最关键的一两点，再请患者复述；未确认理解前不得宣布宣教完成、跳过反问或进入下一个无关主题
+   - 文本和实时语音使用同一闭环；宣教领域卡片的 acknowledged 状态不等于 teach-back 理解完成
 """
 
 
@@ -110,6 +150,13 @@ def build_system_prompt(
     patient_name = patient_info.get("name", "患者")
     patient_gender = patient_info.get("gender", "未知")
     patient_age = patient_info.get("age", "未知")
+    patient_salutation = suggest_patient_salutation(patient_info)
+    if patient_info.get("preferred_salutation") or patient_info.get("preferred_name"):
+        opening_address = patient_salutation
+    elif patient_salutation == "您":
+        opening_address = "您"
+    else:
+        opening_address = f"{patient_name}{patient_salutation}"
     diagnosis_snapshot = patient_info.get("diagnosis_snapshot") or {}
 
     patient_section = f"""
@@ -117,6 +164,7 @@ def build_system_prompt(
 - 姓名：{patient_name}
 - 性别：{patient_gender}
 - 年龄：{patient_age}岁
+- 建议礼貌称呼：{patient_salutation}
 - 当前住院诊断快照（仅供内部理解和评估排序）：{json.dumps(diagnosis_snapshot, ensure_ascii=False)}
   注意：不得把诊断快照当作患者自述向患者宣告，不得据此自行诊断或调整治疗。
 """
@@ -148,7 +196,7 @@ def build_system_prompt(
     # 当前使用内置模板，应用层后续可在构建前注入已审核话术。
     script_section = f"""
 【话术模板】（示例）
-- 开场："您好{patient_name}，我是AI护理助手小智，很高兴为您服务。接下来我会协助您完成入院评估，了解您的健康状况，大约需要10-15分钟，可以开始吗？"
+- 开场："您好，{opening_address}。我是AI护理助手小智，很高兴为您服务。接下来我会协助您完成入院评估，了解您的健康状况，大约需要10-15分钟，可以开始吗？"
 - 追问过敏："您提到对药物过敏，能告诉我具体是哪种药物吗？比如青霉素、头孢类等。"
 - 宣教引入："关于抽烟，我这里有一些健康建议想和您分享..."
 - 结束："感谢您的配合，评估已完成。护士稍后会来核实信息，祝您早日康复！"

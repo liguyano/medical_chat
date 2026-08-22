@@ -109,6 +109,10 @@ class VoiceSession:
     active_response_ids: set[str] = field(default_factory=set)
     suppressed_response_ids: set[str] = field(default_factory=set)
     pending_tool_responses: int = 0
+    response_create_pending: bool = False
+    response_create_attempts: int = 0
+    response_cancel_requested: bool = False
+    handled_tool_call_ids: set[str] = field(default_factory=set)
     receive_task: Any | None = None
     close_task: Any | None = None
     closed: bool = False
@@ -133,6 +137,46 @@ class VoiceGateway:
     def __init__(self) -> None:
         self._sessions: dict[str, VoiceSession] = {}
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _is_no_active_response_error(error: dict[str, Any]) -> bool:
+        """识别 Qwen 在取消/重复触发响应竞态下返回的可恢复错误。"""
+        message = str(error.get("message") or "").lower()
+        code = str(error.get("code") or "").lower()
+        return (
+            "conversation has no active response" in message
+            or code in {"no_active_response", "conversation_no_active_response"}
+        )
+
+    async def _maybe_create_response(self, session: VoiceSession) -> None:
+        """在工具结果写回后，等待当前响应结束再幂等触发下一轮响应。"""
+        if (
+            not session.response_create_pending
+            or session.closed
+            or session.speech_active
+            or session.responding
+            or session.active_response_ids
+            or session.response_requested
+        ):
+            return
+        if session.response_create_attempts >= 3:
+            logger.error(
+                "语音工具响应连续触发失败，保留待处理状态等待下一轮: session=%s",
+                session.session_no,
+            )
+            return
+        session.response_create_pending = False
+        session.response_create_attempts += 1
+        session.response_requested = True
+        try:
+            await session.client.create_response()
+        except Exception:
+            session.response_requested = False
+            session.response_create_pending = True
+            logger.exception(
+                "语音工具结果触发 response.create 失败: session=%s",
+                session.session_no,
+            )
 
     async def get_or_create(
         self,
@@ -463,7 +507,11 @@ class VoiceGateway:
         if event_type == "response.created":
             response = event.get("response") or {}
             if session.pending_tool_responses > 0:
-                session.pending_tool_responses -= 1
+                session.pending_tool_responses = 0
+                session.response_create_pending = False
+            session.response_create_attempts = 0
+            session.response_requested = True
+            session.response_cancel_requested = False
             session.responding = True
             session.audio_suppressed = False
             session.current_response_id = str(response.get("id") or "") or None
@@ -532,6 +580,28 @@ class VoiceGateway:
             return
         if event_type == "error":
             error = event.get("error") or {}
+            if self._is_no_active_response_error(error):
+                # response.cancel / response.create 与上游 response.done 可能乱序。
+                # 该错误不代表语音会话失效，清理本地过期响应状态后继续监听。
+                logger.warning(
+                    "忽略可恢复的无活动响应竞态: session=%s code=%s message=%s",
+                    session.session_no,
+                    error.get("code"),
+                    error.get("message"),
+                )
+                session.active_response_ids.clear()
+                session.generations.clear()
+                session.current_generation = None
+                session.current_response_id = None
+                session.responding = False
+                session.response_requested = False
+                session.response_cancel_requested = False
+                session.audio_suppressed = False
+                if session.pending_tool_responses > 0:
+                    session.response_create_pending = True
+                await self._broadcast_state(session, "listening")
+                await self._maybe_create_response(session)
+                return
             session.publisher.publish(
                 AgentErrorEvent(
                     session_id=session.session_no,
@@ -585,11 +655,18 @@ class VoiceGateway:
         session.pending_transcript_turn_no = 0
         session.input_committed = False
         await self._refresh_schedule_guidance(session)
-        if session.responding:
+        if session.responding and not session.response_cancel_requested:
             session.audio_suppressed = True
             if session.current_response_id:
                 session.suppressed_response_ids.add(session.current_response_id)
-            await session.client.cancel_response()
+            session.response_cancel_requested = True
+            try:
+                await session.client.cancel_response()
+            except Exception:
+                logger.exception(
+                    "取消实时语音响应失败，继续接收患者当前语音: session=%s",
+                    session.session_no,
+                )
         await self._broadcast_json(session, {"type": "speech_started"})
         await self._broadcast_state(session, "listening")
 
@@ -931,8 +1008,10 @@ class VoiceGateway:
         if not generation.text and not generation.all_audio:
             self._remove_generation(session, generation)
             session.response_requested = False
+            session.response_cancel_requested = False
             if not session.closed:
                 await self._broadcast_state(session, "listening")
+                await self._maybe_create_response(session)
             return
         generation.completed = True
         await self._flush_audio_segment(session, generation)
@@ -986,6 +1065,7 @@ class VoiceGateway:
             )
         self._remove_generation(session, generation)
         session.response_requested = False
+        session.response_cancel_requested = False
         if not session.responding and session.pending_tool_responses == 0:
             await self._broadcast_json(
                 session,
@@ -1009,6 +1089,7 @@ class VoiceGateway:
             )
         if not session.closed:
             await self._broadcast_state(session, "listening")
+            await self._maybe_create_response(session)
 
     async def _cancel_generation(
         self,
@@ -1027,8 +1108,10 @@ class VoiceGateway:
                 return
             self._remove_generation(session, generation)
         session.response_requested = False
+        session.response_cancel_requested = False
         await self._broadcast_json(session, {"type": "interrupted"})
         await self._broadcast_state(session, "listening")
+        await self._maybe_create_response(session)
 
     @staticmethod
     def _remove_generation(
@@ -1061,6 +1144,14 @@ class VoiceGateway:
     ) -> None:
         if not call_id or not name:
             return
+        if call_id in session.handled_tool_call_ids:
+            logger.warning(
+                "忽略重复语音工具调用: session=%s call_id=%s",
+                session.session_no,
+                call_id,
+            )
+            return
+        session.handled_tool_call_ids.add(call_id)
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
@@ -1111,8 +1202,11 @@ class VoiceGateway:
             publisher=session.publisher,
         )
         await session.client.send_tool_result(call_id, result)
-        session.pending_tool_responses += 1
-        await session.client.create_response()
+        # 多个 function call 只需要一个后续 response.create；等待当前工具响应
+        # 完成后统一触发，避免快速停顿或工具链重入时重复创建响应。
+        session.pending_tool_responses = 1
+        session.response_create_pending = True
+        await self._maybe_create_response(session)
 
     async def _persist_patient_audio(self, session: VoiceSession) -> None:
         if not session.input_message_id:
