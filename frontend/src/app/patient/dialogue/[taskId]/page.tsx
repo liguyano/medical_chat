@@ -1,17 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
-import ChatBubble from '@/components/chat/ChatBubble';
-import ChatInput from '@/components/chat/ChatInput';
 import ConsentInteractionCard from '@/components/chat/ConsentInteractionCard';
 import EducationMaterialCard from '@/components/chat/EducationMaterialCard';
 import HandoffHistoryCard from '@/components/chat/HandoffHistoryCard';
-import { Badge } from '@/components/shared/Badge';
-import { Button } from '@/components/shared/Button';
-import { Card } from '@/components/shared/Card';
-import { Progress } from '@/components/shared/Progress';
+import { PatientChatBubble } from '@/components/patient/PatientChatBubble';
+import { PatientIcon } from '@/components/patient/PatientIcon';
+import { VoiceOrb } from '@/components/patient/VoiceOrb';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
 import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
@@ -44,16 +42,6 @@ import type {
   InteractionSession,
   StructuredAnswer,
 } from '@/lib/types';
-import {
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  PencilSquareIcon,
-  PauseIcon,
-  PlayIcon,
-  SpeakerXMarkIcon,
-  SparklesIcon,
-  UserPlusIcon,
-} from '@heroicons/react/24/outline';
 
 interface ScriptResult {
   stage: CicareStage;
@@ -255,12 +243,14 @@ export default function PatientDialoguePage() {
   const [connectionError, setConnectionError] = useState('');
   const [voiceState, setVoiceState] =
     useState<VoiceConnectionState>('idle');
-  const [inputMode, setInputMode] = useState<'text' | 'voice'>('text');
+  const [inputMode, setInputMode] = useState<'text' | 'voice'>('voice');
   const [voiceCompletionReadyTaskId, setVoiceCompletionReadyTaskId] =
     useState<string | null>(null);
   const [editingAnswerId, setEditingAnswerId] = useState<string | null>(null);
   const [correction, setCorrection] = useState('');
   const [manualInterventionReason, setManualInterventionReason] = useState('');
+  const [messageDraft, setMessageDraft] = useState('');
+  const [pendingVoiceTranscript, setPendingVoiceTranscript] = useState('');
 
   const dialogueSnapshotKey = task
     ? buildDialogueSnapshotKey(taskId, task.sessionId)
@@ -707,6 +697,7 @@ export default function PatientDialoguePage() {
   };
 
   const startVoice = async () => {
+    setPendingVoiceTranscript('');
     if (runtimeConfig.dataMode === 'mock') {
       setIsRecording(true);
       setVoiceState('listening');
@@ -775,8 +766,7 @@ export default function PatientDialoguePage() {
     setIsRecording(false);
     if (runtimeConfig.dataMode === 'mock') {
       setVoiceState('transcribing');
-      await handleSendMessage('我通过语音回答：目前情况还可以');
-      setVoiceState('idle');
+      setPendingVoiceTranscript('我目前感觉还可以，没有特别不舒服。');
       return;
     }
     try {
@@ -791,6 +781,21 @@ export default function PatientDialoguePage() {
     }
   };
 
+  const confirmVoiceTranscript = async () => {
+    const transcript = pendingVoiceTranscript.trim();
+    if (!transcript) return;
+    setPendingVoiceTranscript('');
+    setVoiceState('thinking');
+    await handleSendMessage(transcript);
+    setVoiceState('idle');
+  };
+
+  const interruptVoice = () => {
+    voiceClientRef.current?.interrupt();
+    setVoiceState('listening');
+    setIsRecording(true);
+  };
+
   const saveCorrection = () => {
     const answer = answers.find((item) => item.questionId === editingAnswerId);
     if (!answer || !correction.trim()) return;
@@ -803,405 +808,478 @@ export default function PatientDialoguePage() {
     setEditingAnswerId(null);
     setCorrection('');
   };
+  const visualVoiceState: VoiceConnectionState = connectionError
+    ? 'text_fallback'
+    : isPaused
+      ? 'paused'
+      : inputMode === 'voice' &&
+          isStreaming &&
+          (voiceState === 'idle' || voiceState === 'closed')
+        ? 'thinking'
+        : voiceState;
+  const progressValue = session?.answeredQuestionCount ?? 0;
+  const progressPercentage = Math.round(
+    (progressValue / Math.max(displayedTotalQuestions, 1)) * 100
+  );
 
   if (!task) {
     return (
       <PatientLayout title="AI对话评估" showBack>
-        <div className="p-6 text-center">任务不存在</div>
+        <div className="p-6 text-center">
+          <Image
+            src="/assets/patient/states/empty-tasks.svg"
+            alt=""
+            width={96}
+            height={96}
+            className="mx-auto h-24 w-24"
+          />
+          <p className="mt-4 font-bold">任务不存在或已经失效</p>
+        </div>
       </PatientLayout>
     );
   }
 
   return (
-    <PatientLayout title="AI智能评估" showBack onBack={() => router.push(`/patient/tasks/${taskId}`)}>
-      <div className="h-[calc(100vh-3.5rem)] flex flex-col">
-        <div className="bg-surface border-b border-border p-3">
-          <div className="max-w-6xl mx-auto flex items-center gap-3">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <SparklesIcon className="w-5 h-5 text-primary" />
-                {readOnly
-                  ? '历史对话记录'
-                  : completed
-                    ? '评估已完成'
-                    : completingVoice
-                      ? '正在完成最后一条回复'
-                    : isPaused
-                    ? '评估已暂停'
-                    : isStreaming
-                      ? 'AI正在生成回复'
-                      : '评估进行中'}
-              </div>
-              <Progress
-                value={session?.answeredQuestionCount ?? 0}
-                max={displayedTotalQuestions}
-                size="sm"
-                className="mt-2"
+    <PatientLayout
+      title="AI智能评估"
+      showBack
+      onBack={() => router.push(`/patient/tasks/${taskId}`)}
+      headerRight={
+        <button
+          type="button"
+          onClick={() => void askNurse()}
+          disabled={isHandoffSubmitting}
+          className="patient-touch-button bg-primary text-white disabled:opacity-50"
+          aria-label={isHandoffSubmitting ? '正在呼叫护士' : '找护士'}
+        >
+          <PatientIcon name="nurse" className="h-5 w-5" />
+        </button>
+      }
+    >
+      <div className="flex h-[calc(100dvh-64px)] flex-col overflow-hidden">
+        <section className="shrink-0 border-b border-border bg-[#fffaf6]/90 px-[18px] py-3">
+          <div className="flex items-center gap-3">
+            <span className="font-black text-primary">{progressValue}</span>
+            <span className="-ml-2 text-sm text-foreground-muted">
+              / {displayedTotalQuestions}
+            </span>
+            <div className="patient-progress-track flex-1">
+              <div
+                className="patient-progress-value"
+                style={{ width: `${progressPercentage}%` }}
               />
             </div>
             {readOnly ? (
-              <Badge variant="default" size="sm">只读</Badge>
+              <span className="rounded-full bg-[#eee9e3] px-2.5 py-1 text-xs font-bold text-foreground-muted">
+                只读
+              </span>
             ) : (
               <IntegrationStatus
+                compact
                 streamStatus={streamStatus}
-                voiceState={
-                  inputMode === 'voice' ? voiceState : undefined
-                }
+                voiceState={inputMode === 'voice' ? voiceState : undefined}
               />
             )}
-            <Badge variant={isStreaming ? 'info' : 'primary'} size="sm">
-              {session?.answeredQuestionCount ?? 0}/{displayedTotalQuestions}
-            </Badge>
-            {runtimeConfig.dataMode === 'mock' && !readOnly && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void togglePause()}
-              >
-                {isPaused ? <PlayIcon className="w-4 h-4 mr-1" /> : <PauseIcon className="w-4 h-4 mr-1" />}
-                {isPaused ? '继续' : '暂停'}
-              </Button>
-            )}
           </div>
-        </div>
+          <p className="mt-2 flex items-center justify-center gap-1.5 text-xs text-foreground-muted">
+            <PatientIcon name="lock" className="h-4 w-4" />
+            仅在您点击后使用麦克风
+          </p>
+        </section>
 
-        <div className="flex-1 overflow-hidden">
-          <div className="max-w-6xl mx-auto h-full grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="scrollbar-soft overflow-y-auto p-4">
-              {historyTimeline.map((item) => {
-                if (item.kind === 'message') {
-                  return (
-                    <ChatBubble
-                      key={item.id}
-                      message={item.message}
-                      showAvatar
-                      animate
-                    />
-                  );
-                }
-                if (item.kind === 'education') {
-                  return (
-                    <EducationMaterialCard
-                      key={item.id}
-                      card={item.item}
-                      readOnly={readOnly}
-                      onAcknowledge={() =>
-                        handleEducationAcknowledge(
-                          item.item.id,
-                          item.item.materialId
-                        )
-                      }
-                    />
-                  );
-                }
-                if (item.kind === 'consent') {
-                  return (
-                    <ConsentInteractionCard
-                      key={item.id}
-                      request={item.item}
-                      participantName={task.participantName ?? task.patientName}
-                      readOnly={readOnly}
-                      onSubmit={handleConsentSubmit}
-                    />
-                  );
-                }
-                if (item.event.eventType === 'handoff') {
-                  return (
-                    <div key={item.id} className="mb-4">
-                      <HandoffHistoryCard event={item.event} />
-                    </div>
-                  );
-                }
+        <div className="scrollbar-soft flex-1 overflow-y-auto px-[14px] py-4">
+          {inputMode === 'voice' && !readOnly && !completed && (
+            <section className="pb-4 pt-2">
+              <VoiceOrb state={visualVoiceState} />
+              {(voiceState === 'listening' || isRecording) && (
+                <button
+                  type="button"
+                  onClick={() => void stopVoice()}
+                  className="patient-outline-button mx-auto mt-4 flex min-w-[160px] rounded-full"
+                >
+                  结束回答
+                </button>
+              )}
+            </section>
+          )}
+
+          <section
+            className={`${
+              inputMode === 'voice' && !readOnly
+                ? 'patient-card rounded-[26px] p-3'
+                : ''
+            }`}
+            aria-label="评估对话记录"
+          >
+            {historyTimeline.map((item) => {
+              if (item.kind === 'message') {
                 return (
-                  <div
+                  <PatientChatBubble key={item.id} message={item.message} />
+                );
+              }
+              if (item.kind === 'education') {
+                return (
+                  <EducationMaterialCard
                     key={item.id}
-                    className={`rounded-2xl border p-4 mb-4 ${
-                      item.event.priority === 'high'
-                        ? 'bg-red-50 border-red-200'
-                        : 'bg-amber-50 border-amber-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 font-medium">
-                      <ExclamationTriangleIcon className="w-5 h-5" />
-                      {item.event.title}
-                    </div>
-                    <p className="text-sm mt-1">{item.event.description}</p>
-                    {readOnly ? (
-                      <p className="mt-2 text-xs text-foreground-muted">
-                        {item.event.handled ? '患者已了解' : '历史风险记录'}
-                      </p>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          useChatStore
-                            .getState()
-                            .markEventHandled(taskId, item.event.id)
-                        }
-                        className="mt-2 text-xs text-primary underline"
-                      >
-                        {item.event.handled ? '已了解' : '我已了解'}
-                      </button>
-                    )}
+                    card={item.item}
+                    readOnly={readOnly}
+                    onAcknowledge={() =>
+                      handleEducationAcknowledge(
+                        item.item.id,
+                        item.item.materialId
+                      )
+                    }
+                  />
+                );
+              }
+              if (item.kind === 'consent') {
+                return (
+                  <ConsentInteractionCard
+                    key={item.id}
+                    request={item.item}
+                    participantName={task.participantName ?? task.patientName}
+                    readOnly={readOnly}
+                    onSubmit={handleConsentSubmit}
+                  />
+                );
+              }
+              if (item.event.eventType === 'handoff') {
+                return (
+                  <div key={item.id} className="mb-4">
+                    <HandoffHistoryCard event={item.event} />
                   </div>
                 );
-              })}
-              {answers.length > 0 && (
-                <details className="lg:hidden rounded-2xl border border-border bg-surface p-4 mb-4">
-                  <summary className="font-medium cursor-pointer">查看已记录信息（{answers.length}项）</summary>
-                  <div className="mt-3 space-y-3">
-                    {answers.map((answer) => (
-                      <div key={answer.questionId} className="rounded-xl bg-surface-secondary p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-xs text-foreground-muted">{answer.questionText}</p>
-                            <p className="text-sm font-medium mt-1">
-                              {getStructuredAnswerDisplayValue(answer)}
-                            </p>
-                          </div>
-                          {!readOnly && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingAnswerId(answer.questionId);
-                                setCorrection(getStructuredAnswerDisplayValue(answer));
-                              }}
-                              className="text-primary"
-                              aria-label={`纠正${answer.questionText}`}
-                            >
-                              <PencilSquareIcon className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {!readOnly && editingAnswerId && (
-                      <div className="rounded-xl bg-primary-tint p-3">
-                        <textarea
-                          value={correction}
-                          onChange={(event) => setCorrection(event.target.value)}
-                          className="w-full rounded-xl border border-border bg-surface p-3 text-sm"
-                          rows={2}
-                        />
-                        <Button size="sm" className="mt-2 w-full" onClick={saveCorrection}>
-                          保存更正
-                        </Button>
-                      </div>
-                    )}
+              }
+              return (
+                <div
+                  key={item.id}
+                  className={`mb-4 rounded-2xl border p-4 ${
+                    item.event.priority === 'high'
+                      ? 'border-red-200 bg-red-50'
+                      : 'border-amber-200 bg-amber-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-bold">
+                    <PatientIcon name="warning" className="h-5 w-5" />
+                    {item.event.title}
                   </div>
-                </details>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                  <p className="mt-1 text-sm leading-6">
+                    {item.event.description}
+                  </p>
+                  {readOnly ? (
+                    <p className="mt-2 text-xs text-foreground-muted">
+                      {item.event.handled ? '患者已了解' : '历史风险记录'}
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        useChatStore
+                          .getState()
+                          .markEventHandled(taskId, item.event.id)
+                      }
+                      className="mt-2 text-xs font-bold text-primary underline"
+                    >
+                      {item.event.handled ? '已了解' : '我已了解'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </section>
 
-            <aside className="scrollbar-soft hidden overflow-y-auto border-l border-border bg-surface-secondary p-4 lg:block">
-              <h2 className="text-lg font-sans font-semibold mb-1">已记录信息</h2>
-              <p className="text-xs text-foreground-muted mb-4">
-                {readOnly
-                  ? '以下为本次评估已记录的信息，仅供查看。'
-                  : '以下内容仍需护士确认，您可以随时纠正。'}
-              </p>
-              <div className="space-y-3">
-                {answers.length === 0 ? (
-                  <p className="text-sm text-foreground-muted">回答后将在此显示结构化信息。</p>
-                ) : (
-                  answers.map((answer) => (
-                    <Card key={answer.questionId} padding="sm">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-xs text-foreground-muted">{answer.questionText}</p>
-                          <p className="text-sm font-medium mt-1">
-                            {getStructuredAnswerDisplayValue(answer)}
-                          </p>
-                          <p className="text-xs text-foreground-muted mt-1">
-                            可信度 {Math.round(answer.extractionConfidence * 100)}%
-                            {answer.corrected && ' · 已更正'}
-                          </p>
-                        </div>
-                        {!readOnly && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingAnswerId(answer.questionId);
-                              setCorrection(getStructuredAnswerDisplayValue(answer));
-                            }}
-                            className="text-primary"
-                            aria-label={`纠正${answer.questionText}`}
-                          >
-                            <PencilSquareIcon className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </Card>
-                  ))
+          {pendingVoiceTranscript || voiceState === 'transcribing' ? (
+            <section className="patient-card mt-3 p-3">
+              <div className="flex items-center gap-2 rounded-2xl bg-[#edf8f7] px-3 py-3 font-bold text-[#258f91]">
+                <PatientIcon name="microphone" className="h-5 w-5" />
+                <span className="flex-1">
+                  {pendingVoiceTranscript || '正在等待后端返回可确认的转写内容…'}
+                </span>
+                {pendingVoiceTranscript && (
+                  <PatientIcon name="check-circle" className="h-5 w-5" />
                 )}
               </div>
-              {!readOnly && editingAnswerId && (
-                <div className="mt-4 rounded-2xl border border-primary/20 bg-primary-tint p-4">
-                  <label className="text-sm font-medium">纠正记录</label>
-                  <textarea
-                    value={correction}
-                    onChange={(event) => setCorrection(event.target.value)}
-                    className="w-full mt-2 rounded-xl border border-border bg-surface p-3 text-sm"
-                    rows={3}
-                  />
-                  <div className="flex gap-2 mt-2">
-                    <Button size="sm" variant="ghost" onClick={() => setEditingAnswerId(null)}>
-                      取消
-                    </Button>
-                    <Button size="sm" onClick={saveCorrection}>保存更正</Button>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void startVoice()}
+                  className="patient-outline-button min-h-11 text-sm"
+                >
+                  <PatientIcon name="replay" className="h-5 w-5" />
+                  重新说一遍
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmVoiceTranscript()}
+                  disabled={!pendingVoiceTranscript}
+                  className="patient-primary-button min-h-11 text-sm"
+                >
+                  <PatientIcon name="send" className="h-5 w-5" />
+                  确认发送
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {answers.length > 0 && (
+            <details className="patient-card mt-3 p-4">
+              <summary className="cursor-pointer font-bold">
+                查看已记录信息（{answers.length} 项）
+              </summary>
+              <div className="mt-3 space-y-2">
+                {answers.map((answer) => (
+                  <div
+                    key={answer.questionId}
+                    className="rounded-2xl bg-surface-secondary p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs text-foreground-muted">
+                          {answer.questionText}
+                        </p>
+                        <p className="mt-1 text-sm font-bold">
+                          {getStructuredAnswerDisplayValue(answer)}
+                        </p>
+                      </div>
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingAnswerId(answer.questionId);
+                            setCorrection(
+                              getStructuredAnswerDisplayValue(answer)
+                            );
+                          }}
+                          className="patient-touch-button h-10 min-h-10 w-10 min-w-10 text-primary"
+                          aria-label={`纠正${answer.questionText}`}
+                        >
+                          <PatientIcon name="edit" className="h-5 w-5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </aside>
-          </div>
+                ))}
+                {!readOnly && editingAnswerId && (
+                  <div className="rounded-2xl bg-primary-tint p-3">
+                    <textarea
+                      value={correction}
+                      onChange={(event) => setCorrection(event.target.value)}
+                      className="w-full rounded-xl border border-border bg-surface p-3 text-sm outline-none focus:border-primary"
+                      rows={2}
+                    />
+                    <button
+                      type="button"
+                      className="patient-primary-button mt-2 min-h-11 w-full text-sm"
+                      onClick={saveCorrection}
+                    >
+                      保存更正
+                    </button>
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
+
+          {(connectionError || streamError) && (
+            <div
+              role="alert"
+              className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800"
+            >
+              {connectionError || streamError}
+              {voiceState === 'text_fallback' && '，您仍可继续使用文字输入。'}
+            </div>
+          )}
+          {manualInterventionReason && (
+            <div
+              role="status"
+              className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800"
+            >
+              字段抽取需要医护人工处理：{manualInterventionReason}
+              。对话仍可继续，人工填写结果将在后续请求中生效。
+            </div>
+          )}
         </div>
 
-        <div className="border-t border-border bg-surface">
-          <div className="max-w-6xl mx-auto">
-            {readOnly ? (
-              <div className="flex items-center gap-3 p-4">
-                <CheckCircleIcon className="h-6 w-6 text-primary" />
-                <div className="flex-1">
-                  <p className="font-medium">本次评估已提交，当前为只读查看</p>
-                  <p className="text-xs text-foreground-muted">如需补充或修改，请联系责任护士。</p>
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => router.push(`/patient/tasks/${taskId}`)}
-                >
-                  返回任务
-                </Button>
+        <footer className="shrink-0 border-t border-border bg-[#fffaf6] px-[14px] pb-[max(10px,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_28px_rgba(94,67,48,.08)]">
+          {readOnly ? (
+            <div className="flex items-center gap-3">
+              <PatientIcon
+                name="lock"
+                className="h-7 w-7 text-foreground-muted"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-bold">本次评估已提交，当前为只读查看</p>
+                <p className="text-xs text-foreground-muted">
+                  如需补充或修改，请联系责任护士。
+                </p>
               </div>
-            ) : completed ? (
-              <div className="p-4 flex items-center gap-3">
-                <CheckCircleIcon className="w-6 h-6 text-success" />
-                <div className="flex-1">
-                  <p className="font-medium">AI评估已完成并提交护士复核</p>
-                  <p className="text-xs text-foreground-muted">
-                    {runtimeConfig.dataMode === 'api'
-                      ? '您已完成本次评估，请等待护士复核'
-                      : '下一步完成知情同意确认'}
-                  </p>
-                </div>
-                <Button
-                  onClick={() =>
-                    router.push(task.consentRequired ? `/patient/consent/${taskId}` : `/patient/complete/${taskId}`)
-                  }
-                >
-                  继续
-                </Button>
+              <button
+                type="button"
+                className="patient-outline-button min-h-11 px-3 text-sm"
+                onClick={() => router.push(`/patient/tasks/${taskId}`)}
+              >
+                返回
+              </button>
+            </div>
+          ) : completed ? (
+            <div className="flex items-center gap-3">
+              <PatientIcon
+                name="check-circle"
+                className="h-7 w-7 text-success"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-bold">AI 评估已完成</p>
+                <p className="text-xs text-foreground-muted">
+                  {runtimeConfig.dataMode === 'api'
+                    ? '结果已提交护士复核'
+                    : '下一步完成知情同意确认'}
+                </p>
               </div>
-            ) : (
-              <>
-                <div className="px-4 pt-3 flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="text-xs text-foreground-muted">
-                      {isRecording
-                        ? voiceState === 'speaking'
-                          ? 'AI 正在播报，您可以直接说话打断'
-                          : '实时语音已开启，系统会自动识别您的停顿'
-                        : inputMode === 'voice'
-                          ? '语音模式：点击麦克风开启连续实时对话'
-                          : '文字模式：输入并发送您的回答'}
-                    </p>
-                    {completingVoice && (
-                      <p className="shrink-0 text-xs text-primary">
-                        正在等待最后一段语音播报完成……
-                      </p>
-                    )}
-                    <div
-                      className="flex shrink-0 rounded-lg border border-border p-0.5"
-                      role="group"
-                      aria-label="对话输入模式"
-                    >
-                      {(['text', 'voice'] as const).map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          onClick={() => void changeInputMode(mode)}
-                          disabled={isRecording || isStreaming || completingVoice}
-                          aria-pressed={inputMode === mode}
-                          className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                            inputMode === mode
-                              ? 'bg-primary text-white'
-                              : 'text-foreground-muted hover:bg-surface-secondary'
-                          }`}
-                        >
-                          {mode === 'text' ? '文字' : '语音'}
-                        </button>
-                      ))}
-                    </div>
-                    {inputMode === 'voice' &&
-                      voiceState !== 'idle' &&
-                      voiceState !== 'closed' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void closeVoice()}
-                          disabled={completingVoice}
-                          className="shrink-0 text-danger"
-                          title="关闭实时语音并保留文字输入"
-                        >
-                          <SpeakerXMarkIcon className="mr-1 h-4 w-4" />
-                          关闭语音
-                        </Button>
-                      )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void askNurse()}
-                    disabled={isHandoffSubmitting}
-                    className="text-sm text-danger flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <UserPlusIcon className="w-4 h-4" />
-                    {isHandoffSubmitting ? '正在呼叫' : '找护士'}
-                  </button>
-                </div>
-                <ChatInput
-                  onSend={handleSendMessage}
-                  onVoiceStart={
-                    inputMode === 'voice' ? () => void startVoice() : undefined
-                  }
-                  onVoiceStop={
-                    inputMode === 'voice' ? () => void stopVoice() : undefined
-                  }
-                  placeholder={
-                    isPaused
-                      ? '评估已暂停'
-                      : inputMode === 'voice'
-                        ? '语音模式下请点击麦克风回答'
-                        : '输入您的回答...'
-                  }
+              <button
+                type="button"
+                className="patient-primary-button min-h-11 px-4 text-sm"
+                onClick={() =>
+                  router.push(
+                    task.consentRequired
+                      ? `/patient/consent/${taskId}`
+                      : `/patient/complete/${taskId}`
+                  )
+                }
+              >
+                继续
+              </button>
+            </div>
+          ) : inputMode === 'voice' ? (
+            <>
+              <div className="grid grid-cols-[1fr_92px_1fr] items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void changeInputMode('text')}
+                  disabled={completingVoice}
+                  className="flex min-h-[60px] flex-col items-center justify-center gap-1 text-xs font-bold text-foreground-muted disabled:opacity-50"
+                >
+                  <span className="patient-touch-button border border-border bg-white">
+                    <PatientIcon name="keyboard" />
+                  </span>
+                  切换文字
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (voiceState === 'speaking') {
+                      interruptVoice();
+                    } else if (isRecording) {
+                      void stopVoice();
+                    } else {
+                      void startVoice();
+                    }
+                  }}
                   disabled={
                     isPaused ||
                     completingVoice ||
-                    (inputMode === 'text' && isStreaming)
+                    voiceState === 'transcribing' ||
+                    voiceState === 'thinking'
                   }
-                  isRecording={isRecording}
-                  recordingLabel="实时语音已开启，停顿后系统会自动回复"
-                />
-              </>
-            )}
-            {(connectionError || streamError) && (
-              <div
-                role="alert"
-                className="mx-4 mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
-              >
-                {connectionError || streamError}
-                {voiceState === 'text_fallback' && '，您仍可继续使用文字输入。'}
+                  className="mx-auto grid h-20 w-20 place-items-center rounded-full border-[7px] border-white bg-gradient-to-br from-[#ff7557] to-[#ff5032] text-white shadow-[0_10px_26px_rgba(255,86,52,.28)] disabled:opacity-50"
+                  aria-label={isRecording ? '结束回答' : '开始语音回答'}
+                >
+                  <PatientIcon
+                    name={isRecording ? 'stop' : 'microphone'}
+                    className="h-9 w-9"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={interruptVoice}
+                  disabled={voiceState !== 'speaking'}
+                  className="flex min-h-[60px] flex-col items-center justify-center gap-1 text-xs font-bold text-foreground-muted disabled:opacity-45"
+                >
+                  <span className="patient-touch-button border border-border bg-white">
+                    <PatientIcon name="interrupt" />
+                  </span>
+                  打断播报
+                </button>
               </div>
-            )}
-            {manualInterventionReason && (
-              <div
-                role="status"
-                className="mx-4 mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800"
+              {voiceState !== 'idle' && voiceState !== 'closed' && (
+                <button
+                  type="button"
+                  onClick={() => void closeVoice()}
+                  disabled={completingVoice}
+                  className="mx-auto mt-1 block text-xs font-bold text-danger underline disabled:opacity-50"
+                >
+                  关闭语音并保留文字输入
+                </button>
+              )}
+              {completingVoice && (
+                <p className="mt-2 text-center text-xs text-primary">
+                  正在等待最后一段语音播报完成…
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={() => void changeInputMode('voice')}
+                disabled={isStreaming || isPaused}
+                className="patient-touch-button border border-border bg-white text-primary disabled:opacity-50"
+                aria-label="切换语音"
               >
-                字段抽取需要医护人工处理：{manualInterventionReason}。对话仍可继续，人工填写结果将在后续请求中生效。
-              </div>
-            )}
-          </div>
-        </div>
+                <PatientIcon name="microphone" />
+              </button>
+              <textarea
+                value={messageDraft}
+                onChange={(event) => setMessageDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    const content = messageDraft.trim();
+                    if (!content) return;
+                    setMessageDraft('');
+                    void handleSendMessage(content);
+                  }
+                }}
+                placeholder={isPaused ? '评估已暂停' : '输入您的回答…'}
+                disabled={isPaused || isStreaming || completingVoice}
+                rows={1}
+                className="min-h-12 max-h-28 min-w-0 flex-1 resize-none rounded-2xl border border-border bg-white px-4 py-3 text-sm outline-none focus:border-primary disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const content = messageDraft.trim();
+                  if (!content) return;
+                  setMessageDraft('');
+                  void handleSendMessage(content);
+                }}
+                disabled={
+                  !messageDraft.trim() ||
+                  isPaused ||
+                  isStreaming ||
+                  completingVoice
+                }
+                className="patient-touch-button bg-primary text-white disabled:opacity-40"
+                aria-label="发送回答"
+              >
+                <PatientIcon name="send" />
+              </button>
+            </div>
+          )}
+          {runtimeConfig.dataMode === 'mock' && !readOnly && !completed && (
+            <button
+              type="button"
+              onClick={() => void togglePause()}
+              className="mx-auto mt-2 flex min-h-8 items-center gap-1 text-xs font-bold text-foreground-muted"
+            >
+              <PatientIcon
+                name={isPaused ? 'play' : 'pause'}
+                className="h-4 w-4"
+              />
+              {isPaused ? '继续评估' : '暂停评估'}
+            </button>
+          )}
+        </footer>
       </div>
     </PatientLayout>
   );

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
 import QuestionCard from '@/components/assessment/QuestionCard';
+import { PatientIcon } from '@/components/patient/PatientIcon';
+import { PatientState } from '@/components/patient/PatientState';
 import { Card } from '@/components/shared/Card';
 import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
@@ -19,7 +21,6 @@ import {
   ArrowRightIcon,
   CheckCircleIcon,
   CloudArrowUpIcon,
-  DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 const EMPTY_FORM_ANSWERS: Record<string, PrototypeAnswerValue> = {};
@@ -230,7 +231,13 @@ export default function PatientFormPage() {
   if (!task) {
     return (
       <PatientLayout title="传统问卷" showBack>
-        <div className="p-6 text-center">任务不存在</div>
+        <div className="p-[18px]">
+          <PatientState
+            kind="empty-tasks"
+            title="任务不存在"
+            description="请返回任务中心查看最新护理任务。"
+          />
+        </div>
       </PatientLayout>
     );
   }
@@ -238,8 +245,12 @@ export default function PatientFormPage() {
   if (questionnaireLoading) {
     return (
       <PatientLayout title="传统问卷评估" showBack>
-        <div className="max-w-xl mx-auto p-6 text-center text-foreground-muted">
-          正在加载本次任务的量表题目…
+        <div className="p-[18px]">
+          <PatientState
+            kind="loading"
+            title="正在加载量表"
+            description="正在读取本次任务绑定的真实题目与草稿…"
+          />
         </div>
       </PatientLayout>
     );
@@ -252,8 +263,8 @@ export default function PatientFormPage() {
   ) {
     return (
       <PatientLayout title="传统问卷评估" showBack onBack={() => router.push(`/patient/tasks/${taskId}`)}>
-        <div className="max-w-xl mx-auto p-4">
-          <Card padding="lg" className="text-center">
+        <div className="p-[18px]">
+          <Card padding="lg" className="patient-card text-center">
             <CheckCircleIcon className="w-10 h-10 mx-auto text-primary mb-3" />
             <p className="font-medium">
               {questionnaire.status === 'confirmed'
@@ -272,12 +283,14 @@ export default function PatientFormPage() {
   return (
     <PatientLayout title="传统问卷评估" showBack onBack={() => router.push(`/patient/tasks/${taskId}`)}>
       <div className="min-h-screen bg-background pb-28">
-        <div className="sticky top-14 z-40 bg-surface border-b border-border p-4">
-          <div className="max-w-xl mx-auto">
+        <div className="sticky top-16 z-30 border-b border-border bg-[#fffaf6]/95 p-4 backdrop-blur">
+          <div>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <DocumentTextIcon className="w-5 h-5 text-primary" />
-                <span className="text-sm font-medium">{sectionNames[safeSectionIndex]}</span>
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-primary-tint text-primary">
+                  <PatientIcon name="document" className="h-5 w-5" />
+                </span>
+                <span className="text-sm font-black">{sectionNames[safeSectionIndex]}</span>
               </div>
               <div className="flex items-center gap-2">
                 <IntegrationStatus compact />
@@ -286,7 +299,7 @@ export default function PatientFormPage() {
                 </Badge>
               </div>
             </div>
-            <Progress value={answeredCount} max={requiredQuestions.length} size="sm" />
+            <Progress value={answeredCount} max={requiredQuestions.length} size="md" />
             <div className="mt-2 flex items-center gap-1 text-xs text-green-700">
               <CloudArrowUpIcon className="w-4 h-4" />
               {draftStatus === 'saving'
@@ -298,7 +311,7 @@ export default function PatientFormPage() {
           </div>
         </div>
 
-        <div className="max-w-xl mx-auto p-4 space-y-4">
+        <div className="space-y-4 p-[18px]">
           {submitError && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {submitError}
@@ -315,8 +328,8 @@ export default function PatientFormPage() {
           ))}
         </div>
 
-        <div className="fixed bottom-0 inset-x-0 z-50 bg-surface border-t border-border p-4 safe-area-pb">
-          <div className="max-w-xl mx-auto flex gap-3">
+        <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] border-t border-border bg-surface/95 p-4 shadow-[0_-10px_28px_rgba(94,67,48,.08)] backdrop-blur safe-area-pb min-[520px]:bottom-4 min-[520px]:rounded-b-[34px]">
+          <div className="flex gap-3">
             {safeSectionIndex > 0 && (
               <Button variant="outline" onClick={previousSection}>
                 <ArrowLeftIcon className="w-4 h-4 mr-1" />

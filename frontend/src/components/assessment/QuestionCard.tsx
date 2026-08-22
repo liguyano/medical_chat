@@ -55,7 +55,7 @@ export default function QuestionCard({
                 key={option.id ?? option.optionCode}
                 type="button"
                 onClick={() => onChange(option.optionCode)}
-                className={`w-full p-4 rounded-xl border-2 transition-all duration-200 text-left ${
+                className={`min-h-[54px] w-full rounded-2xl border-2 p-4 text-left transition-all duration-200 ${
                   value === option.optionCode
                     ? 'border-primary bg-primary-tint'
                     : 'border-border bg-surface hover:border-foreground-muted'
@@ -112,7 +112,7 @@ export default function QuestionCard({
                       : [...selectedValues, option.optionCode];
                     onChange(newValues);
                   }}
-                  className={`w-full p-4 rounded-xl border-2 transition-all duration-200 text-left ${
+                  className={`min-h-[54px] w-full rounded-2xl border-2 p-4 text-left transition-all duration-200 ${
                     isSelected
                       ? 'border-primary bg-primary-tint'
                       : 'border-border bg-surface hover:border-foreground-muted'
@@ -231,10 +231,13 @@ export default function QuestionCard({
   };
 
   const CardContent = (
-    <Card padding="lg" className={error ? 'border-2 border-danger' : ''}>
+    <Card
+      padding="none"
+      className={`patient-card p-4 ${error ? 'border-2 border-danger' : ''}`}
+    >
       {/* 题目编码仅用于接口和审计，不向用户展示；必填标记与题目同行，避免顶部产生空白区域 */}
       <div className="flex items-start gap-3 mb-4">
-        <h3 className="min-w-0 flex-1 text-base font-medium text-foreground leading-relaxed">
+        <h3 className="min-w-0 flex-1 text-[17px] font-bold leading-7 text-foreground">
           {question.questionText}
         </h3>
         {question.required && (

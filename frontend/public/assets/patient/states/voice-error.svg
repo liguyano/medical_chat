@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="语音异常">
+  <circle cx="64" cy="64" r="50" fill="#FFF0D8"/>
+  <circle cx="64" cy="64" r="38" fill="#E5A146"/>
+  <circle cx="64" cy="64" r="17" fill="#FFF" opacity=".78"/>
+  <circle cx="58" cy="61" r="3" fill="#C98526"/>
+  <circle cx="70" cy="61" r="3" fill="#C98526"/>
+  <path d="M56 76q8-5 16 0" fill="none" stroke="#C98526" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="102" cy="26" r="14" fill="#D95A4A"/>
+  <path d="M102 18v9M102 33h.1" stroke="#FFF" stroke-width="3" stroke-linecap="round"/>
+</svg>

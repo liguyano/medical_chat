@@ -13,6 +13,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## 当前原型架构
 
 - 使用 Next.js App Router，医护端路由位于 `src/app/nurse`，患者端路由位于 `src/app/patient`。
+- 患者端新版 UI 以 390px 移动视口为主要验收基准，桌面端由
+  `src/components/layout/PatientLayout.tsx` 提供最大 430px 的居中移动画布；患者端设计令牌
+  统一放在 `src/app/globals.css` 的 `.patient-app` 作用域，禁止用患者端变量覆盖医护端。
+- 患者端交付素材复制到 `public/assets/patient`，页面不得直接引用 `docs/ui` 原型截图；
+  通用图标、状态、语音 Orb、聊天气泡和呼叫护士入口位于 `src/components/patient`。
+- 患者端 UI 重构只能消费现有 Repository、Store、SSE 和语音 WebSocket 状态；原型有展示但
+  后端尚未返回的状态必须保留明确前端展示与对接位置，并在 `docs/review` 记录，禁止为了视觉
+  复现修改接口路径、DTO 或传输协议。
 - `src/lib/stores/useUserStore.ts` 管理演示登录身份。
 - `src/lib/stores/useTaskStore.ts` 管理任务、传统问卷草稿、知情同意、护士复核和质量评价，并通过 Zustand persist 保存到浏览器。
 - `src/lib/stores/useChatStore.ts` 管理 AI 会话、结构化答案、风险/宣教事件和逐轮反馈，并通过 Zustand persist 保存到浏览器。
