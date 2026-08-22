@@ -254,6 +254,103 @@ async def test_function_call_uses_official_output_then_response_create(
 
 
 @pytest.mark.asyncio
+async def test_function_call_waits_for_active_response_before_creating_continuation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """工具调用发生在当前响应中时，必须等 response.done 后再创建下一响应。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "execute_tool",
+        AsyncMock(return_value={"success": True, "message": "宣教已展示"}),
+    )
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_education"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.function_call_arguments.done",
+            "response_id": "resp_education",
+            "call_id": "call_education",
+            "name": "get_education_material",
+            "arguments": '{"category":"tobacco","level":2}',
+        },
+    )
+
+    session.client.create_response.assert_not_awaited()
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_education", "status": "completed"},
+        },
+    )
+
+    session.client.create_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_function_call_is_ignored(tmp_path: Path, monkeypatch):
+    """上游重复投递同一 call_id 时不得重复执行宣教或呼叫护士。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    execute = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(voice_gateway_module, "execute_tool", execute)
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    event = {
+        "type": "response.function_call_arguments.done",
+        "response_id": "resp_tool",
+        "call_id": "call_duplicate",
+        "name": "get_education_material",
+        "arguments": '{"category":"tobacco","level":2}',
+    }
+
+    await gateway._handle_event(session, event)
+    await gateway._handle_event(session, event)
+
+    execute.assert_awaited_once()
+    session.client.send_tool_result.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_no_active_response_race_recovers_without_text_fallback(
+    tmp_path: Path,
+):
+    """Qwen 无活动响应竞态只清理本地状态，不把语音会话降级卡死。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    websocket = FakeWebSocket()
+    session.connected_clients.add(websocket)
+    session.pending_tool_responses = 1
+
+    await gateway._handle_event(
+        session,
+        {
+            "type": "error",
+            "error": {
+                "code": "invalid_request_error",
+                "message": "Conversation has no active response.",
+            },
+        },
+    )
+
+    session.client.create_response.assert_awaited_once()
+    assert {"type": "state", "state": "listening"} in websocket.messages
+    assert not session.publisher.events
+
+
+@pytest.mark.asyncio
 async def test_response_ids_keep_mixed_tool_response_until_each_response_finishes(
     tmp_path: Path,
     monkeypatch,

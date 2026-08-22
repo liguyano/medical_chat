@@ -246,6 +246,13 @@ export class VoiceSocketClient {
     } else if (message.type === 'transcript_discarded') {
       this.options.onTranscriptDiscarded?.(message.transcript_id);
       this.setState('listening');
+    } else if (
+      message.type === 'error' &&
+      /conversation has no active response/i.test(message.message)
+    ) {
+      // 上游取消/重复触发响应的竞态不应关闭麦克风或降级文字输入。
+      this.completePendingResponse();
+      this.setState('listening');
     } else if (message.type === 'error') {
       this.completePendingResponse();
       this.options.onError?.(message.message);

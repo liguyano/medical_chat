@@ -214,4 +214,41 @@ describe('VoiceSocketClient', () => {
     expect(stream.track.stop).toHaveBeenCalledOnce();
     expect(states.at(-1)).toBe('text_fallback');
   });
+
+  it('无活动响应竞态不会关闭麦克风或切换文字降级', async () => {
+    const stream = new FakeMediaStream();
+    vi.stubGlobal('navigator', {
+      mediaDevices: {
+        getUserMedia: vi.fn().mockResolvedValue(stream),
+      },
+    });
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const states: string[] = [];
+    const errors: string[] = [];
+    const { VoiceSocketClient } = await import(
+      '@/lib/transports/voiceSocket'
+    );
+    const client = new VoiceSocketClient({
+      taskId: '111',
+      sessionId: 'SESS-111',
+      onStateChange: (state) => states.push(state),
+      onError: (message) => errors.push(message),
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0]?.onmessage?.({
+      data: JSON.stringify({
+        type: 'error',
+        code: 'invalid_request_error',
+        message: 'Conversation has no active response.',
+      }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(stream.track.stop).not.toHaveBeenCalled();
+    expect(errors).toEqual([]);
+    expect(states.at(-1)).toBe('listening');
+    await client.close();
+  });
 });

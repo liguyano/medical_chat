@@ -34,6 +34,8 @@ def test_system_prompt_requires_completed_question_evidence():
     """系统提示必须约束模型仅按证据标记完成题目。"""
     assert "completed_questions" in DEVIATION_CHECK_SYSTEM_PROMPT
     assert "不允许猜测" in DEVIATION_CHECK_SYSTEM_PROMPT
+    assert "teach-back" in DEVIATION_CHECK_SYSTEM_PROMPT
+    assert "用自己的话复述" in DEVIATION_CHECK_SYSTEM_PROMPT
 
 
 def test_remaining_tasks_include_required_optional_and_options():
