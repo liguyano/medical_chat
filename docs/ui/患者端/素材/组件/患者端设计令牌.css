@@ -1,0 +1,44 @@
+:root {
+  --patient-bg: #f7f4ef;
+  --patient-surface: #ffffff;
+  --patient-surface-soft: #fbf9f5;
+  --patient-primary: #c4612f;
+  --patient-primary-hover: #a94e22;
+  --patient-primary-tint: #f2e3d6;
+  --patient-teal: #4ba7a3;
+  --patient-blue: #5b8def;
+  --patient-success: #3dad82;
+  --patient-warning: #e5a146;
+  --patient-danger: #d95a4a;
+  --patient-ink: #2f2925;
+  --patient-muted: #756d66;
+  --patient-border: #e8dcd1;
+  --patient-radius-card: 24px;
+  --patient-radius-control: 16px;
+  --patient-radius-pill: 999px;
+  --patient-shadow-card: 0 8px 24px rgba(94, 67, 48, 0.08);
+  --patient-shadow-float: 0 12px 28px rgba(94, 67, 48, 0.14);
+  --patient-font-display: 'DM Serif Display', Georgia, serif;
+  --patient-font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+}
+
+.patient-card {
+  border: 1px solid var(--patient-border);
+  border-radius: var(--patient-radius-card);
+  background: var(--patient-surface);
+  box-shadow: var(--patient-shadow-card);
+}
+
+.patient-button-primary {
+  min-height: 48px;
+  border-radius: var(--patient-radius-pill);
+  background: var(--patient-primary);
+  color: #fff;
+  font-weight: 600;
+  padding: 0 20px;
+}
+
+.patient-touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}

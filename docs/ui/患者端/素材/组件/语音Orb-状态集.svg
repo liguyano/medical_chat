@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-label="语音 Orb 状态集">
+  <defs>
+    <radialGradient id="idle" cx="50%" cy="40%" r="65%"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#F6DCCF"/><stop offset="1" stop-color="#C4612F"/></radialGradient>
+    <radialGradient id="listening" cx="50%" cy="40%" r="65%"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#D8F3EF"/><stop offset="1" stop-color="#4BA7A3"/></radialGradient>
+    <radialGradient id="thinking" cx="50%" cy="40%" r="65%"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#DEE8FF"/><stop offset="1" stop-color="#5B8DEF"/></radialGradient>
+    <radialGradient id="speaking" cx="50%" cy="40%" r="65%"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#D7F0E5"/><stop offset="1" stop-color="#3DAD82"/></radialGradient>
+    <radialGradient id="error" cx="50%" cy="40%" r="65%"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#FFF0D8"/><stop offset="1" stop-color="#E5A146"/></radialGradient>
+    <filter id="shadow"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <g font-family="system-ui, sans-serif" text-anchor="middle">
+    <g transform="translate(72 70)">
+      <circle r="53" fill="#F2E3D6" opacity=".55" filter="url(#shadow)"/><circle r="42" fill="url(#idle)"/><circle r="17" fill="#fff" opacity=".72"/><circle cx="-6" cy="-2" r="2.6" fill="#C4612F"/><circle cx="6" cy="-2" r="2.6" fill="#C4612F"/><path d="M-8 8q8 7 16 0" fill="none" stroke="#C4612F" stroke-width="2.5" stroke-linecap="round"/><text y="77" font-size="13" fill="#5D514A">待机</text>
+    </g>
+    <g transform="translate(216 70)">
+      <circle r="56" fill="none" stroke="#4BA7A3" stroke-width="2" stroke-dasharray="2 7" opacity=".9"/><circle r="44" fill="url(#listening)"/><circle r="17" fill="#fff" opacity=".72"/><circle cx="-6" cy="-2" r="2.6" fill="#2E8D89"/><circle cx="6" cy="-2" r="2.6" fill="#2E8D89"/><path d="M-8 8q8 7 16 0" fill="none" stroke="#2E8D89" stroke-width="2.5" stroke-linecap="round"/><text y="77" font-size="13" fill="#5D514A">正在听</text>
+    </g>
+    <g transform="translate(360 70)">
+      <circle r="55" fill="none" stroke="#5B8DEF" stroke-width="2" stroke-dasharray="10 5" opacity=".9"/><circle r="43" fill="url(#thinking)"/><circle r="17" fill="#fff" opacity=".72"/><circle cx="-6" cy="-2" r="2.6" fill="#4775D5"/><circle cx="6" cy="-2" r="2.6" fill="#4775D5"/><path d="M-8 8q8 7 16 0" fill="none" stroke="#4775D5" stroke-width="2.5" stroke-linecap="round"/><text y="77" font-size="13" fill="#5D514A">AI思考</text>
+    </g>
+    <g transform="translate(504 70)">
+      <path d="M-58 0h116M-48-12h96M-38 12h76" stroke="#3DAD82" stroke-width="2" stroke-linecap="round" opacity=".75"/><circle r="43" fill="url(#speaking)"/><circle r="17" fill="#fff" opacity=".72"/><circle cx="-6" cy="-2" r="2.6" fill="#3DAD82"/><circle cx="6" cy="-2" r="2.6" fill="#3DAD82"/><path d="M-8 8q8 7 16 0" fill="none" stroke="#3DAD82" stroke-width="2.5" stroke-linecap="round"/><text y="77" font-size="13" fill="#5D514A">AI播报</text>
+    </g>
+    <g transform="translate(648 70)">
+      <circle r="44" fill="url(#error)"/><circle r="17" fill="#fff" opacity=".72"/><circle cx="-6" cy="-2" r="2.6" fill="#C98526"/><circle cx="6" cy="-2" r="2.6" fill="#C98526"/><path d="M-8 10q8-5 16 0" fill="none" stroke="#C98526" stroke-width="2.5" stroke-linecap="round"/><circle cx="30" cy="-30" r="10" fill="#E5A146"/><path d="M30-35v6M30-26h.1" stroke="#fff" stroke-width="2" stroke-linecap="round"/><text y="77" font-size="13" fill="#5D514A">语音异常</text>
+    </g>
+  </g>
+</svg>

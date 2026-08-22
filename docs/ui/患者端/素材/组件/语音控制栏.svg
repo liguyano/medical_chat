@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 152" role="img" aria-label="语音控制栏组件">
+  <defs>
+    <filter id="ds"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#9A6040" flood-opacity=".18"/></filter>
+  </defs>
+  <rect x="8" y="8" width="624" height="136" rx="30" fill="#FFFDF9" stroke="#E8DCD1"/>
+  <g font-family="system-ui, sans-serif" text-anchor="middle">
+    <g transform="translate(110 76)">
+      <circle r="27" fill="#F7F4EF" stroke="#E8DCD1"/><rect x="-10" y="-10" width="20" height="20" rx="4" fill="none" stroke="#6A625C" stroke-width="1.8"/><path d="M-6-3h.1M0-3h.1M6-3h.1M-6 3h12" stroke="#6A625C" stroke-width="1.8" stroke-linecap="round"/><text y="48" font-size="14" fill="#5D514A">切换文字</text>
+    </g>
+    <g transform="translate(320 76)" filter="url(#ds)">
+      <circle r="40" fill="#C4612F"/><rect x="-11" y="-21" width="22" height="32" rx="11" fill="none" stroke="#fff" stroke-width="2.6"/><path d="M-20-1a20 20 0 0 0 40 0M0 19v11M-8 30h16" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><text y="61" font-size="14" fill="#5D514A">点击开始说话</text>
+    </g>
+    <g transform="translate(530 76)">
+      <circle r="27" fill="#F7F4EF" stroke="#E8DCD1"/><path d="M-12 0a12 12 0 0 1 20-9M12 0A12 12 0 0 1-8 9M8-10v5H3M-8 10V5h5" fill="none" stroke="#6A625C" stroke-width="1.8" stroke-linecap="round"/><text y="48" font-size="14" fill="#5D514A">打断播报</text>
+    </g>
+  </g>
+</svg>
