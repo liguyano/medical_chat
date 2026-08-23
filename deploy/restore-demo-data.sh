@@ -27,6 +27,15 @@ require_confirmation() {
     }
 }
 
+require_container_config_readable() {
+    if ! "${COMPOSE[@]}" run --rm --no-deps migrate \
+        sh -ec 'test -r /app/config.yaml' >/dev/null 2>&1; then
+        echo "容器用户 UID 10001 无法读取 config.production.yaml。" >&2
+        echo "请执行：chown 10001:10001 config.production.yaml && chmod 600 config.production.yaml" >&2
+        exit 1
+    fi
+}
+
 find_data_file() {
     local pattern="$1"
     find . -maxdepth 1 -type f -name "$pattern" -print -quit
@@ -53,6 +62,8 @@ set -a
 # shellcheck disable=SC1091
 source ./.env.production
 set +a
+
+require_container_config_readable
 
 POSTGRES_DUMP="$(find_data_file 'medical-evaluate-demo-postgres-*.dump')"
 STORAGE_ARCHIVE="$(find_data_file 'medical-evaluate-demo-storage-*.tar.gz')"
