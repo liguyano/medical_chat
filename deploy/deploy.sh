@@ -50,6 +50,15 @@ require_application_images() {
     fi
 }
 
+require_container_config_readable() {
+    if ! "${COMPOSE[@]}" run --rm --no-deps migrate \
+        sh -ec 'test -r /app/config.yaml' >/dev/null 2>&1; then
+        echo "容器用户 UID 10001 无法读取 config.production.yaml。" >&2
+        echo "请执行：chown 10001:10001 config.production.yaml && chmod 600 config.production.yaml" >&2
+        exit 1
+    fi
+}
+
 command="${1:-}"
 case "${command}" in
     config)
@@ -61,6 +70,7 @@ case "${command}" in
         require_files
         "${COMPOSE[@]}" config --quiet
         require_application_images
+        require_container_config_readable
         "${COMPOSE[@]}" up -d --no-build --remove-orphans
         "${COMPOSE[@]}" ps
         ;;
@@ -68,6 +78,7 @@ case "${command}" in
         require_files
         "${COMPOSE[@]}" config --quiet
         require_application_images
+        require_container_config_readable
         "${COMPOSE[@]}" up -d --no-build --force-recreate --remove-orphans
         "${COMPOSE[@]}" ps
         ;;
@@ -92,6 +103,7 @@ case "${command}" in
     bootstrap)
         require_files
         require_application_images
+        require_container_config_readable
         : "${BOOTSTRAP_STAFF_NO:?请设置 BOOTSTRAP_STAFF_NO}"
         : "${BOOTSTRAP_STAFF_NAME:?请设置 BOOTSTRAP_STAFF_NAME}"
         : "${BOOTSTRAP_STAFF_PASSWORD:?请设置 BOOTSTRAP_STAFF_PASSWORD}"
@@ -107,6 +119,7 @@ case "${command}" in
     demo-restore)
         require_files
         require_application_images
+        require_container_config_readable
         DEMO_RESTORE_CONFIRM="${DEMO_RESTORE_CONFIRM:-}" \
             ./restore-demo-data.sh
         ;;

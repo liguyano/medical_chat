@@ -43,6 +43,9 @@
   `/health` 返回 200，PostgreSQL、双 Redis、三个 Worker、Beat 和 API 均正常。
 - 已生成 `release/20260823-04`，包含后端项目安装修复、前端 SWC 依赖补齐和
   `storage-init` Compose 修复；真实数据包继续复用已校验的 20260823-01 数据。
+- 已修复生产配置文件权限说明：后端容器 UID `10001` 必须能读取
+  `config.production.yaml`；部署脚本和恢复脚本会在启动前检查，并提示使用
+  `chown 10001:10001` 与 `chmod 600` 修复。
 - 已更新根目录、后端和前端 `AGENTS.md`，明确真实数据包不得提交 Git 或放入公开目录，
   Redis 不迁移，浏览器不能执行 Docker，且生产端口变更必须同步宝塔 Nginx。
 

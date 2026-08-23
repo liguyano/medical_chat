@@ -223,7 +223,10 @@ cd /opt/medical-evaluate/deploy
 chmod 700 deploy.sh restore-demo-data.sh
 cp .env.production.example .env.production
 cp config.production.example.yaml config.production.yaml
-chmod 600 .env.production config.production.yaml
+chmod 600 .env.production
+# 后端容器以 UID 10001 的非 root 用户读取该文件。
+chown 10001:10001 config.production.yaml
+chmod 600 config.production.yaml
 ```
 
 编辑 `.env.production`，至少修改：
@@ -240,6 +243,12 @@ DASHSCOPE_API_KEY=真实模型密钥
 
 编辑 `config.production.yaml`，确认语音模型中的 `{WorkspaceId}` 已替换为
 真实工作空间 ID。禁止提交 `.env.production` 和 `config.production.yaml`。
+如果修改配置文件后编辑器将所有权恢复为 root，请再次执行：
+
+```bash
+chown 10001:10001 config.production.yaml
+chmod 600 config.production.yaml
+```
 
 `IMAGE_TAG` 必须与本次导入的镜像标签完全一致。若写成 `latest`，
 服务器必须实际加载带有 `:latest` 标签的镜像。
