@@ -35,6 +35,11 @@ RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin nextjs
 COPY --from=build --chown=nextjs:nextjs /app/frontend/.next/standalone /app
 COPY --from=build --chown=nextjs:nextjs /app/frontend/.next/static /app/.next/static
 COPY --from=build --chown=nextjs:nextjs /app/frontend/public /app/public
+# pnpm 的 standalone tracing 可能只复制 @swc/helpers 的 CJS 文件；
+# Next.js 运行时还会按 ESM 路径加载该包，因此补齐锁定版本的完整目录。
+COPY --from=build --chown=nextjs:nextjs \
+    /app/frontend/node_modules/.pnpm/@swc+helpers@0.5.23/node_modules/@swc/helpers \
+    /app/node_modules/.pnpm/@swc+helpers@0.5.23/node_modules/@swc/helpers
 
 USER nextjs
 EXPOSE 3000

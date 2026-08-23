@@ -117,3 +117,5 @@ These apply repo-wide; module guides own the module-specific detail.
   队列不迁移，服务器使用新 Redis 数据卷。
 - 浏览器只能访问已启动的 HTTPS 站点，不能执行 Docker 或替代服务器部署命令；
   修改生产端口时必须同步更新 `.env.production` 与 `deploy/baota-reverse-proxy.conf`。
+- Compose 首次使用空的应用存储卷时，必须通过 `storage-init` 完成音频和签名目录
+  初始化，API、Worker、Beat 必须等待该服务成功后再启动，避免共享卷并发挂载竞争。

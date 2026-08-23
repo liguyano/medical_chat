@@ -37,6 +37,12 @@
   `medagent` 的问题；现在复制完整源码后执行锁定的非开发项目安装。
 - 已使用修复后的 Dockerfile 构建 `medical-evaluate-backend:medagent-fix`，并在
   容器内成功导入 `medagent` 和 `AgentModelBinding`。
+- 本机隔离 Compose 验证发现空应用存储卷存在并发初始化竞争，已增加一次性
+  `storage-init` 服务，并让 API、Worker、Beat 等待其成功完成。
+- 本机第二轮隔离 Compose 已验证新前端镜像稳定运行，前端 HTTP 返回 200，后端
+  `/health` 返回 200，PostgreSQL、双 Redis、三个 Worker、Beat 和 API 均正常。
+- 已生成 `release/20260823-04`，包含后端项目安装修复、前端 SWC 依赖补齐和
+  `storage-init` Compose 修复；真实数据包继续复用已校验的 20260823-01 数据。
 - 已更新根目录、后端和前端 `AGENTS.md`，明确真实数据包不得提交 Git 或放入公开目录，
   Redis 不迁移，浏览器不能执行 Docker，且生产端口变更必须同步宝塔 Nginx。
 
