@@ -422,6 +422,10 @@ docker load -i medical-evaluate-images-新版本.tar
 ./deploy.sh demo-restore
 ```
 
+如果首次空库启动时看到应用存储卷目录创建冲突，说明使用了旧版 Compose。
+请更新 `docker-compose.yaml`，确保包含 `storage-init` 服务；新版 Compose 会先
+初始化 `consent-signatures`、`dialog-audio` 目录，再启动 API、Worker 和 Beat。
+
 # 1. 数据库部署指南
 
 ## PostgreSQL 配置

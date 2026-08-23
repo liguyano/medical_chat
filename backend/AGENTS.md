@@ -26,6 +26,9 @@
   设置 `DEMO_RESTORE_CONFIRM=YES`，因为恢复会清理目标数据库对象。
 - Redis 运行态不作为演示数据迁移，生产服务器必须使用新的 Redis 数据卷，避免带入
   登录会话、SSE 游标、Agent 临时状态和 Celery 队列。
+- `medical_evaluate_app_storage` 是 API 与所有 Worker 共享的持久化卷；生产 Compose
+  必须先运行 `storage-init` 创建 `consent-signatures` 和 `dialog-audio` 目录，
+  再启动会挂载该卷的服务。
 
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
