@@ -243,6 +243,47 @@ DASHSCOPE_API_KEY=真实模型密钥
 
 编辑 `config.production.yaml`，确认语音模型中的 `{WorkspaceId}` 已替换为
 真实工作空间 ID。禁止提交 `.env.production` 和 `config.production.yaml`。
+
+### 真实演示数据的患者身份密钥
+
+如果执行的是 `./deploy.sh demo-restore`，`PATIENT_IDENTITY_SECRET` 必须与
+导出本机 PostgreSQL 数据时使用的密钥完全一致。患者身份证号在数据库中保存为
+依赖该密钥的加密值；密钥不一致时，医护端可能仍能正常登录，但患者端会提示：
+
+```text
+身份证号或手机号不匹配
+```
+
+本项目当前本机演示数据库未单独配置密钥，使用代码默认值：
+
+```dotenv
+PATIENT_IDENTITY_SECRET=medical-evaluate-development-identity-secret
+```
+
+因此，复现当前本机演示数据时，服务器必须使用上面的值。部署前检查：
+
+```bash
+grep '^PATIENT_IDENTITY_SECRET=' .env.production
+```
+
+如果目标是复现本机演示数据，可修复为：
+
+```bash
+sed -i 's/^PATIENT_IDENTITY_SECRET=.*/PATIENT_IDENTITY_SECRET=medical-evaluate-development-identity-secret/' .env.production
+./deploy.sh update
+```
+
+然后再执行：
+
+```bash
+export DEMO_RESTORE_CONFIRM=YES
+./deploy.sh demo-restore
+unset DEMO_RESTORE_CONFIRM
+```
+
+普通空库生产部署可以使用随机长密钥；但已经导出的真实演示数据恢复后，
+不得直接更换该密钥。若必须更换，需要先对数据库中的全部患者身份证密文执行
+受控重新加密，再重启所有 API 和 Worker。
 如果修改配置文件后编辑器将所有权恢复为 root，请再次执行：
 
 ```bash
