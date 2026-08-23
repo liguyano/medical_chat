@@ -403,6 +403,25 @@ docker compose --env-file .env.production -f docker-compose.yaml exec -T postgre
   密钥，并限制文件权限。
 - 签名和音频使用 Docker 数据卷持久化，不能依赖容器临时文件系统。
 
+## 0.12 常见恢复错误
+
+如果 `./deploy.sh demo-restore` 在迁移阶段出现：
+
+```text
+ModuleNotFoundError: No module named 'medagent'
+```
+
+说明服务器导入的是旧后端镜像。`backend.Dockerfile` 已要求在复制完整源码后
+安装项目本身；请使用修复后的新版本重新构建并导入镜像。数据库和存储数据包
+无需重新导出。
+
+服务器导入新镜像后，确认 `.env.production` 的 `IMAGE_TAG` 已改为新标签，再执行：
+
+```bash
+docker load -i medical-evaluate-images-新版本.tar
+./deploy.sh demo-restore
+```
+
 # 1. 数据库部署指南
 
 ## PostgreSQL 配置

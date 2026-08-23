@@ -17,7 +17,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY backend /app/backend
 COPY docs/structured /app/docs/structured
 
-RUN mkdir -p /app/backend/storage/consent-signatures \
+RUN uv sync --frozen --no-dev --no-editable \
+    && mkdir -p /app/backend/storage/consent-signatures \
     /app/backend/storage/dialog-audio \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app

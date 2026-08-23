@@ -33,6 +33,10 @@
 - 已增加 `restore-demo-data.sh` 与 `deploy.sh demo-restore`。恢复前必须显式设置
   `DEMO_RESTORE_CONFIRM=YES`；脚本会清理目标 PostgreSQL 对象、恢复音频/签名，
   删除旧 Redis 运行态并重新创建空 Redis 数据卷，然后执行迁移并启动完整服务。
+- 已修复后端 Dockerfile 原先使用 `--no-install-project` 导致生产虚拟环境缺少
+  `medagent` 的问题；现在复制完整源码后执行锁定的非开发项目安装。
+- 已使用修复后的 Dockerfile 构建 `medical-evaluate-backend:medagent-fix`，并在
+  容器内成功导入 `medagent` 和 `AgentModelBinding`。
 - 已更新根目录、后端和前端 `AGENTS.md`，明确真实数据包不得提交 Git 或放入公开目录，
   Redis 不迁移，浏览器不能执行 Docker，且生产端口变更必须同步宝塔 Nginx。
 
@@ -51,3 +55,5 @@ Linux 容器实际启动、HTTP、SSE、WebSocket 和 HTTPS 联调。部署服�
 - 应配置 PostgreSQL、应用存储和 Redis 的异地备份，并进行恢复演练。
 - 当前仅完成脚本级静态验证，未在隔离临时数据库/卷上实际执行真实数据恢复；
   首次上线前应先制作脱敏副本进行完整恢复演练，再处理正式数据包。
+- 服务器已经导入的旧后端镜像不会自动更新；必须重新构建、导出并 `docker load`
+  新版本镜像，真实 PostgreSQL 和应用存储数据包可以继续复用。
