@@ -109,3 +109,11 @@ These apply repo-wide; module guides own the module-specific detail.
   与 `.env.production` 中的 `IMAGE_TAG` 完全一致。
 - 前端镜像构建时必须传入最终 HTTPS `PUBLIC_ORIGIN`，域名变化需要重新构建前端
   镜像；服务器只上传镜像发布包、Compose 文件和运行时配置。
+- 如需复现本机演示状态，只能使用 `deploy/export-demo-data.ps1` 导出
+  PostgreSQL 与 `backend/storage`，并在确认是演示服务器后执行
+  `DEMO_RESTORE_CONFIRM=YES ./deploy.sh demo-restore`；该操作会覆盖目标数据库。
+- 真实数据包可能包含身份证、手机号、对话、签名和音频，禁止提交 Git、放入
+  Web 可公开目录或长期保留服务器临时目录；Redis 登录会话、SSE 游标和 Celery
+  队列不迁移，服务器使用新 Redis 数据卷。
+- 浏览器只能访问已启动的 HTTPS 站点，不能执行 Docker 或替代服务器部署命令；
+  修改生产端口时必须同步更新 `.env.production` 与 `deploy/baota-reverse-proxy.conf`。

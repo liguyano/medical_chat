@@ -9,6 +9,7 @@
 - 生产初始化和签名文件访问
 - `deploy/Install.md` 及各级 `AGENTS.md`
 - 本地镜像构建、导出和服务器无源码启动流程
+- 真实 PostgreSQL、应用存储和 Redis 恢复流程
 
 ## 已验证
 
@@ -26,6 +27,14 @@
 - `.gitattributes` 已强制 Shell、Compose 和 Nginx 配置使用 Linux 兼容换行符。
 - 已验证 Windows PowerShell 5.1 可解析 `build-images.ps1`；发布包中的
   `deploy.sh` 会被统一转换为无 BOM 的 LF 换行。
+- 已增加 `export-demo-data.ps1`，以 PostgreSQL custom dump 和
+  `backend/storage` tar.gz 导出真实演示数据，并为每个文件生成
+  `hash  filename` 格式的 SHA256 校验文件。
+- 已增加 `restore-demo-data.sh` 与 `deploy.sh demo-restore`。恢复前必须显式设置
+  `DEMO_RESTORE_CONFIRM=YES`；脚本会清理目标 PostgreSQL 对象、恢复音频/签名，
+  删除旧 Redis 运行态并重新创建空 Redis 数据卷，然后执行迁移并启动完整服务。
+- 已更新根目录、后端和前端 `AGENTS.md`，明确真实数据包不得提交 Git 或放入公开目录，
+  Redis 不迁移，浏览器不能执行 Docker，且生产端口变更必须同步宝塔 Nginx。
 
 ## 未完成的运行时验证
 
@@ -40,3 +49,5 @@ Linux 容器实际启动、HTTP、SSE、WebSocket 和 HTTPS 联调。部署服�
 - 正式环境必须先在宝塔申请并验证 Let’s Encrypt 证书，再合并 Nginx 片段。
 - 应在真实服务器上验证证书续期后的 Nginx reload、SSE 长连接和 WebSocket 语音。
 - 应配置 PostgreSQL、应用存储和 Redis 的异地备份，并进行恢复演练。
+- 当前仅完成脚本级静态验证，未在隔离临时数据库/卷上实际执行真实数据恢复；
+  首次上线前应先制作脱敏副本进行完整恢复演练，再处理正式数据包。

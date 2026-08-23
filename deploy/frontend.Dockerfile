@@ -1,9 +1,9 @@
-FROM node:20-bookworm-slim AS build
+FROM node:26-slim AS build
 
 WORKDIR /app
 
-RUN corepack enable \
-    && corepack prepare pnpm@10.26.2 --activate
+RUN npm install --global pnpm@10.26.2 \
+    && npm cache clean --force
 
 COPY frontend/package.json frontend/pnpm-lock.yaml /app/frontend/
 WORKDIR /app/frontend
@@ -22,7 +22,7 @@ ENV NEXT_PUBLIC_DATA_MODE=${NEXT_PUBLIC_DATA_MODE} \
 
 RUN pnpm build
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:26-slim AS runtime
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

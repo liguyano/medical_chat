@@ -44,6 +44,11 @@ PostgreSQL、Redis、前端和后端端口不应对公网开放。
 后端：127.0.0.1:18000
 ```
 
+端口可以修改，不需要重新构建镜像：在服务器 `.env.production` 中修改
+`FRONTEND_BIND_PORT`、`API_BIND_PORT`，并将本文件中的宝塔 Nginx
+`proxy_pass` 端口同步改成相同值，然后测试并重载 Nginx。数据库和 Redis
+容器端口不要发布到宿主机或公网。
+
 SSE 和 WebSocket 的代理配置不能省略，否则实时对话和语音功能会断开。
 
 ## 0.3 本地构建 Linux 镜像
@@ -108,14 +113,49 @@ docker save `
   redis:7-alpine `
   -o .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar
 
-(Get-FileHash `
+$imageHash = (Get-FileHash `
   .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar `
-  -Algorithm SHA256).Hash.ToLowerInvariant() |
+  -Algorithm SHA256).Hash.ToLowerInvariant()
+"$imageHash  medical-evaluate-images-all-20260822-01.tar" |
   Set-Content .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar.sha256 `
   -Encoding ASCII
 ```
 
-## 0.4 上传发布包到服务器
+## 0.4 导出真实演示数据
+
+镜像构建完成后，在本地停止 FastAPI、Next.js、Celery Worker 和 Beat，
+避免数据库与文件同时写入。然后执行：
+
+```powershell
+Set-Location D:\A-AICodeWork\medical-evaluate
+
+.\deploy\export-demo-data.ps1 `
+  -ReleaseDirectory ".\release\20260822-01" `
+  -PostgresContainer "medical-evaluate-postgres" `
+  -PostgresUser "medical" `
+  -Database "medical_evaluate"
+```
+
+脚本会导出：
+
+```text
+medical-evaluate-demo-postgres-20260822-01.dump
+medical-evaluate-demo-postgres-20260822-01.dump.sha256
+medical-evaluate-demo-storage-20260822-01.tar.gz
+medical-evaluate-demo-storage-20260822-01.tar.gz.sha256
+DEMO-DATA.txt
+```
+
+数据包包含当前 PostgreSQL 数据、知情同意签名、对话音频等真实数据。
+Redis 登录会话、SSE 游标和 Celery 临时队列不会导出。
+
+导出后建议检查文件大小：
+
+```powershell
+Get-ChildItem .\release\20260822-01\medical-evaluate-demo-*
+```
+
+## 0.5 上传发布包到服务器
 
 建议上传到服务器的临时目录，不要直接覆盖正在运行的部署目录。
 PowerShell 通过 `scp` 上传示例：
@@ -131,14 +171,20 @@ scp -r `
 ```text
 medical-evaluate-images-20260822-01.tar
 medical-evaluate-images-20260822-01.tar.sha256
+medical-evaluate-demo-postgres-20260822-01.dump
+medical-evaluate-demo-postgres-20260822-01.dump.sha256
+medical-evaluate-demo-storage-20260822-01.tar.gz
+medical-evaluate-demo-storage-20260822-01.tar.gz.sha256
+DEMO-DATA.txt
 docker-compose.yaml
 deploy.sh
+restore-demo-data.sh
 baota-reverse-proxy.conf
 .env.production.example
 config.production.example.yaml
 ```
 
-## 0.5 服务器导入镜像并准备配置
+## 0.6 服务器导入镜像并准备配置
 
 SSH 登录服务器后执行：
 
@@ -163,11 +209,15 @@ docker load -i medical-evaluate-images-all-20260822-01.tar
 ```bash
 cp docker-compose.yaml deploy.sh baota-reverse-proxy.conf \
   /opt/medical-evaluate/deploy/
+cp restore-demo-data.sh \
+  /opt/medical-evaluate/deploy/
 cp .env.production.example config.production.example.yaml \
+  /opt/medical-evaluate/deploy/
+cp medical-evaluate-demo-* DEMO-DATA.txt \
   /opt/medical-evaluate/deploy/
 
 cd /opt/medical-evaluate/deploy
-chmod 700 deploy.sh
+chmod 700 deploy.sh restore-demo-data.sh
 cp .env.production.example .env.production
 cp config.production.example.yaml config.production.yaml
 chmod 600 .env.production config.production.yaml
@@ -191,7 +241,30 @@ DASHSCOPE_API_KEY=真实模型密钥
 `IMAGE_TAG` 必须与本次导入的镜像标签完全一致。若写成 `latest`，
 服务器必须实际加载带有 `:latest` 标签的镜像。
 
-## 0.6 服务器启动容器
+## 0.7 恢复真实数据并启动容器
+
+这是破坏性恢复操作，只能用于空白演示服务器或明确允许覆盖的演示环境。
+确认目标服务器无须保留现有数据库后执行：
+
+```bash
+export DEMO_RESTORE_CONFIRM=YES
+./deploy.sh demo-restore
+unset DEMO_RESTORE_CONFIRM
+```
+
+恢复脚本会：
+
+1. 停止 API、前端和 Worker；
+2. 启动 PostgreSQL；
+3. 校验并恢复 PostgreSQL 数据；
+4. 恢复音频和签名到应用存储卷；
+5. 执行迁移兼容检查；
+6. 使用空 Redis 数据卷启动完整系统。
+
+恢复完成后，不要执行 `./deploy.sh bootstrap`，因为医护账号和患者数据已经
+从演示数据库恢复。
+
+如果只部署空数据库、不恢复本机数据，才执行普通启动：
 
 首次启动前先校验 Compose 配置：
 
@@ -250,7 +323,7 @@ unset BOOTSTRAP_STAFF_ROLE BOOTSTRAP_STAFF_DEPARTMENT
 
 `bootstrap` 会导入正式量表和交互规则，但不会创建演示患者。
 
-## 0.7 部署验证
+## 0.8 部署验证
 
 ```bash
 curl -I https://app.example.com
@@ -266,7 +339,7 @@ docker compose --env-file .env.production -f docker-compose.yaml ps
 确认浏览器开发者工具中 API、SSE 和 WebSocket 均使用当前 HTTPS 域名，
 不能出现 `localhost:8000`。
 
-## 0.8 更新、回滚和停止
+## 0.9 更新、回滚和停止
 
 发布新版本时，在本地使用新的 `ReleaseTag` 构建镜像并上传新发布目录。
 服务器执行：
@@ -301,7 +374,7 @@ sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=20260822-01/' .env.production
 
 禁止执行 `docker compose down -v`，除非确认要删除全部数据。
 
-## 0.9 数据备份
+## 0.10 数据备份
 
 至少定期备份：
 
@@ -318,7 +391,7 @@ docker compose --env-file .env.production -f docker-compose.yaml exec -T postgre
 
 备份文件必须存放到服务器之外，并定期验证可恢复性。
 
-## 0.10 生产安全要求
+## 0.11 生产安全要求
 
 - 禁止执行 `seed_demo`，禁止使用 `123456`。
 - 只开放 SSH、HTTP、HTTPS，数据库和 Redis 仅在 Docker 内部网络通信。
