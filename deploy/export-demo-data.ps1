@@ -91,8 +91,9 @@ foreach ($path in @($dumpPath, $storageArchivePath)) {
 
 foreach ($path in @($dumpPath, $storageArchivePath)) {
     $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
-    "$($hash.Hash.ToLowerInvariant())  $(Split-Path -Leaf $path)" |
-        Set-Content -LiteralPath "$path.sha256" -Encoding ASCII
+    $shaLine = "$($hash.Hash.ToLowerInvariant())  $(Split-Path -Leaf $path)`n"
+    $ascii = New-Object System.Text.ASCIIEncoding
+    [System.IO.File]::WriteAllText("$path.sha256", $shaLine, $ascii)
 }
 
 @"

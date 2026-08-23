@@ -77,8 +77,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $hash = Get-FileHash -LiteralPath $archivePath -Algorithm SHA256
-"$($hash.Hash.ToLowerInvariant())  $(Split-Path -Leaf $archivePath)" |
-    Set-Content -LiteralPath "$archivePath.sha256" -Encoding ASCII
+$shaLine = "$($hash.Hash.ToLowerInvariant())  $(Split-Path -Leaf $archivePath)`n"
+$ascii = New-Object System.Text.ASCIIEncoding
+[System.IO.File]::WriteAllText("$archivePath.sha256", $shaLine, $ascii)
 
 $runtimeFiles = @(
     'docker-compose.yaml',
