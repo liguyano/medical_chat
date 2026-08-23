@@ -116,9 +116,12 @@ docker save `
 $imageHash = (Get-FileHash `
   .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar `
   -Algorithm SHA256).Hash.ToLowerInvariant()
-"$imageHash  medical-evaluate-images-all-20260822-01.tar" |
-  Set-Content .\release\20260822-01\medical-evaluate-images-all-20260822-01.tar.sha256 `
-  -Encoding ASCII
+$ascii = New-Object System.Text.ASCIIEncoding
+[System.IO.File]::WriteAllText(
+  '.\release\20260822-01\medical-evaluate-images-all-20260822-01.tar.sha256',
+  "$imageHash  medical-evaluate-images-all-20260822-01.tar`n",
+  $ascii
+)
 ```
 
 ## 0.4 导出真实演示数据
