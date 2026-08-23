@@ -77,11 +77,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $hash = Get-FileHash -LiteralPath $archivePath -Algorithm SHA256
-$hash.Hash.ToLowerInvariant() | Set-Content -LiteralPath "$archivePath.sha256" -Encoding ASCII
+"$($hash.Hash.ToLowerInvariant())  $(Split-Path -Leaf $archivePath)" |
+    Set-Content -LiteralPath "$archivePath.sha256" -Encoding ASCII
 
 $runtimeFiles = @(
     'docker-compose.yaml',
     'deploy.sh',
+    'restore-demo-data.sh',
     'baota-reverse-proxy.conf',
     '.env.production.example',
     'config.production.example.yaml'

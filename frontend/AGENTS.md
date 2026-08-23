@@ -113,6 +113,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   直接暴露后端端口的前端路由。
 - 生产前端通过 `deploy/build-images.ps1` 构建为目标 Linux 平台镜像；构建时必须
   传入最终 HTTPS `PublicOrigin`，服务器不得重新执行 Next.js 构建。
+- 真实演示数据由后端 PostgreSQL 与 `backend/storage` 恢复，前端不得新增本地
+  患者资料、对话、签名或音频副本，也不得把真实数据包提交 Git 或放入静态资源目录。
+- 生产浏览器只访问宝塔 Nginx 提供的 HTTPS 同源地址；前端页面不能提供“浏览器
+  一键执行 Docker/恢复脚本”的逻辑，部署动作必须由服务器终端执行。
 
 ## 常用检查命令
 

@@ -21,6 +21,11 @@
   `app.commands.bootstrap_production` 并显式提供首个医护账号。
 - 生产后端由本地/CI 构建为指定平台镜像后上传服务器运行；服务器只执行
   `docker load` 和 Compose `--no-build`，不得依赖服务器源码或重新安装 Python 依赖。
+- 真实演示发布只迁移 PostgreSQL 和 `backend/storage`（音频、签名等持久化文件），
+  使用 `deploy/export-demo-data.ps1` 与 `deploy/restore-demo-data.sh`；恢复前必须
+  设置 `DEMO_RESTORE_CONFIRM=YES`，因为恢复会清理目标数据库对象。
+- Redis 运行态不作为演示数据迁移，生产服务器必须使用新的 Redis 数据卷，避免带入
+  登录会话、SSE 游标、Agent 临时状态和 Celery 队列。
 
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 

@@ -29,6 +29,7 @@ usage() {
   ps         查看服务状态
   logs       查看全部服务日志
   bootstrap  导入生产量表/规则并创建首个医护账号
+  demo-restore 恢复真实数据演示包（必须显式确认）
   config     校验 Compose 配置
 EOF
 }
@@ -102,6 +103,12 @@ case "${command}" in
             -e BOOTSTRAP_STAFF_DEPARTMENT \
             -e BOOTSTRAP_ROTATE_PASSWORD \
             api python -m app.commands.bootstrap_production
+        ;;
+    demo-restore)
+        require_files
+        require_application_images
+        DEMO_RESTORE_CONFIRM="${DEMO_RESTORE_CONFIRM:-}" \
+            ./restore-demo-data.sh
         ;;
     *)
         usage
