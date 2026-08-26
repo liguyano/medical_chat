@@ -1,0 +1,30 @@
+{
+  "id": "athens_insomnia",
+  "title": "阿森斯失眠量表（AIS）",
+  "source_file": "用户提供：量表统计.md（表 B.13）",
+  "status": "pending_review",
+  "form_type": "symptom_scale",
+  "instructions": "根据过去1个月内每周至少发生3次以上的情况回答。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 24},
+    "items": [
+      {"id": "sleep_induction", "label": "入睡时间", "patient_text": "过去1个月，如果每周至少出现3次，从关灯到睡着的时间通常属于哪种情况？", "options": [{"score": 0, "label": "没问题"}, {"score": 1, "label": "轻微延迟"}, {"score": 2, "label": "显著延迟"}, {"score": 3, "label": "严重延迟或没睡"}]},
+      {"id": "awakenings", "label": "夜间苏醒", "patient_text": "过去1个月，如果每周至少出现3次，您夜间醒来的情况通常属于哪种程度？", "options": [{"score": 0, "label": "没问题"}, {"score": 1, "label": "轻微"}, {"score": 2, "label": "显著"}, {"score": 3, "label": "严重或没睡"}]},
+      {"id": "final_awakening", "label": "早醒", "patient_text": "过去1个月，如果每周至少出现3次，您比期望时间早醒的情况通常属于哪种程度？", "options": [{"score": 0, "label": "没问题"}, {"score": 1, "label": "轻微提早"}, {"score": 2, "label": "显著提早"}, {"score": 3, "label": "严重提早或没睡"}]},
+      {"id": "total_sleep_duration", "label": "总睡眠时间", "patient_text": "过去1个月，如果每周至少出现3次，您的总睡眠时间通常属于哪种情况？", "options": [{"score": 0, "label": "没问题"}, {"score": 1, "label": "轻微不足"}, {"score": 2, "label": "显著不足"}, {"score": 3, "label": "严重不足或没睡"}]},
+      {"id": "sleep_quality", "label": "总睡眠质量", "patient_text": "过去1个月，如果每周至少出现3次，您对总体睡眠质量的感受通常如何？", "options": [{"score": 0, "label": "满意"}, {"score": 1, "label": "轻微不满"}, {"score": 2, "label": "显著不满"}, {"score": 3, "label": "严重不满或没睡"}]},
+      {"id": "daytime_mood", "label": "白天情绪", "patient_text": "过去1个月，如果每周至少出现3次，您的白天情绪通常属于哪种情况？", "options": [{"score": 0, "label": "正常"}, {"score": 1, "label": "轻微低落"}, {"score": 2, "label": "显著低落"}, {"score": 3, "label": "严重低落"}]},
+      {"id": "daytime_functioning", "label": "白天身体功能", "patient_text": "过去1个月，如果每周至少出现3次，睡眠对您白天体力或精神的影响通常属于哪种程度？", "options": [{"score": 0, "label": "体力和精神足够"}, {"score": 1, "label": "轻微影响"}, {"score": 2, "label": "显著影响"}, {"score": 3, "label": "严重影响"}]},
+      {"id": "daytime_sleepiness", "label": "白天思睡", "patient_text": "过去1个月，如果每周至少出现3次，您白天想睡觉的情况通常属于哪种程度？", "options": [{"score": 0, "label": "无"}, {"score": 1, "label": "轻微"}, {"score": 2, "label": "显著"}, {"score": 3, "label": "严重"}]}
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score >= 0 and total_score <= 3", "result": "无睡眠障碍"},
+    {"condition": "total_score >= 4 and total_score <= 6", "result": "可能有睡眠障碍"},
+    {"condition": "total_score >= 6", "result": "存在睡眠障碍"}
+  ],
+  "review_notes": [
+    "用户提供资料中4至6分与大于等于6分在6分处重叠，按原文保留，发布前需临床审核确认6分归类。"
+  ]
+}

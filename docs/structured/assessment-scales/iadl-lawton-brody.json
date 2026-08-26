@@ -1,0 +1,108 @@
+{
+  "id": "iadl_lawton_brody",
+  "title": "工具性日常生活活动能力量表（Lawton-Brody）",
+  "source_file": "用户提供：量表统计.md（表 B.2）",
+  "status": "pending_review",
+  "form_type": "ability_scale",
+  "instructions": "请根据老人最近1个月的实际情况回答。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 8},
+    "items": [
+      {
+        "id": "shopping",
+        "label": "上街购物",
+        "patient_text": "最近1个月，您上街购物通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "独立完成所有购物需求"},
+          {"score": 0, "label": "独立购买日常生活用品"},
+          {"score": 0, "label": "每次需人陪伴"},
+          {"score": 0, "label": "完全不上街"}
+        ]
+      },
+      {
+        "id": "transportation",
+        "label": "使用交通工具",
+        "patient_text": "最近1个月，您使用交通工具通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "独立乘坐公交或独自驾车"},
+          {"score": 1, "label": "独立乘出租车并安排路线，但不能乘公交"},
+          {"score": 1, "label": "他人帮助或陪伴下能乘公交"},
+          {"score": 0, "label": "仅能在陪伴下乘出租车"},
+          {"score": 0, "label": "不能外出"}
+        ]
+      },
+      {
+        "id": "food_preparation",
+        "label": "食物烹调",
+        "patient_text": "最近1个月，您准备和烹调食物通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "能独立计划、烹煮和摆设饭菜"},
+          {"score": 0, "label": "备好佐料会做"},
+          {"score": 0, "label": "会将做好的饭菜加热"},
+          {"score": 0, "label": "需别人煮好摆好"}
+        ]
+      },
+      {
+        "id": "housekeeping",
+        "label": "家务维持",
+        "patient_text": "最近1个月，您做家务通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "能做繁重家务或需偶尔协助"},
+          {"score": 1, "label": "能做简单家务，如洗碗、铺床"},
+          {"score": 1, "label": "能做简单家务但不整洁"},
+          {"score": 1, "label": "所有家务需协助"},
+          {"score": 0, "label": "完全不能做家务"}
+        ]
+      },
+      {
+        "id": "laundry",
+        "label": "洗衣服",
+        "patient_text": "最近1个月，您清洗衣物通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "自己清洗所有衣物"},
+          {"score": 1, "label": "只洗小件或部分需协助"},
+          {"score": 0, "label": "所有衣物由别人洗"}
+        ]
+      },
+      {
+        "id": "telephone_use",
+        "label": "使用电话",
+        "patient_text": "最近1个月，您使用电话通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "独立使用，包括查号、拨号"},
+          {"score": 1, "label": "仅可拨熟悉号码"},
+          {"score": 1, "label": "仅会接不会拨"},
+          {"score": 0, "label": "完全不会"}
+        ]
+      },
+      {
+        "id": "medication_management",
+        "label": "服用药物",
+        "patient_text": "最近1个月，您服用药物通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "能自己负责正确时间和剂量"},
+          {"score": 0, "label": "需要提醒或少许协助"},
+          {"score": 0, "label": "药物摆好后能自行服用"},
+          {"score": 0, "label": "不能自己服用"}
+        ]
+      },
+      {
+        "id": "financial_management",
+        "label": "处理财务",
+        "patient_text": "最近1个月，您处理财务通常能做到什么程度？",
+        "options": [
+          {"score": 1, "label": "独立处理财务"},
+          {"score": 1, "label": "能处理日常购买，但大宗交易或银行事务需协助"},
+          {"score": 0, "label": "不能处理财务"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score == 8", "result": "工具性日常生活活动能力正常"},
+    {"condition": "total_score >= 6 and total_score <= 7", "result": "工具性日常生活活动能力轻度依赖"},
+    {"condition": "total_score >= 3 and total_score <= 5", "result": "工具性日常生活活动能力中度依赖"},
+    {"condition": "total_score <= 2", "result": "工具性日常生活活动能力严重依赖"}
+  ]
+}

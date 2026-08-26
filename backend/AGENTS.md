@@ -61,7 +61,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `docs/后端详细设计方案.md` 的表结构章节仅保留指针，不再作为数据库依据。
 - 智能体运行态存 Redis（TTL），不映射为独立 `agent_states` 表。
 
-当前 ORM 已落地 33 张表，按领域分组：
+当前 ORM 已落地 34 张表，按领域分组：
 - `app/models/staff_account.py` — 医护端登录账号 `staff_account`
 - `app/models/patient_task.py` — `patient` / `patient_encounter` / `care_task`
 - `app/models/assessment_template.py` — 量表配置 7 表
@@ -70,8 +70,9 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - `app/models/quality_review.py` — AI 整体质量评价 4 表
 - `app/models/education.py` — 宣教方案、版本与内容单元 3 表
 - `app/models/nursing_plan.py` — 患者画像快照、护理计划与计划明细 3 表
+- `app/models/assessment_report.py` — 版本化评估报告 1 表
 - Alembic 初始迁移：`26533d4669bd_initial_domain_model_batch_a.py`
-- 当前迁移头：`20260820_patient_management_event_idempotency.py`
+- 当前迁移头：`20260826_assessment_report.py`
 
 
 ## 项目架构
@@ -171,6 +172,8 @@ from medagent.configs.agent_config import get_agent_config
 - `app/managers/assessment_catalog_importer.py` 幂等导入
   `docs/structured/assessment-scales`。源文件为 `pending_review` 时必须保持“审核中”，
   临床审核前禁止直接发布。
+- 结构化量表字段可声明 `patient_text`、`original_text`、`nurse_text` 和
+  `validation_rule`；导入器优先保留显式患者问法，未声明时才生成保守的默认问句。
 - 所有模型（语言 + 语音）统一登记在 `config.yaml` 的 `models` 列表，用 `type: language|voice`
   区分类别；`agent_models` 绑定支持简写（`agent: model_name` → 语言模型）或详写
   （`agent: {language: .., voice: ..}`）。Schedule Agent 通过
@@ -327,6 +330,15 @@ from medagent.configs.agent_config import get_agent_config
   `extraction_agent`；结构化生成必须关闭 thinking，并通过 Pydantic JSON 校验。
 - 任务进入 `pending_review` 后异步派发护理计划生成；医护端也可调用同步生成接口。
   护士确认前必须处理全部计划项，且不得全部拒绝。
+
+## 评估报告
+
+- `assessment_report` 按任务和版本保存量表事实快照及 LLM 综合内容；重新生成新增版本，
+  不覆盖历史报告。
+- 评估报告只能在护士最终复核后生成；量表分数、风险结果和答案以快照为准，LLM 只负责
+  综合摘要、重点发现、护理关注点和复评建议。
+- `GET/POST /api/tasks/{task_ref}/report` 提供查询、生成和确认；前端报告页不得把模型
+  摘要当作量表原始分数展示。
 
 ## 传统问卷评估边界
 

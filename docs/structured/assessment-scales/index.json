@@ -2,7 +2,7 @@
   "schema_version": "draft-2026-08-13",
   "status": "pending_review",
   "source_directory": "docs/文档/评估表",
-  "generated_at": "2026-08-13",
+  "generated_at": "2026-08-26",
   "forms": [
     {
       "id": "nrs2002",
@@ -38,6 +38,83 @@
       "source_file": "日常生活能力(ADL)评价表GD(1.0).pdf",
       "structured_file": "adl.json",
       "form_type": "ability_scale"
+    },
+    {
+      "id": "iadl_lawton_brody",
+      "title": "工具性日常生活活动能力量表（Lawton-Brody）",
+      "source_file": "量表统计.md（表 B.2）",
+      "structured_file": "iadl-lawton-brody.json",
+      "form_type": "ability_scale"
+    },
+    {
+      "id": "simple_vision",
+      "title": "视力简易评估表",
+      "source_file": "量表统计.md（表 B.4）",
+      "structured_file": "simple-vision.json",
+      "form_type": "function_scale"
+    },
+    {
+      "id": "visual_function",
+      "title": "视觉功能简易评估表",
+      "source_file": "量表统计.md（表 B.5）",
+      "structured_file": "visual-function.json",
+      "form_type": "function_scale"
+    },
+    {
+      "id": "simple_hearing",
+      "title": "听力简易评估表",
+      "source_file": "量表统计.md（表 B.6）",
+      "structured_file": "simple-hearing.json",
+      "form_type": "function_scale"
+    },
+    {
+      "id": "home_environment_screening",
+      "title": "居家环境筛查表",
+      "source_file": "量表统计.md（表 B.9）",
+      "structured_file": "home-environment-screening.json",
+      "form_type": "risk_scale"
+    },
+    {
+      "id": "frail",
+      "title": "FRAIL 衰弱量表",
+      "source_file": "量表统计.md（表 B.10）",
+      "structured_file": "frail.json",
+      "form_type": "risk_scale"
+    },
+    {
+      "id": "iciq_sf",
+      "title": "国际尿失禁咨询委员会尿失禁问卷表简表（ICIQ-SF）",
+      "source_file": "量表统计.md（表 B.11）",
+      "structured_file": "iciq-sf.json",
+      "form_type": "symptom_scale"
+    },
+    {
+      "id": "constipation_symptoms",
+      "title": "便秘症状评估表",
+      "source_file": "量表统计.md（表 B.12）",
+      "structured_file": "constipation-symptoms.json",
+      "form_type": "symptom_scale"
+    },
+    {
+      "id": "athens_insomnia",
+      "title": "阿森斯失眠量表（AIS）",
+      "source_file": "量表统计.md（表 B.13）",
+      "structured_file": "athens-insomnia.json",
+      "form_type": "symptom_scale"
+    },
+    {
+      "id": "chronic_pain_nrs",
+      "title": "慢性疼痛数字评定量表（NRS）",
+      "source_file": "量表统计.md（表 B.14）",
+      "structured_file": "chronic-pain-nrs.json",
+      "form_type": "symptom_scale"
+    },
+    {
+      "id": "mna_sf",
+      "title": "微营养评定法简表（MNA-SF）",
+      "source_file": "量表统计.md（表 B.19）",
+      "structured_file": "mna-sf.json",
+      "form_type": "risk_scale"
     }
   ]
 }

@@ -463,7 +463,7 @@ export default function TaskDetailPage() {
                       )}
                       <Button
                         variant="outline"
-                        onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
+                        onClick={() => router.push(`/nurse/tasks/${task.id}/report`)}
                         className="flex-1"
                       >
                         对比量表

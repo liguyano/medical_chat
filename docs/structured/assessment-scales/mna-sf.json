@@ -1,0 +1,85 @@
+{
+  "id": "mna_sf",
+  "title": "微营养评定法简表（MNA-SF）",
+  "source_file": "用户提供：量表统计.md（表 B.19）",
+  "status": "pending_review",
+  "form_type": "risk_scale",
+  "instructions": "评估食量、体重、活动、疾病、精神心理和BMI；无法取得BMI时使用小腿围替代。",
+  "scoring": {
+    "formula": "sum(first_five_item_scores) + bmi_or_calf_score",
+    "score_range": {"min": 0, "max": 14},
+    "items": [
+      {
+        "id": "food_intake_decline",
+        "label": "食量减少",
+        "patient_text": "近期您的食量是否减少？最符合的是哪一种情况？",
+        "options": [
+          {"score": 0, "label": "严重减少"},
+          {"score": 1, "label": "中度减少"},
+          {"score": 2, "label": "没有改变"}
+        ]
+      },
+      {
+        "id": "weight_loss",
+        "label": "体重丢失",
+        "patient_text": "近期您的体重下降情况最符合下面哪一项？",
+        "options": [
+          {"score": 0, "label": "下降超过3公斤"},
+          {"score": 1, "label": "不知道"},
+          {"score": 2, "label": "下降1至3公斤"},
+          {"score": 3, "label": "没有下降"}
+        ]
+      },
+      {
+        "id": "mobility",
+        "label": "活动能力",
+        "patient_text": "您目前的活动能力最符合下面哪一项？",
+        "options": [
+          {"score": 0, "label": "卧床或需要轮椅"},
+          {"score": 1, "label": "能下床但不外出"},
+          {"score": 2, "label": "能外出"}
+        ]
+      },
+      {
+        "id": "acute_disease_or_stress",
+        "label": "心理创伤或急性病",
+        "patient_text": "近期您是否经历过心理创伤或急性疾病？",
+        "options": [
+          {"id": "yes", "score": 0, "label": "是"},
+          {"id": "no", "score": 2, "label": "否"}
+        ]
+      },
+      {
+        "id": "neuropsychological_problems",
+        "label": "精神心理情况",
+        "patient_text": "您的精神心理情况最符合下面哪一项？",
+        "options": [
+          {"score": 0, "label": "严重痴呆或抑郁"},
+          {"score": 1, "label": "轻度痴呆"},
+          {"score": 2, "label": "没有相关问题"}
+        ]
+      },
+      {
+        "id": "bmi_or_calf_circumference",
+        "label": "BMI或替代小腿围",
+        "patient_text": "如果知道BMI，请选择对应范围；如果无法取得BMI，请按小腿围选择对应项。",
+        "options": [
+          {"id": "bmi_lt_19", "score": 0, "label": "BMI小于19"},
+          {"id": "bmi_19_to_lt_21", "score": 1, "label": "BMI为19至小于21"},
+          {"id": "bmi_21_to_lt_23", "score": 2, "label": "BMI为21至小于23"},
+          {"id": "bmi_ge_23", "score": 3, "label": "BMI大于或等于23"},
+          {"id": "calf_lt_31", "score": 0, "label": "无法取得BMI且小腿围小于31厘米"},
+          {"id": "calf_ge_31", "score": 3, "label": "无法取得BMI且小腿围大于或等于31厘米"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score <= 11", "result": "提示有营养不良风险"},
+    {"condition": "total_score >= 12", "result": "未提示营养不良风险"}
+  ],
+  "review_notes": [
+    "BMI与小腿围为替代关系，结构化为同一道互斥单选题，避免两项重复计分。",
+    "用户资料仅明确总分小于等于11分提示风险；大于等于12分结果为互补表达。"
+  ]
+}

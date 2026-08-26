@@ -1,0 +1,35 @@
+{
+  "id": "home_environment_screening",
+  "title": "居家环境筛查表",
+  "source_file": "用户提供：量表统计.md（表 B.9）",
+  "status": "pending_review",
+  "form_type": "risk_scale",
+  "instructions": "根据患者目前居住环境回答。每题是得1分，否得0分；得分越低，居家环境风险越大。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 14},
+    "items": [
+      {"id": "passage_clear", "label": "通道无杂乱物品", "patient_text": "您家里的通道是否没有杂乱物品，能够顺畅通行？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "home_passage_hazard"}]},
+      {"id": "floor_good_condition", "label": "地板状况良好", "patient_text": "您家里的地板状况是否良好，没有破损或明显高低差？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "floor_condition_hazard"}]},
+      {"id": "floor_non_slip", "label": "地板防滑", "patient_text": "您家里的地板是否防滑？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "slippery_floor"}]},
+      {"id": "fixed_floor_mat", "label": "地板有固定防滑垫", "patient_text": "您家里的地板上是否有固定、不易滑动的防滑垫？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "missing_floor_mat"}]},
+      {"id": "indoor_lighting_adequate", "label": "室内灯光足够看清物品", "patient_text": "家里灯光的亮度是否足够让您看清东西？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "poor_indoor_lighting"}]},
+      {"id": "bed_light_accessible", "label": "床上开关灯方便", "patient_text": "您躺在床上时开关灯是否方便？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "bed_light_inaccessible"}]},
+      {"id": "outdoor_night_lighting", "label": "夜间路灯和楼道照明良好", "patient_text": "晚上家门外的路灯和楼道照明是否良好？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "poor_outdoor_lighting"}]},
+      {"id": "bathroom_grab_bars", "label": "淋浴室和浴池旁有扶手", "patient_text": "您家淋浴室或浴池旁是否装有扶手？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "missing_bathroom_grab_bar"}]},
+      {"id": "fixed_bathroom_mat", "label": "浴池和浴室有固定防滑垫", "patient_text": "您家浴池或浴室里是否有固定的防滑垫？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "missing_bathroom_mat"}]},
+      {"id": "toilet_near_bathroom", "label": "厕所接近浴室", "patient_text": "您家的厕所是否接近浴室，途中不需要走很远？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "toilet_access_hazard"}]},
+      {"id": "indoor_stair_handrails", "label": "室内楼梯均有可用扶手", "patient_text": "如果家里有室内楼梯，楼梯旁是否都有可用的扶手？", "options": [{"id": "yes", "label": "是或家中没有室内楼梯", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "missing_indoor_handrail"}]},
+      {"id": "outdoor_stair_handrails", "label": "室外楼梯均有可用扶手", "patient_text": "如果家门外有楼梯，楼梯旁是否都有可用的扶手？", "options": [{"id": "yes", "label": "是或家门外没有楼梯", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "missing_outdoor_handrail"}]},
+      {"id": "stair_edges_visible", "label": "楼梯边缘清晰", "patient_text": "您家及家门外楼梯的边缘是否清晰、容易辨认？", "options": [{"id": "yes", "label": "是或没有楼梯", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "unclear_stair_edges"}]},
+      {"id": "surrounding_road_good", "label": "房屋周围路况良好", "patient_text": "您家房屋周围的路况是否良好，行走时没有明显障碍？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0, "risk_tag": "surrounding_road_hazard"}]}
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score >= 0 and total_score <= 14", "result": "得分越低，表明居家环境风险越大"}
+  ],
+  "review_notes": [
+    "源表未给出风险等级分界值，不额外补充分级阈值。",
+    "对无楼梯场景增加不适用等价选项，避免因住房结构不适用而错误扣分。"
+  ]
+}

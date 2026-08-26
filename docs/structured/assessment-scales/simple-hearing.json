@@ -1,0 +1,35 @@
+{
+  "id": "simple_hearing",
+  "title": "听力简易评估表",
+  "source_file": "用户提供：量表统计.md（表 B.6）",
+  "status": "pending_review",
+  "form_type": "function_scale",
+  "instructions": "若平日佩戴助听器，请在佩戴助听器的情况下评估。五个描述为互斥等级，对话中选择最符合的一项。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 4},
+    "items": [
+      {
+        "id": "hearing_level",
+        "label": "当前听力水平",
+        "patient_text": "在平日佩戴助听器的情况下，下面哪一项最符合您目前的听力？",
+        "options": [
+          {"score": 4, "label": "可正常交谈，能听到电视、电话和门铃的声音"},
+          {"score": 3, "label": "轻声说话或说话距离超过2米时听不清"},
+          {"score": 2, "label": "正常交流有些困难，需在安静环境或大声说话才能听到"},
+          {"score": 1, "label": "讲话者大声或缓慢说话时只能部分听见"},
+          {"score": 0, "label": "完全听不见"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score == 4", "result": "听力正常"},
+    {"condition": "total_score == 3", "result": "听力下降"},
+    {"condition": "total_score >= 1 and total_score <= 2", "result": "听力障碍"},
+    {"condition": "total_score == 0", "result": "完全失聪"}
+  ],
+  "review_notes": [
+    "源表以5行符合项描述同一听力等级；结构化为单选题，避免多个互斥等级同时计分。"
+  ]
+}

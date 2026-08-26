@@ -1,0 +1,38 @@
+{
+  "id": "chronic_pain_nrs",
+  "title": "慢性疼痛数字评定量表（NRS）",
+  "source_file": "用户提供：量表统计.md（表 B.14）",
+  "status": "pending_review",
+  "form_type": "symptom_scale",
+  "instructions": "请患者选择最符合当前疼痛程度的0至10分描述。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 10},
+    "items": [
+      {
+        "id": "current_pain_intensity",
+        "label": "当前疼痛程度",
+        "patient_text": "请按0到10分评价您现在的疼痛程度，0分表示无痛，10分表示极度疼痛。下面哪一项最符合？",
+        "options": [
+          {"score": 0, "label": "0分：无疼痛"},
+          {"score": 1, "label": "1分：翻身、咳嗽或深呼吸时感到疼痛"},
+          {"score": 2, "label": "2分：翻身或咳嗽时感到疼痛，静息时无疼痛"},
+          {"score": 3, "label": "3分：咳嗽或深呼吸时感到疼痛，静息时无疼痛"},
+          {"score": 4, "label": "4分：静息时有间歇疼痛，开始影响生活质量"},
+          {"score": 5, "label": "5分：静息时有持续疼痛"},
+          {"score": 6, "label": "6分：静息时疼痛较重"},
+          {"score": 7, "label": "7分：疼痛较重、翻转不安、无法入睡"},
+          {"score": 8, "label": "8分：持续疼痛难忍、全身大汗"},
+          {"score": 9, "label": "9分：剧烈疼痛、无法忍受"},
+          {"score": 10, "label": "10分：极度疼痛"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score == 0", "result": "无疼痛"},
+    {"condition": "total_score >= 1 and total_score <= 3", "result": "轻度疼痛"},
+    {"condition": "total_score >= 4 and total_score <= 6", "result": "中度疼痛"},
+    {"condition": "total_score >= 7 and total_score <= 10", "result": "重度疼痛"}
+  ]
+}

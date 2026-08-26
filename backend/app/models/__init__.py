@@ -7,6 +7,7 @@ from app.models.assessment_execution import (
     AssessmentScore,
     AssessmentSubmission,
 )
+from app.models.assessment_report import AssessmentReport
 from app.models.assessment_template import (
     AssessmentActionDefinition,
     AssessmentOption,
@@ -70,6 +71,7 @@ __all__ = [
     "AssessmentOption",
     "AssessmentQuestion",
     "AssessmentReview",
+    "AssessmentReport",
     "AssessmentRule",
     "AssessmentScale",
     "AssessmentScaleVersion",

@@ -1,0 +1,46 @@
+{
+  "id": "visual_function",
+  "title": "视觉功能简易评估表",
+  "source_file": "用户提供：量表统计.md（表 B.5）",
+  "status": "pending_review",
+  "form_type": "function_scale",
+  "instructions": "每题回答是得0分，回答否得1分。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 3},
+    "items": [
+      {
+        "id": "difficulty_reading_walking_tv",
+        "label": "阅读、行走和看电视时觉得吃力",
+        "patient_text": "您在阅读、行走或看电视时会觉得吃力吗？",
+        "options": [
+          {"id": "yes", "value": "是", "score": 0, "label": "是", "risk_tag": "possible_cataract"},
+          {"id": "no", "value": "否", "score": 1, "label": "否"}
+        ]
+      },
+      {
+        "id": "visual_field_obstruction",
+        "label": "视物遮挡或视野缺损",
+        "patient_text": "您看东西时会觉得有东西遮挡，或者有一部分看不见吗？",
+        "options": [
+          {"id": "yes", "value": "是", "score": 0, "label": "是", "risk_tag": "possible_cataract_or_glaucoma"},
+          {"id": "no", "value": "否", "score": 1, "label": "否"}
+        ]
+      },
+      {
+        "id": "visual_distortion",
+        "label": "视物变形或扭曲",
+        "patient_text": "您看东西时会觉得实物变形或扭曲吗？",
+        "options": [
+          {"id": "yes", "value": "是", "score": 0, "label": "是", "risk_tag": "possible_macular_degeneration"},
+          {"id": "no", "value": "否", "score": 1, "label": "否"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score == 3", "result": "视觉功能良好"},
+    {"condition": "total_score == 2", "result": "视觉功能较差"},
+    {"condition": "total_score <= 1", "result": "视觉功能差"}
+  ]
+}

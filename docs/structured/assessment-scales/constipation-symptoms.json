@@ -1,0 +1,63 @@
+{
+  "id": "constipation_symptoms",
+  "title": "便秘症状评估表",
+  "source_file": "用户提供：量表统计.md（表 B.12）",
+  "status": "pending_review",
+  "form_type": "symptom_scale",
+  "instructions": "请患者描述病程、症状和有症状时的粪便性状。结果由医务人员综合判断。",
+  "sections": [
+    {
+      "id": "course",
+      "title": "病程",
+      "fields": [
+        {"id": "course_duration", "label": "症状开始至今的持续时间", "type": "text", "patient_text": "这些排便症状从开始到现在大约持续了多久？请按年或月说明。"},
+        {"id": "symptomatic_duration", "label": "其中有症状的累计时间", "type": "text", "patient_text": "在这段病程中，实际出现这些症状的时间累计大约有多久？请按年或月说明。"}
+      ]
+    },
+    {
+      "id": "symptoms",
+      "title": "症状",
+      "fields": [
+        {
+          "id": "constipation_features",
+          "label": "便秘相关症状",
+          "type": "multiple_choice",
+          "patient_text": "您是否有以下排便情况？可以选择多项。",
+          "options": [
+            {"id": "reduced_frequency", "label": "排便次数减少，每周少于3次"},
+            {"id": "incomplete_evacuations", "label": "排便不尽感"},
+            {"id": "anorectal_obstruction", "label": "肛门直肠堵塞感"},
+            {"id": "prolonged_defecation", "label": "排便费时"},
+            {"id": "manual_maneuvers", "label": "需要手法辅助"},
+            {"id": "abdominal_pain_relief", "label": "腹痛或不适，排便后缓解"},
+            {"id": "none", "label": "以上情况均没有"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stool_form",
+      "title": "粪便性状",
+      "fields": [
+        {
+          "id": "stool_form",
+          "label": "有症状时的粪便形状",
+          "type": "single_choice",
+          "patient_text": "有症状时，您的粪便形状通常最接近下面哪一种？",
+          "options": [
+            {"id": "hard_lumps", "label": "干球状，坚果样"},
+            {"id": "hard_sausage", "label": "腊肠样，很硬"},
+            {"id": "cracked_sausage", "label": "腊肠样，表面有裂缝"},
+            {"id": "smooth_soft", "label": "腊肠或蛇状，光滑柔软"},
+            {"id": "soft_blobs", "label": "柔软团块，边缘清楚"},
+            {"id": "mushy", "label": "松散碎片或糊状"},
+            {"id": "watery", "label": "水样便"}
+          ]
+        }
+      ]
+    }
+  ],
+  "review_notes": [
+    "该表没有患者自评总分，医务人员需结合病程、症状和粪便性状判断是否便秘及类型。"
+  ]
+}

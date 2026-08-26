@@ -8,6 +8,7 @@ import { getVisibleQuestions } from '@/lib/mock/assessment';
 import type {
   AssessmentScaleConfigDetail,
   AssessmentScaleConfigSummary,
+  AssessmentReport,
   CareTask,
   EducationMaterialConfig,
   InteractionRuleConfig,
@@ -154,6 +155,61 @@ const mockScaleDetails: AssessmentScaleConfigDetail[] = mockScales.map(
 );
 
 const mockNursingPlans = new Map<string, NursingPlan>();
+const mockAssessmentReports = new Map<string, AssessmentReport[]>();
+
+function reportWithHistory(
+  report: AssessmentReport,
+  history: AssessmentReport[]
+): AssessmentReport {
+  return {
+    ...report,
+    versions: history.map((item) => ({
+      id: item.id,
+      versionNo: item.versionNo,
+      reportStatus: item.reportStatus,
+      generatedBy: item.generatedBy,
+      generatedAt: item.generatedAt,
+      confirmedBy: item.confirmedBy,
+      confirmedAt: item.confirmedAt,
+    })),
+  };
+}
+
+function buildMockAssessmentReport(taskId: string, versionNo = 1): AssessmentReport {
+  const now = new Date().toISOString();
+  return {
+    id: versionNo,
+    versionNo,
+    reportStatus: 'generated',
+    generatedBy: 'ai:demo',
+    generatedAt: now,
+    confirmedBy: null,
+    confirmedAt: null,
+    reportNo: `REPORT-DEMO-${taskId}-${versionNo}`,
+    taskId: Number(taskId) || 1,
+    sourceSubmissionIds: [1],
+    sourceSnapshot: {
+      assessments: [
+        {
+          scale_code: 'demo_scale',
+          scale_name: '演示量表',
+          result_summary: '需要关注',
+          risk_level: 'medium',
+          answers: [{ question: '演示评估项', value: '存在风险', abnormal: true }],
+          scores: [{ score_name: '总分', score_value: 6, risk_level: 'medium' }],
+        },
+      ],
+    },
+    reportContent: {
+      overallSummary: '这是本地演示评估报告，正式 API 模式会根据已保存的量表结果生成。',
+      keyFindings: ['患者完成本次量表评估', '请结合护士复核结果查看具体异常项'],
+      riskOverview: ['存在需要持续关注的中等风险提示'],
+      nursingFocus: ['关注患者安全和重点风险变化'],
+      followUpSuggestions: ['按护理计划进行复评并记录变化'],
+    },
+    versions: [],
+  };
+}
 
 function buildMockNursingPlan(taskId: string): NursingPlan {
   const now = new Date().toISOString();
@@ -885,6 +941,36 @@ export class MockCareRepository implements CareRepository {
     await wait(signal);
     const current = mockNursingPlans.get(taskId);
     return structuredClone(current ?? null);
+  }
+
+  async getAssessmentReport(taskId: string, versionNo?: number, signal?: AbortSignal) {
+    await wait(signal);
+    const history = mockAssessmentReports.get(taskId) ?? [];
+    const report = versionNo === undefined
+      ? history[0]
+      : history.find((item) => item.versionNo === versionNo);
+    return report ? structuredClone(reportWithHistory(report, history)) : null;
+  }
+
+  async generateAssessmentReport(taskId: string, force = false, signal?: AbortSignal) {
+    await wait(signal);
+    const history = mockAssessmentReports.get(taskId) ?? [];
+    const current = history[0];
+    if (current && !force) return structuredClone(reportWithHistory(current, history));
+    const report = buildMockAssessmentReport(taskId, (current?.versionNo ?? 0) + 1);
+    const nextHistory = [report, ...history];
+    mockAssessmentReports.set(taskId, nextHistory);
+    return structuredClone(reportWithHistory(report, nextHistory));
+  }
+
+  async confirmAssessmentReport(taskId: string, signal?: AbortSignal) {
+    await wait(signal);
+    const history = mockAssessmentReports.get(taskId) ?? [];
+    const current = history[0] ?? buildMockAssessmentReport(taskId);
+    const confirmed = { ...current, reportStatus: 'confirmed', confirmedBy: 1, confirmedAt: new Date().toISOString() };
+    const nextHistory = [confirmed, ...history.slice(1)];
+    mockAssessmentReports.set(taskId, nextHistory);
+    return structuredClone(reportWithHistory(confirmed, nextHistory));
   }
 
   async generateNursingPlan(

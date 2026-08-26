@@ -115,7 +115,10 @@ def _select_source_submission(
         ).all()
     )
     candidates = [
-        row for row in rows if row.submission_type in _SUBMISSION_PRIORITY
+        row
+        for row in rows
+        if row.submission_type in _SUBMISSION_PRIORITY
+        and row.answered_question_count > 0
     ]
     if not candidates:
         return None
@@ -257,18 +260,50 @@ def build_generation_source(
         ).all()
     )
     scores_by_submission: dict[int, list[dict[str, Any]]] = defaultdict(list)
+
+    def score_payload(score: AssessmentScore) -> dict[str, Any]:
+        """转换得分快照，并保留得分来源提交。"""
+        return {
+            "score_id": score.id,
+            "source_submission_id": score.submission_id,
+            "score_code": score.score_code,
+            "score_name": score.score_name,
+            "score_value": _scalar_value(score.score_value),
+            "max_score": _scalar_value(score.max_score),
+            "risk_level": score.risk_level,
+            "interpretation": score.interpretation,
+        }
+
     for score in score_rows:
-        scores_by_submission[score.submission_id].append(
-            {
-                "score_id": score.id,
-                "score_code": score.score_code,
-                "score_name": score.score_name,
-                "score_value": _scalar_value(score.score_value),
-                "max_score": _scalar_value(score.max_score),
-                "risk_level": score.risk_level,
-                "interpretation": score.interpretation,
-            }
+        scores_by_submission[score.submission_id].append(score_payload(score))
+
+    # 最终确认提交只保存护士确认后的答案；分数沿用同量表最近一次已计算结果。
+    for submission in source_submissions:
+        if scores_by_submission[submission.id]:
+            continue
+        fallback_scores = list(
+            db.scalars(
+                select(AssessmentScore)
+                .join(
+                    AssessmentSubmission,
+                    AssessmentSubmission.id == AssessmentScore.submission_id,
+                )
+                .where(
+                    AssessmentSubmission.assessment_instance_id
+                    == submission.assessment_instance_id,
+                    AssessmentSubmission.deleted == 0,
+                    AssessmentScore.deleted == 0,
+                )
+                .order_by(AssessmentSubmission.id.desc(), AssessmentScore.id.asc())
+            ).all()
         )
+        if fallback_scores:
+            latest_source_id = fallback_scores[0].submission_id
+            scores_by_submission[submission.id] = [
+                score_payload(score)
+                for score in fallback_scores
+                if score.submission_id == latest_source_id
+            ]
 
     session = db.scalar(
         select(InteractionSession)
@@ -281,16 +316,20 @@ def build_generation_source(
     assessments = []
     for submission in source_submissions:
         scale = scale_by_instance[submission.assessment_instance_id]
+        scores = scores_by_submission[submission.id]
+        first_score = scores[0] if scores else {}
         assessments.append(
             {
                 "scale_code": scale.scale_code,
                 "scale_name": scale.scale_name,
                 "submission_id": submission.id,
                 "submission_type": submission.submission_type,
-                "result_summary": submission.result_summary,
-                "risk_level": submission.risk_level,
+                "result_summary": submission.result_summary
+                or first_score.get("interpretation"),
+                "risk_level": submission.risk_level
+                or first_score.get("risk_level"),
                 "answers": answers_by_submission[submission.id],
-                "scores": scores_by_submission[submission.id],
+                "scores": scores,
             }
         )
     source = {

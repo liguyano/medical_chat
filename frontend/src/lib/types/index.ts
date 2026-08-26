@@ -4,6 +4,7 @@
 
 export * from './systemConfig';
 export * from './nursingPlan';
+export * from './assessmentReport';
 
 // 用户角色
 export type UserRole = 'nurse' | 'patient';

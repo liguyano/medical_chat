@@ -3,6 +3,7 @@
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models import (
     AssessmentAnswer,
     AssessmentAnswerOption,
+    AssessmentRule,
     AssessmentScore,
     AssessmentSubmission,
 )
@@ -424,9 +426,6 @@ class ExtractionResultWriter:
         """
         with self._new_session() as db:
             try:
-                # TODO: 从 scale_version 加载 scoring_rules（批次B实现）
-                # 这里简化处理：汇总所有 clinical_score
-
                 answers = (
                     db.execute(
                         select(AssessmentAnswer).where(
@@ -440,8 +439,52 @@ class ExtractionResultWriter:
 
                 total_score = sum(float(ans.clinical_score or 0.0) for ans in answers)
 
-                # 简化风险等级判断（实际需要按量表规则）
-                if total_score >= 10:
+                rules = db.scalars(
+                    select(AssessmentRule)
+                    .where(
+                        AssessmentRule.scale_version_id == scale_version_id,
+                        AssessmentRule.deleted == 0,
+                        AssessmentRule.status.in_(("启用", "active", "enabled")),
+                    )
+                    .order_by(AssessmentRule.priority.asc(), AssessmentRule.id.asc())
+                ).all()
+                result_summary = None
+                for rule in rules:
+                    expression = (rule.condition_expression or {}).get("expression")
+                    if not isinstance(expression, str):
+                        continue
+                    clauses = re.split(r"\s+and\s+", expression.strip(), flags=re.IGNORECASE)
+                    matches = True
+                    for clause in clauses:
+                        match = re.fullmatch(
+                            r"\s*total_score\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*",
+                            clause,
+                        )
+                        if not match:
+                            matches = False
+                            break
+                        threshold = float(match.group(2))
+                        operator = match.group(1)
+                        matches = {
+                            ">=": total_score >= threshold,
+                            "<=": total_score <= threshold,
+                            "==": total_score == threshold,
+                            ">": total_score > threshold,
+                            "<": total_score < threshold,
+                        }[operator]
+                        if not matches:
+                            break
+                    if matches:
+                        payload = rule.result_payload or {}
+                        result_summary = str(
+                            payload.get("result") or payload.get("summary") or ""
+                        ) or None
+                        break
+
+                # 有量表解释规则时保留规则结论，不强行套用跨量表风险分段。
+                if rules:
+                    risk_level = None
+                elif total_score >= 10:
                     risk_level = "high_risk"
                 elif total_score >= 5:
                     risk_level = "medium_risk"
@@ -467,11 +510,18 @@ class ExtractionResultWriter:
                     score_type="total",
                     score_value=Decimal(str(total_score)),
                     risk_level=risk_level,
+                    interpretation=result_summary,
                     calculation_detail=calculation_detail,
                     creator=creator,
                 )
 
                 db.add(score)
+                submission = db.get(AssessmentSubmission, submission_id)
+                if submission is not None:
+                    submission.total_score = Decimal(str(total_score))
+                    submission.risk_level = risk_level
+                    submission.result_summary = result_summary
+                    submission.updator = creator
                 db.commit()
                 db.refresh(score)
 

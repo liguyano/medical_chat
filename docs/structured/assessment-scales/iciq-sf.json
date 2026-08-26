@@ -1,0 +1,78 @@
+{
+  "id": "iciq_sf",
+  "title": "国际尿失禁咨询委员会尿失禁问卷表简表（ICIQ-SF）",
+  "source_file": "用户提供：量表统计.md（表 B.11）",
+  "status": "pending_review",
+  "form_type": "symptom_scale",
+  "instructions": "请根据最近4周的情况回答。总分为漏尿频次、漏尿量和生活影响三项之和。",
+  "scoring": {
+    "formula": "leakage_frequency + leakage_amount + daily_life_impact",
+    "score_range": {"min": 0, "max": 21},
+    "items": [
+      {
+        "id": "leakage_frequency",
+        "label": "最近4周漏尿频次",
+        "patient_text": "最近4周，您发生漏尿的频率大约是多少？",
+        "options": [
+          {"score": 0, "label": "从不"},
+          {"score": 1, "label": "大约每周1次或更少"},
+          {"score": 2, "label": "每周2至3次"},
+          {"score": 3, "label": "大约每天1次"},
+          {"score": 4, "label": "每天多于1次"},
+          {"score": 5, "label": "一直漏尿"}
+        ]
+      },
+      {
+        "id": "leakage_amount",
+        "label": "最近4周通常漏尿量",
+        "patient_text": "最近4周，您每次通常会漏多少尿？",
+        "options": [
+          {"score": 0, "label": "没有"},
+          {"score": 2, "label": "少量"},
+          {"score": 4, "label": "中等量"},
+          {"score": 6, "label": "大量"}
+        ]
+      },
+      {
+        "id": "daily_life_impact",
+        "label": "漏尿对日常生活的影响程度",
+        "patient_text": "如果0分表示完全没有影响、10分表示影响极重，最近4周漏尿对您日常生活的影响是几分？",
+        "options": [
+          {"score": 0, "label": "0分，无影响"},
+          {"score": 1, "label": "1分"},
+          {"score": 2, "label": "2分"},
+          {"score": 3, "label": "3分"},
+          {"score": 4, "label": "4分"},
+          {"score": 5, "label": "5分"},
+          {"score": 6, "label": "6分"},
+          {"score": 7, "label": "7分"},
+          {"score": 8, "label": "8分"},
+          {"score": 9, "label": "9分"},
+          {"score": 10, "label": "10分，影响极重"}
+        ]
+      },
+      {
+        "id": "leakage_situations",
+        "label": "发生漏尿的情形",
+        "type": "multiple_choice",
+        "patient_text": "最近4周，您通常会在什么情况下发生漏尿？可以选择多项。",
+        "options": [
+          {"id": "never", "label": "从未漏尿"},
+          {"id": "before_toilet", "label": "未到达厕所前"},
+          {"id": "cough_or_sneeze", "label": "咳嗽或打喷嚏时"},
+          {"id": "asleep", "label": "睡着时"},
+          {"id": "activity_or_exercise", "label": "活动或运动时"},
+          {"id": "after_urination", "label": "小便结束穿衣时"},
+          {"id": "no_obvious_reason", "label": "无明显原因"},
+          {"id": "continuous", "label": "一直漏尿"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score >= 0 and total_score <= 21", "result": "分数越高，尿失禁越严重"}
+  ],
+  "review_notes": [
+    "源表未给出严重程度分界值，不额外补充分级阈值。"
+  ]
+}

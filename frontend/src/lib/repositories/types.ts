@@ -3,6 +3,7 @@ import type {
 } from '@/lib/api/contracts';
 import type {
   AssessmentScale,
+  AssessmentReport,
   CareTask,
   ConsentProgress,
   InteractionSession,
@@ -327,6 +328,20 @@ export interface CareRepository {
     taskId: string,
     signal?: AbortSignal
   ): Promise<NursingPlan | null>;
+  getAssessmentReport(
+    taskId: string,
+    versionNo?: number,
+    signal?: AbortSignal
+  ): Promise<AssessmentReport | null>;
+  generateAssessmentReport(
+    taskId: string,
+    force?: boolean,
+    signal?: AbortSignal
+  ): Promise<AssessmentReport>;
+  confirmAssessmentReport(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<AssessmentReport>;
   generateNursingPlan(
     taskId: string,
     force?: boolean,

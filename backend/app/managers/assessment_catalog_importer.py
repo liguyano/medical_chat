@@ -267,9 +267,12 @@ class AssessmentCatalogImporter:
             section_id=section_id,
             question_code=field["id"],
             question_name=field["label"],
-            original_text=field["label"],
-            patient_text=self._patient_text(field["label"], question_type),
-            nurse_text=field["label"],
+            original_text=str(field.get("original_text") or field["label"]),
+            patient_text=str(
+                field.get("patient_text")
+                or self._patient_text(field["label"], question_type)
+            ),
+            nurse_text=str(field.get("nurse_text") or field["label"]),
             question_type=question_type,
             value_type=value_type,
             required=not derived,
@@ -281,7 +284,7 @@ class AssessmentCatalogImporter:
             ),
             derived=derived,
             calculation_expression=DERIVED_EXPRESSIONS.get(field["id"]),
-            validation_rule=None,
+            validation_rule=field.get("validation_rule"),
             sort_no=sort_no,
             creator="structured_catalog_importer",
         )

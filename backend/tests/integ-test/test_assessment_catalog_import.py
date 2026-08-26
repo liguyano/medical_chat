@@ -50,19 +50,19 @@ def test_import_all_real_scales_is_idempotent(
     postgres_session_factory,
     isolated_catalog,
 ):
-    """五份真实量表应完整导入，重复执行不产生重复版本。"""
+    """十六份真实量表应完整导入，重复执行不产生重复版本。"""
     catalog_dir, _ = isolated_catalog
     importer = AssessmentCatalogImporter(postgres_session_factory)
     first = importer.import_directory(catalog_dir, publish_status="已发布")
     second = importer.import_directory(catalog_dir, publish_status="已发布")
 
-    assert first["scales"] == 5
-    assert first["versions"] == 5
-    assert first["questions"] >= 90
-    assert first["options"] > 100
+    assert first["scales"] == 16
+    assert first["versions"] == 16
+    assert first["questions"] >= 140
+    assert first["options"] > 280
     assert first["actions"] == 53
     assert second["versions"] == 0
-    assert second["skipped_versions"] == 5
+    assert second["skipped_versions"] == 16
 
     with postgres_session_factory() as db:
         imported_scale_ids = db.scalars(
@@ -70,13 +70,13 @@ def test_import_all_real_scales_is_idempotent(
                 AssessmentScale.scale_code.like(f"%{isolated_catalog[1][0][-8:]}")
             )
         ).all()
-        assert len(imported_scale_ids) == 5
+        assert len(imported_scale_ids) == 16
         version_ids = db.scalars(
             select(AssessmentScaleVersion.id).where(
                 AssessmentScaleVersion.scale_id.in_(imported_scale_ids)
             )
         ).all()
-        assert len(version_ids) == 5
+        assert len(version_ids) == 16
         assert (
             db.scalar(
                 select(func.count(AssessmentQuestion.id)).where(
@@ -153,6 +153,9 @@ async def test_loader_returns_published_questions_options_and_order(
         5.0,
         10.0,
     ]
+    iadl_code = next(code for code in scale_codes if code.startswith("iadl_lawton_brody_"))
+    iadl_tasks = [task for task in tasks if task.scale_code == iadl_code]
+    assert iadl_tasks[0].patient_text == "最近1个月，您上街购物通常能做到什么程度？"
 
 
 @pytest.mark.asyncio
@@ -169,6 +172,6 @@ async def test_pending_review_catalog_is_not_executable(
     assert await loader.load_questions_by_scale_codes([adl_code]) == []
 
     promoted = importer.import_directory(catalog_dir, publish_status="已发布")
-    assert promoted["promoted_versions"] == 5
+    assert promoted["promoted_versions"] == 16
     assert promoted["versions"] == 0
     assert await loader.load_questions_by_scale_codes([adl_code])

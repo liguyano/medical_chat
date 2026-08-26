@@ -89,6 +89,13 @@ export default function NurseReviewPage() {
         Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
       );
     }
+    if (task?.collectionMode === 'ai_dialogue') {
+      return (aiAnswers ?? []).map((answer) => ({
+        id: answer.questionId,
+        questionText: answer.questionText,
+        sectionName: 'AI 对话量表',
+      }));
+    }
     return prototypeQuestions.filter((question) =>
       Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
     );

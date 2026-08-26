@@ -331,6 +331,31 @@ export interface NursingPlanDto {
   items: NursingPlanItemDto[];
 }
 
+export interface AssessmentReportVersionDto {
+  id: ApiId;
+  version_no: number;
+  report_status: string;
+  generated_by: string;
+  generated_at: string;
+  confirmed_by?: ApiId | null;
+  confirmed_at?: string | null;
+}
+
+export interface AssessmentReportDto extends AssessmentReportVersionDto {
+  report_no: string;
+  task_id: ApiId;
+  source_submission_ids: ApiId[];
+  source_snapshot: Record<string, unknown>;
+  report_content: {
+    overall_summary: string;
+    key_findings: string[];
+    risk_overview: string[];
+    nursing_focus: string[];
+    follow_up_suggestions: string[];
+  };
+  versions: AssessmentReportVersionDto[];
+}
+
 export interface CreateTaskRequest {
   patient_id: number;
   encounter_id: number;

@@ -18,6 +18,10 @@ from app.models.base import get_db
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
 from app.schemas.assessment_review import AssessmentReviewRequest
+from app.schemas.assessment_report import (
+    AssessmentReportDto,
+    AssessmentReportGenerateRequest,
+)
 from app.schemas.interaction_tools import (
     EducationAcknowledgeRequest,
     HandoffRequest,
@@ -395,5 +399,75 @@ def confirm_nursing_plan(
             task_ref,
             staff_id=staff.id,
             operator=staff.staff_no,
+        )
+    )
+
+
+@router.get(
+    "/{task_ref}/report",
+    response_model=ApiResponse[AssessmentReportDto | None],
+    summary="查询评估报告",
+)
+def get_assessment_report(
+    task_ref: str,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+    version_no: int | None = None,
+) -> dict:
+    """查询任务最新或指定历史版本的评估报告。"""
+    from app.services import assessment_report_service
+
+    return ok(
+        assessment_report_service.get_assessment_report(
+            db,
+            task_ref,
+            staff_id=staff.id,
+            version_no=version_no,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/report/generate",
+    response_model=ApiResponse[AssessmentReportDto],
+    summary="生成评估报告",
+)
+async def generate_assessment_report(
+    task_ref: str,
+    req: AssessmentReportGenerateRequest,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """调用语言模型生成并保存新的评估报告版本。"""
+    from app.services import assessment_report_service
+
+    return ok(
+        await assessment_report_service.generate_assessment_report(
+            db,
+            task_ref,
+            staff_id=staff.id,
+            force=req.force,
+        )
+    )
+
+
+@router.post(
+    "/{task_ref}/report/confirm",
+    response_model=ApiResponse[AssessmentReportDto],
+    summary="确认评估报告",
+)
+def confirm_assessment_report(
+    task_ref: str,
+    db: DbSession,
+    staff: Annotated[StaffAccount, Depends(require_staff)],
+) -> dict:
+    """确认当前最新评估报告版本。"""
+    from app.services import assessment_report_service
+
+    return ok(
+        assessment_report_service.confirm_assessment_report(
+            db,
+            task_ref,
+            staff_id=staff.id,
         )
     )

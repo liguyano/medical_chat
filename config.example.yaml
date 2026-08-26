@@ -148,3 +148,6 @@ agent_models:
 
   nursing_plan_agent:
     language: qwen-plus  # 患者画像与护理计划结构化生成
+
+  assessment_report_agent:
+    language: qwen-plus  # 量表评估报告综合生成

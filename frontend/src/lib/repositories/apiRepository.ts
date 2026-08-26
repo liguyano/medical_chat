@@ -18,6 +18,7 @@ import type {
   PatientRecordDto,
   QualityReviewDto,
   AssessmentScaleConfigSummaryDto,
+  AssessmentReportDto,
   QuestionnaireDto,
   SseEnvelope,
   StaffLoginResponse,
@@ -42,6 +43,7 @@ import {
 import type {
   AssessmentScale,
   AssessmentScaleConfigSummary,
+  AssessmentReport,
   CareTask,
   EducationMaterialConfig,
   InteractionRuleConfig,
@@ -320,6 +322,38 @@ function mapNursingPlan(item: NursingPlanDto): NursingPlan {
           ? planItem.nurse_action
           : 'pending',
       nurseComment: planItem.nurse_comment ?? null,
+    })),
+  };
+}
+
+function mapAssessmentReport(item: AssessmentReportDto): AssessmentReport {
+  return {
+    id: Number(item.id),
+    versionNo: item.version_no,
+    reportStatus: item.report_status,
+    generatedBy: item.generated_by,
+    generatedAt: item.generated_at,
+    confirmedBy: item.confirmed_by == null ? null : Number(item.confirmed_by),
+    confirmedAt: item.confirmed_at ?? null,
+    reportNo: item.report_no,
+    taskId: Number(item.task_id),
+    sourceSubmissionIds: item.source_submission_ids.map(Number),
+    sourceSnapshot: item.source_snapshot,
+    reportContent: {
+      overallSummary: item.report_content.overall_summary,
+      keyFindings: item.report_content.key_findings,
+      riskOverview: item.report_content.risk_overview,
+      nursingFocus: item.report_content.nursing_focus,
+      followUpSuggestions: item.report_content.follow_up_suggestions,
+    },
+    versions: item.versions.map((version) => ({
+      id: Number(version.id),
+      versionNo: version.version_no,
+      reportStatus: version.report_status,
+      generatedBy: version.generated_by,
+      generatedAt: version.generated_at,
+      confirmedBy: version.confirmed_by == null ? null : Number(version.confirmed_by),
+      confirmedAt: version.confirmed_at ?? null,
     })),
   };
 }
@@ -806,6 +840,36 @@ export class ApiCareRepository implements CareRepository {
       { signal }
     );
     return response ? mapNursingPlan(response) : null;
+  }
+
+  async getAssessmentReport(taskId: string, versionNo?: number, signal?: AbortSignal) {
+    const query = versionNo === undefined ? '' : `?version_no=${versionNo}`;
+    const response = await apiRequest<AssessmentReportDto | null>(
+      `/api/tasks/${encodeURIComponent(taskId)}/report${query}`,
+      { signal }
+    );
+    return response ? mapAssessmentReport(response) : null;
+  }
+
+  async generateAssessmentReport(taskId: string, force = false, signal?: AbortSignal) {
+    const response = await apiRequest<AssessmentReportDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/report/generate`,
+      {
+        method: 'POST',
+        body: { force },
+        signal,
+        timeoutMs: 120_000,
+      }
+    );
+    return mapAssessmentReport(response);
+  }
+
+  async confirmAssessmentReport(taskId: string, signal?: AbortSignal) {
+    const response = await apiRequest<AssessmentReportDto>(
+      `/api/tasks/${encodeURIComponent(taskId)}/report/confirm`,
+      { method: 'POST', signal }
+    );
+    return mapAssessmentReport(response);
   }
 
   async generateNursingPlan(

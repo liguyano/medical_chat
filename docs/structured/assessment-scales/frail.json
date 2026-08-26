@@ -1,0 +1,24 @@
+{
+  "id": "frail",
+  "title": "FRAIL 衰弱量表",
+  "source_file": "用户提供：量表统计.md（表 B.10）",
+  "status": "pending_review",
+  "form_type": "risk_scale",
+  "instructions": "询问以下5项，符合计1分，不符合计0分。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 5},
+    "items": [
+      {"id": "fatigue", "label": "过去4周大部分或所有时间感到疲乏", "patient_text": "过去4周内，您是否在大部分时间或者所有时间都感到疲乏？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0}]},
+      {"id": "resistance", "label": "独立爬1层楼梯有困难", "patient_text": "不用辅助工具和他人帮助、途中不休息时，您爬1层楼梯是否有困难？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0}]},
+      {"id": "ambulation", "label": "独立步行100米有困难", "patient_text": "不用辅助工具和他人帮助时，您走完大约100米是否有困难？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0}]},
+      {"id": "illnesses", "label": "患有5种以上指定疾病", "patient_text": "医生是否曾告知您患有5种以上疾病，例如高血压、糖尿病、心脏病、卒中、肿瘤、心衰、哮喘、关节炎、肺病、肾病或心绞痛？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0}]},
+      {"id": "weight_loss", "label": "1年或更短时间内体重下降至少5%", "patient_text": "在最近1年或更短时间内，您的体重是否下降了5%或更多？", "options": [{"id": "yes", "label": "是", "score": 1}, {"id": "no", "label": "否", "score": 0}]}
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score >= 3", "result": "衰弱"},
+    {"condition": "total_score >= 1 and total_score <= 2", "result": "衰弱前期"},
+    {"condition": "total_score == 0", "result": "无衰弱"}
+  ]
+}

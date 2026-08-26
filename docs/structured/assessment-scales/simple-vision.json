@@ -1,0 +1,35 @@
+{
+  "id": "simple_vision",
+  "title": "视力简易评估表",
+  "source_file": "用户提供：量表统计.md（表 B.4）",
+  "status": "pending_review",
+  "form_type": "function_scale",
+  "instructions": "若平日佩戴眼镜，请在佩戴眼镜的情况下评估。五个描述为互斥等级，对话中选择最符合的一项。",
+  "scoring": {
+    "formula": "sum(item_scores)",
+    "score_range": {"min": 0, "max": 4},
+    "items": [
+      {
+        "id": "vision_level",
+        "label": "当前视力水平",
+        "patient_text": "在平日佩戴眼镜的情况下，下面哪一项最符合您目前的视力？",
+        "options": [
+          {"score": 4, "label": "能看清书报上的标准字体"},
+          {"score": 3, "label": "能看清大字体，但看不清书报上的标准字体"},
+          {"score": 2, "label": "看不清报纸大标题，但能辨认物体"},
+          {"score": 1, "label": "辨认物体有困难，但眼睛能跟随物体移动，只能看到光、颜色和形状"},
+          {"score": 0, "label": "没有视力，眼睛不能跟随物体移动"}
+        ]
+      }
+    ]
+  },
+  "interpretation": [
+    {"condition": "total_score == 4", "result": "视力正常"},
+    {"condition": "total_score == 3", "result": "低视力"},
+    {"condition": "total_score >= 1 and total_score <= 2", "result": "盲"},
+    {"condition": "total_score == 0", "result": "完全失明"}
+  ],
+  "review_notes": [
+    "源表以5行是/否描述同一视力等级；结构化为单选题，避免多个互斥等级同时计分。"
+  ]
+}
