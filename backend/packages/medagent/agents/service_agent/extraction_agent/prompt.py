@@ -28,15 +28,15 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
         for q in questions
     ]
 
-    return f"""你是一个专业的护理评估字段抽取专家。\
-你的任务是从患者与AI的对话中，准确抽取出量表问题的结构化答案。
+    return f"""你是一个专业的护理评估答案识别助手。\
+你的任务是判断患者对话已经明确回答了哪些量表题目，并返回最小答案候选。
 
 ## 核心原则
 1. **忠实原文**：只抽取患者明确说过的内容，不推测、不脑补
-2. **多轮综合**：患者可能分多轮回答同一问题（如追问后补充），需综合所有相关对话
-3. **置信度标注**：每个字段必须给出抽取可信度（0.0-1.0）
-4. **来源追溯**：记录答案来自哪几条对话消息（message_id）
-5. **增量更新**：如果历史字段已有答案，新对话纠正时更新并降低置信度；新对话补充细节时提高置信度
+2. **当前问句优先**：优先判断当前护理人员问句对应的题目，不把一句短回答复制到无关题目
+3. **多轮综合**：患者可能分多轮回答同一问题，需识别补充和更正
+4. **置信度标注**：每个候选必须给出可信度（0.0-1.0）
+5. **原话依据**：evidence 只写支持答案的患者原话，不写隐藏推理过程
 
 ## 量表信息
 量表名称：{scale_version.get("scale_name", "未知量表")}
@@ -45,35 +45,25 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
 ## 问题定义（JSON格式）
 {json.dumps(questions_schema, ensure_ascii=False, indent=2)}
 
-## 输出格式（严格遵守JSON Schema）
+## 输出格式（严格遵守 JSON Schema）
+只返回 question_id、value、evidence、confidence。不要返回 question_code、answer_type、来源消息、临床得分或其他数据库字段。
 The response must be a valid json object and must not contain markdown or explanatory text.
 {{
-  "extracted_answers": [
+  "answers": [
     {{
       "question_id": 101,
-      "question_code": "smoking_status",
-      "answer_type": "single_choice",
-      "answer_value": "吸烟",  // 文本/数字/布尔/日期
-      "selected_option_codes": ["smoking_yes"],  // 单选/多选使用
-      "extra_inputs": {{"frequency": 15, "unit": "支/天"}},  // 附加输入
-      "clinical_score": 2.0,
-      "extraction_confidence": 0.92,
-      "source_message_ids": ["MSG-301", "MSG-302"],
-      "reasoning": "患者在第5轮明确说'我抽烟'，第6轮补充'每天15支左右'"
+      "value": "smoking_yes",
+      "evidence": "我现在还抽烟",
+      "confidence": 0.92
     }}
-  ],
-  "overall_confidence": 0.85,
-  "missing_questions": [102, 103],  // 尚未问到的题目
-  "ambiguous_questions": [104]  // 回答不清晰的题目
+  ]
 }}
 
 ## 重要提示
-- 如果历史抽取字段已有答案，且新对话**纠正**了该答案（如"不抽烟了" vs "抽烟"），\
-请更新答案并降低置信度
-- 如果新对话**补充**了细节（如"每天15支" 补充 "吸烟"），\
-请合并到 extra_inputs 并提高置信度
-- 纠正 vs 补充的判断标准：纠正=矛盾（互斥），补充=细化（兼容）
-- 如果患者回答模糊（"嗯...差不多吧"），请降低置信度并在 reasoning 标注
+- 如果历史答案被新对话明确纠正，返回更正后的候选
+- 选择题的 value 可使用题目定义中的选项编码、标签或值；多选使用字符串数组
+- 文本、数字和布尔题直接返回对应的简单值；日期使用 YYYY-MM-DD
+- 无法确认题目或答案时返回 {{"answers": []}}，禁止猜测或返回“待人工确认”
 """
 
 
@@ -128,7 +118,7 @@ def build_user_prompt(
     # 4. 任务指令
     prompt_parts.append("## 任务")
     prompt_parts.append(
-        "请根据以上信息，抽取或更新量表字段。如果新对话纠正了历史字段，请更新并降低置信度；如果新对话补充了细节，请合并并提高置信度。"
+        "请判断哪些题目已有明确答案，只返回题目ID、答案值、患者原话依据和置信度；无法确认时返回空 answers。"
     )
 
     return "\n".join(prompt_parts)

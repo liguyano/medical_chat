@@ -1,4 +1,4 @@
-import type { StructuredAnswer } from '@/lib/types';
+import type { InteractionMessage, StructuredAnswer } from '@/lib/types';
 
 /**
  * 返回结构化答案的用户可见值。
@@ -17,4 +17,32 @@ export function getStructuredAnswerDisplayValue(answer: StructuredAnswer): strin
   if (answer.answerNumber !== undefined) return String(answer.answerNumber);
   if (answer.answerBoolean !== undefined) return answer.answerBoolean ? '是' : '否';
   return '已记录';
+}
+
+/**
+ * 根据后端保存的来源消息编号返回真实患者原话。
+ * 模型生成的说明不替代原始对话证据。
+ */
+export function getStructuredAnswerEvidenceMessages(
+  answer: StructuredAnswer,
+  messages: InteractionMessage[]
+): InteractionMessage[] {
+  const messageByIdentity = new Map<string, InteractionMessage>();
+  messages.forEach((message) => {
+    messageByIdentity.set(message.id, message);
+    messageByIdentity.set(message.messageNo, message);
+  });
+
+  const seen = new Set<string>();
+  return answer.sourceMessageIds
+    .map((messageId) => messageByIdentity.get(messageId))
+    .filter(
+      (message): message is InteractionMessage =>
+        Boolean(message) && message?.role === 'patient'
+    )
+    .filter((message) => {
+      if (seen.has(message.messageNo)) return false;
+      seen.add(message.messageNo);
+      return true;
+    });
 }

@@ -29,7 +29,10 @@ import {
   type MonitorTimelineFilter,
   type MonitorTimelineSort,
 } from '@/lib/dialogue/monitorTimeline';
-import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
+import {
+  getStructuredAnswerDisplayValue,
+  getStructuredAnswerEvidenceMessages,
+} from '@/lib/structuredAnswer';
 import type { MessageFeedback, StructuredAnswer } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
@@ -599,7 +602,12 @@ export default function NurseMonitorDetailPage() {
           <Card padding="sm">
             <h2 className="font-semibold mb-3">结构化答案</h2>
             <div className="scrollbar-soft space-y-2 max-h-72 overflow-y-auto">
-              {answers.map((answer) => (
+              {answers.map((answer) => {
+                const evidenceMessages = getStructuredAnswerEvidenceMessages(
+                  answer,
+                  session?.messages ?? []
+                );
+                return (
                 <div key={answer.questionId} className="rounded-xl bg-surface-secondary p-3">
                   <div className="flex justify-between gap-2">
                     <p className="text-xs text-foreground-muted">{answer.questionText}</p>
@@ -612,6 +620,26 @@ export default function NurseMonitorDetailPage() {
                       ? `模型未识别：${answer.invalidReason ?? '请人工填写'}`
                       : getStructuredAnswerDisplayValue(answer)}
                   </p>
+                  {evidenceMessages.length > 0 && (
+                    <details className="mt-2 rounded-lg border border-border bg-white px-3 py-2 text-xs">
+                      <summary className="cursor-pointer font-medium text-foreground-muted">
+                        查看解析依据（{evidenceMessages.length}条）
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {evidenceMessages.map((message) => (
+                          <blockquote
+                            key={message.messageNo}
+                            className="border-l-2 border-primary/40 pl-2 leading-5 text-foreground"
+                          >
+                            “{message.contentText}”
+                            <span className="ml-2 text-foreground-muted">
+                              {formatMonitorDateTime(message.occurredAt)}
+                            </span>
+                          </blockquote>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   {answer.answerType && (
                     <div className="mt-2 space-y-2 border-t border-border pt-2">
                       {!manualDrafts[answer.questionId] ? (
@@ -729,7 +757,8 @@ export default function NurseMonitorDetailPage() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
               {!answers.length && <p className="text-sm text-foreground-muted">暂无结构化答案</p>}
             </div>
           </Card>

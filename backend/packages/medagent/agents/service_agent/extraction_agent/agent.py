@@ -5,6 +5,8 @@
 import asyncio
 import json
 import logging
+from datetime import date
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -13,6 +15,7 @@ from .prompt import build_system_prompt, build_user_prompt
 from .types import normalize_answer_type
 from .validator import (
     ExtractedAnswer,
+    ExtractionCandidate,
     ExtractionResult,
     InvalidExtractedAnswer,
     RawExtractionResult,
@@ -81,51 +84,23 @@ class FieldExtractionAgent:
             HumanMessage(content=user_prompt),
         ]
 
-        # 先让供应商返回对象，再逐条校验答案。不能用整个 ExtractionResult
-        # 一次性校验，否则一个坏字段会丢弃同批所有有效字段。
+        # 模型只返回题号、值、原话依据和置信度；数据库元数据由后端补齐。
         structured = self.model.with_structured_output(RawExtractionResult)
         raw_result = await structured.ainvoke(messages)
         if isinstance(raw_result, ExtractionResult):
             result = raw_result
         else:
-            raw = (
-                raw_result.model_dump(mode="json")
-                if isinstance(raw_result, RawExtractionResult)
-                else self._coerce_object(raw_result)
+            raw = raw_result if isinstance(raw_result, RawExtractionResult) else RawExtractionResult.model_validate(
+                self._coerce_object(raw_result)
             )
-            valid_answers: list[ExtractedAnswer] = []
-            invalid_answers: list[InvalidExtractedAnswer] = []
-            for item in raw.get("extracted_answers", []) or []:
-                if not isinstance(item, dict):
-                    invalid_answers.append(
-                        InvalidExtractedAnswer(
-                            raw_answer={"value": item},
-                            error="字段结果不是对象",
-                        )
-                    )
-                    continue
-                try:
-                    normalized_item = {
-                        **item,
-                        "answer_type": normalize_answer_type(item["answer_type"]),
-                    }
-                    valid_answers.append(ExtractedAnswer.model_validate(normalized_item))
-                except Exception as exc:  # noqa: BLE001
-                    invalid_answers.append(
-                        InvalidExtractedAnswer(
-                            question_id=item.get("question_id"),
-                            question_code=item.get("question_code"),
-                            answer_type=item.get("answer_type"),
-                            raw_answer=item,
-                            error=f"{type(exc).__name__}: {exc}",
-                        )
-                    )
-            result = ExtractionResult.model_validate(
-                {
-                    **raw,
-                    "extracted_answers": valid_answers,
-                    "invalid_answers": invalid_answers,
-                }
+            result = self._build_result(
+                raw,
+                questions=questions,
+                source_message_ids=[
+                    str(item.get("message_id"))
+                    for item in new_dialog
+                    if item.get("message_id")
+                ],
             )
 
         # 计算派生字段
@@ -138,6 +113,181 @@ class FieldExtractionAgent:
             result.overall_confidence,
         )
         return result
+
+    @classmethod
+    def _build_result(
+        cls,
+        raw: RawExtractionResult,
+        *,
+        questions: list[dict],
+        source_message_ids: list[str],
+    ) -> ExtractionResult:
+        """将最小模型候选转换为现有持久化答案契约。"""
+        question_by_id = {
+            int(question["question_id"]): question
+            for question in questions
+            if question.get("question_id") is not None
+        }
+        valid_answers: list[ExtractedAnswer] = []
+        invalid_answers: list[InvalidExtractedAnswer] = []
+
+        for candidate in raw.answers:
+            question = question_by_id.get(candidate.question_id)
+            if question is None:
+                invalid_answers.append(
+                    cls._invalid_candidate(candidate, "题目不属于当前量表")
+                )
+                continue
+            try:
+                valid_answers.append(
+                    cls._candidate_to_answer(
+                        candidate,
+                        question=question,
+                        source_message_ids=source_message_ids,
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                invalid_answers.append(
+                    cls._invalid_candidate(candidate, str(exc), question=question)
+                )
+
+        valid_ids = {answer.question_id for answer in valid_answers}
+        invalid_ids = {
+            item.question_id for item in invalid_answers if item.question_id is not None
+        }
+        confidence = (
+            sum(answer.extraction_confidence for answer in valid_answers)
+            / len(valid_answers)
+            if valid_answers
+            else 0.0
+        )
+        return ExtractionResult(
+            extracted_answers=valid_answers,
+            overall_confidence=confidence,
+            missing_questions=[
+                question_id
+                for question_id in question_by_id
+                if question_id not in valid_ids
+            ],
+            ambiguous_questions=sorted(invalid_ids),
+            invalid_answers=invalid_answers,
+        )
+
+    @classmethod
+    def _candidate_to_answer(
+        cls,
+        candidate: ExtractionCandidate,
+        *,
+        question: dict,
+        source_message_ids: list[str],
+    ) -> ExtractedAnswer:
+        """依据题库定义补齐单个候选并规范化答案值。"""
+        raw_type = str(question.get("answer_type") or "text")
+        try:
+            answer_type = normalize_answer_type(raw_type)
+        except ValueError:
+            answer_type = "text"
+
+        selected_option_codes: list[str] = []
+        answer_value: str | float | bool | date | None = None
+        if answer_type in {"single_choice", "multiple_choice"}:
+            selected_option_codes = cls._map_option_codes(
+                candidate.value,
+                options=list(question.get("options") or []),
+                multiple=answer_type == "multiple_choice",
+            )
+        elif answer_type == "number":
+            if isinstance(candidate.value, bool) or isinstance(candidate.value, list):
+                raise ValueError("数值题候选不是数值")
+            answer_value = float(candidate.value)
+        elif answer_type == "boolean":
+            answer_value = cls._normalize_boolean(candidate.value)
+        elif answer_type == "date":
+            if not isinstance(candidate.value, str):
+                raise ValueError("日期题候选不是日期字符串")
+            answer_value = date.fromisoformat(candidate.value.strip())
+        else:
+            if isinstance(candidate.value, list):
+                answer_value = "、".join(candidate.value)
+            else:
+                answer_value = str(candidate.value).strip()
+            if not answer_value:
+                raise ValueError("文本题候选为空")
+
+        return ExtractedAnswer(
+            question_id=candidate.question_id,
+            question_code=str(question.get("question_code") or candidate.question_id),
+            answer_type=answer_type,
+            answer_value=answer_value,
+            selected_option_codes=selected_option_codes,
+            extra_inputs={},
+            clinical_score=None,
+            extraction_confidence=candidate.confidence,
+            source_message_ids=list(dict.fromkeys(source_message_ids)),
+            reasoning=candidate.evidence.strip(),
+        )
+
+    @staticmethod
+    def _normalize_boolean(value: Any) -> bool:
+        """将常见布尔表达规范化为布尔值。"""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, list):
+            raise ValueError("布尔题候选不是单值")
+        normalized = str(value).strip().casefold()
+        if normalized in {"true", "1", "yes", "是", "有"}:
+            return True
+        if normalized in {"false", "0", "no", "否", "无", "没有"}:
+            return False
+        raise ValueError("布尔题候选无法识别")
+
+    @staticmethod
+    def _map_option_codes(
+        value: str | float | bool | list[str],
+        *,
+        options: list[dict],
+        multiple: bool,
+    ) -> list[str]:
+        """在当前题目内把编码、标签或值唯一映射为选项编码。"""
+        values = value if isinstance(value, list) else [value]
+        if not values:
+            raise ValueError("选择题候选为空")
+        if not multiple and len(values) != 1:
+            raise ValueError("单选题候选包含多个值")
+
+        codes: list[str] = []
+        for raw_value in values:
+            target = str(raw_value).strip().casefold()
+            matched = []
+            for option in options:
+                aliases = {
+                    str(option.get("option_code", "")).strip().casefold(),
+                    str(option.get("option_label", "")).strip().casefold(),
+                    str(option.get("option_value", "")).strip().casefold(),
+                }
+                if target and target in aliases:
+                    matched.append(str(option.get("option_code") or ""))
+            matched = list(dict.fromkeys(code for code in matched if code))
+            if len(matched) != 1:
+                raise ValueError(f"选择题候选无法唯一映射: {raw_value}")
+            codes.append(matched[0])
+        return list(dict.fromkeys(codes))
+
+    @staticmethod
+    def _invalid_candidate(
+        candidate: ExtractionCandidate,
+        error: str,
+        *,
+        question: dict | None = None,
+    ) -> InvalidExtractedAnswer:
+        """生成仅供诊断的无效候选记录。"""
+        return InvalidExtractedAnswer(
+            question_id=candidate.question_id,
+            question_code=(str(question.get("question_code")) if question else None),
+            answer_type=(str(question.get("answer_type")) if question else None),
+            raw_answer=candidate.model_dump(mode="json"),
+            error=error,
+        )
 
     @staticmethod
     def _coerce_object(value) -> dict:

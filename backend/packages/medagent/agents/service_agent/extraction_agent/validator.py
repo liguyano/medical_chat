@@ -9,6 +9,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .types import AnswerType
 
+
+class ExtractionCandidate(BaseModel):
+    """模型返回的最小答案候选。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: int = Field(..., description="能够填写的题目ID")
+    value: str | float | bool | list[str] = Field(..., description="患者答案值")
+    evidence: str = Field(..., min_length=1, description="患者原话依据")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="候选置信度")
+
 class ExtractedAnswer(BaseModel):
     """单个字段的抽取结果"""
 
@@ -56,7 +67,7 @@ class ExtractedAnswer(BaseModel):
 
 
 class InvalidExtractedAnswer(BaseModel):
-    """单个字段校验失败的人工介入记录。"""
+    """单个候选校验失败的诊断记录。"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -68,14 +79,11 @@ class InvalidExtractedAnswer(BaseModel):
 
 
 class RawExtractionResult(BaseModel):
-    """宽松的模型响应容器，供逐字段校验使用。"""
+    """提供给模型的最小结构化响应。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
-    extracted_answers: list[dict[str, Any]] = Field(default_factory=list)
-    overall_confidence: float = 0.0
-    missing_questions: list[int] = Field(default_factory=list)
-    ambiguous_questions: list[int] = Field(default_factory=list)
+    answers: list[ExtractionCandidate] = Field(..., description="本轮能够填写的答案候选")
 
 
 class ExtractionResult(BaseModel):

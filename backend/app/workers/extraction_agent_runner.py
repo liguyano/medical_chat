@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
-from uuid import uuid4
 
 from langchain_core.language_models import BaseChatModel
 from medagent.agents.factory import create_extraction_agent
@@ -23,7 +22,6 @@ from app.models.assessment_template import AssessmentScale, AssessmentScaleVersi
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask
 from app.schemas.events import AgentErrorEvent, ProgressUpdatedEvent
-from app.schemas.events import HandoffRequestedEvent
 from app.services.assessment_progress_service import refresh_assessment_progress
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
@@ -133,7 +131,6 @@ class ExtractionAgentRunner:
             writer = self.writer_factory()
             changed_fields: dict[str, Any] = {}
             confidence_scores: dict[str, float] = {}
-            invalid_fields: list[dict[str, Any]] = []
 
             for context in contexts:
                 submission_id = self._find_submission(context.instance_id)
@@ -189,31 +186,21 @@ class ExtractionAgentRunner:
                 )
                 if result is None:
                     reason = f"字段抽取失败，已达到重试次数: {context.scale_code}"
-                    self._mark_manual_intervention(
-                        task_id,
-                        reason=reason,
-                    )
                     self.publisher_factory(session_id, self.redis).publish(
                         AgentErrorEvent(
                             session_id=session_id,
                             task_id=task_id,
                             message_id=source_message_id,
                             agent_name="extraction_agent",
-                            error_code="EXTRACTION_MANUAL_INTERVENTION",
-                            message="字段抽取重试已达上限，请医护人工填写",
+                            error_code="EXTRACTION_RETRY_EXHAUSTED",
+                            message="字段抽取重试已达上限，等待后续对话重新解析",
                             retrying=False,
-                            manual_intervention=True,
+                            manual_intervention=False,
                             intervention_reason=reason,
                         )
                     )
-                    self._publish_manual_alert(
-                        task_id,
-                        session_id=session_id,
-                        reason=reason,
-                        invalid_fields=[],
-                    )
                     return {
-                        "status": "manual_intervention",
+                        "status": "failed",
                         "session_id": session_id,
                         "task_id": task_id,
                         "reason": reason,
@@ -221,37 +208,14 @@ class ExtractionAgentRunner:
 
                 valid_ids = {question.question_id for question in context.questions}
                 for invalid in result.invalid_answers:
-                    field = {
-                        "question_id": invalid.question_id,
-                        "question_code": invalid.question_code,
-                        "answer_type": invalid.answer_type,
-                        "raw_answer": invalid.raw_answer,
-                        "error": invalid.error,
-                        "scale_code": context.scale_code,
-                    }
-                    invalid_fields.append(field)
-                    question = next(
-                        (
-                            item
-                            for item in context.questions
-                            if item.question_id == invalid.question_id
-                        ),
-                        None,
+                    logger.warning(
+                        "[Extraction Agent] 跳过无效候选: session=%s scale=%s "
+                        "question=%s error=%s",
+                        session_id,
+                        context.scale_code,
+                        invalid.question_id,
+                        invalid.error,
                     )
-                    if question is not None:
-                        changed_fields[str(question.question_id)] = {
-                            "question_id": question.question_id,
-                            "question_code": question.question_code,
-                            "question_text": question.patient_text or question.question_name,
-                            "answer_type": question.question_type,
-                            "display_value": None,
-                            "invalid": True,
-                            "invalid_reason": invalid.error,
-                            "raw_answer": invalid.raw_answer,
-                            "source_message_ids": [source_message_id],
-                            "confidence": 0,
-                            "corrected": False,
-                        }
                 result.extracted_answers = [
                     answer
                     for answer in result.extracted_answers
@@ -269,10 +233,7 @@ class ExtractionAgentRunner:
                     assessment_instance_id=context.instance_id,
                     extraction_result=result,
                     total_question_count=len(context.questions),
-                    invalid_answers=[
-                        item.model_dump(mode="json")
-                        for item in result.invalid_answers
-                    ],
+                    invalid_answers=[],
                 )
                 answers = await writer.upsert_answers(
                     submission_id=submission.id,
@@ -376,33 +337,6 @@ class ExtractionAgentRunner:
                     confidence_scores=confidence_scores,
                     message_id=source_message_id,
                 )
-            if invalid_fields:
-                reason = "部分字段无法由模型校验，需医护人工填写"
-                self._mark_manual_intervention(
-                    task_id,
-                    reason=reason,
-                )
-                publisher = self.publisher_factory(session_id, self.redis)
-                publisher.publish(
-                    AgentErrorEvent(
-                        session_id=session_id,
-                        task_id=task_id,
-                        message_id=source_message_id,
-                        agent_name="extraction_agent",
-                        error_code="EXTRACTION_FIELD_INVALID",
-                        message="部分字段抽取结果无效，请医护人工填写",
-                        retrying=False,
-                        manual_intervention=True,
-                        intervention_reason=reason,
-                        invalid_fields=invalid_fields,
-                    )
-                )
-                self._publish_manual_alert(
-                    task_id,
-                    session_id=session_id,
-                    reason=reason,
-                    invalid_fields=invalid_fields,
-                )
             if model_base.SessionLocal is None:
                 raise RuntimeError("数据库未初始化")
             with model_base.SessionLocal() as db:
@@ -437,7 +371,7 @@ class ExtractionAgentRunner:
                 "progress_current": progress.current,
                 "progress_total": progress.total,
                 "assessment_completed": progress.completed,
-                "manual_intervention": bool(invalid_fields),
+                "manual_intervention": False,
             }
         except Exception:
             DialogEventPublisher(session_id, self.redis).publish(
@@ -454,85 +388,6 @@ class ExtractionAgentRunner:
             raise
         finally:
             lease.release()
-
-    @staticmethod
-    def _mark_manual_intervention(
-        task_id: int,
-        *,
-        reason: str,
-    ) -> None:
-        """停止当前批次并记录医护人工介入所需信息。"""
-        if model_base.SessionLocal is None:
-            raise RuntimeError("数据库未初始化")
-        with model_base.SessionLocal() as db:
-            task = db.get(CareTask, task_id)
-            if task is None:
-                return
-            task.need_manual_intervention = True
-            task.intervention_reason = reason
-            # 任务表已有文本原因；失败字段明细由 submission 快照保存。
-            task.updator = "extraction_agent"
-            db.commit()
-
-    def _publish_manual_alert(
-        self,
-        task_id: int,
-        *,
-        session_id: str,
-        reason: str,
-        invalid_fields: list[dict[str, Any]],
-    ) -> None:
-        """向责任护士全局提醒流发送可直接跳转监控页的人工介入通知。"""
-        if model_base.SessionLocal is None:
-            return
-        with model_base.SessionLocal() as db:
-            task = db.get(CareTask, task_id)
-            if task is None or task.assigned_nurse_id is None:
-                return
-            from app.models.patient_task import Patient, PatientEncounter
-            from app.services.tool_interaction_service import _persist_event
-            from app.workers.event_publisher import NurseEventPublisher
-
-            patient = db.get(Patient, task.patient_id)
-            encounter = db.get(PatientEncounter, task.encounter_id)
-            event = HandoffRequestedEvent(
-                session_id=session_id,
-                task_id=task_id,
-                request_id=f"extraction-{task_id}-{uuid4().hex[:12]}",
-                reason=reason,
-                requested_action="人工填写字段值",
-                action_label="字段抽取人工介入",
-                urgency="urgent",
-                title="字段抽取需要人工介入",
-                description=f"待处理字段数：{len(invalid_fields)}",
-                patient_name=patient.patient_name if patient else "",
-                bed_no=encounter.bed_no if encounter else None,
-                ward_name=encounter.ward_name if encounter else None,
-                request_source="agent",
-                tool_name="extraction_manual_intervention",
-                tool_args={"invalid_fields": invalid_fields},
-                tool_result={"reason": reason},
-            )
-            session = db.scalar(
-                select(InteractionSession).where(
-                    InteractionSession.session_no == session_id,
-                    InteractionSession.deleted == 0,
-                )
-            )
-            if session is not None:
-                session.handoff_required = True
-                session.handoff_reason = reason
-                _persist_event(
-                    db,
-                    session=session,
-                    message_no=None,
-                    event_type=event.event_type.value,
-                    payload=event.model_dump(mode="json"),
-                    source_invocation_id=f"extraction_manual:{task_id}:{event.request_id}",
-                    creator="extraction_agent",
-                )
-                db.commit()
-            NurseEventPublisher(task.assigned_nurse_id, self.redis).publish(event)
 
     def _load_contexts(
         self,
