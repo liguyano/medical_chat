@@ -1,5 +1,7 @@
 """患者明确表示不知道/不清楚时的抽取回归测试。"""
 
+import pytest
+
 from medagent.agents.service_agent.extraction_agent.agent import FieldExtractionAgent
 from medagent.agents.service_agent.extraction_agent.prompt import build_system_prompt
 from medagent.agents.service_agent.extraction_agent.validator import RawExtractionResult
@@ -54,6 +56,51 @@ def test_common_unknown_phrases_are_canonicalized():
         answer = _build_unknown("number", phrase).extracted_answers[0]
         assert answer.answer_type == "text"
         assert answer.answer_value == phrase
+
+
+@pytest.mark.asyncio
+async def test_bound_explicit_unknown_is_persistable_without_calling_model():
+    """当前题已绑定且患者明确未知时，后端应直接形成答案，不依赖模型是否愿意抽取。"""
+
+    class ExplodingModel:
+        def with_structured_output(self, *_args, **_kwargs):
+            raise AssertionError("明确未知不应再调用模型")
+
+    agent = FieldExtractionAgent(
+        session_id="S",
+        scale_codes=["nrs2002"],
+        model=ExplodingModel(),
+    )
+    result = await agent.extract_from_dialog(
+        previous_extraction={},
+        history_summary="",
+        new_dialog=[
+            {
+                "turn": 8,
+                "message_id": "MSG-23",
+                "patient": "不清楚",
+                "ai_question": "过去三个月体重下降百分比是多少？",
+                "current_question_id": 23,
+            }
+        ],
+        scale_version={"scale_name": "NRS2002", "version_code": "v1"},
+        questions=[
+            {
+                "question_id": 23,
+                "question_code": "weight_loss_percent",
+                "question_text": "过去三个月体重下降百分比是多少？",
+                "answer_type": "number",
+                "options": [],
+                "required": True,
+            }
+        ],
+    )
+    assert len(result.extracted_answers) == 1
+    answer = result.extracted_answers[0]
+    assert answer.question_id == 23
+    assert answer.answer_type == "text"
+    assert answer.answer_value == "不清楚"
+    assert answer.extraction_confidence >= 0.9
 
 
 def test_extraction_prompt_treats_explicit_unknown_as_valid_answer():
