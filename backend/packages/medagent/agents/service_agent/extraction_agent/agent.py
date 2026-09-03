@@ -23,6 +23,40 @@ from .validator import (
 
 logger = logging.getLogger(__name__)
 
+EXPLICIT_UNKNOWN_VALUES = {
+    "不知道",
+    "我不知道",
+    "这个不知道",
+    "这个我不知道",
+    "不清楚",
+    "我不清楚",
+    "这个我不清楚",
+    "不太清楚",
+    "我不太清楚",
+    "记不清",
+    "记不清了",
+    "我记不清",
+    "我记不清了",
+    "不记得",
+    "不记得了",
+    "我不记得",
+    "我不记得了",
+    "记不得",
+    "记不得了",
+    "忘了",
+    "我忘了",
+    "忘记了",
+    "我忘记了",
+    "说不准",
+    "我说不准",
+    "不确定",
+    "我不确定",
+    "不太确定",
+    "我不太确定",
+    "想不起来",
+    "我想不起来",
+}
+
 
 class FieldExtractionAgent:
     """字段抽取智能体
@@ -224,6 +258,21 @@ class FieldExtractionAgent:
         source_message_ids: list[str],
     ) -> ExtractedAnswer:
         """依据题库定义补齐单个候选并规范化答案值。"""
+        explicit_unknown = cls._explicit_unknown_text(candidate.value)
+        if explicit_unknown is not None:
+            return ExtractedAnswer(
+                question_id=candidate.question_id,
+                question_code=str(question.get("question_code") or candidate.question_id),
+                answer_type="text",
+                answer_value=explicit_unknown,
+                selected_option_codes=[],
+                extra_inputs={"explicit_unknown": True},
+                clinical_score=None,
+                extraction_confidence=candidate.confidence,
+                source_message_ids=list(dict.fromkeys(source_message_ids)),
+                reasoning=candidate.evidence.strip(),
+            )
+
         raw_type = str(question.get("answer_type") or "text")
         try:
             answer_type = normalize_answer_type(raw_type)
@@ -268,6 +317,19 @@ class FieldExtractionAgent:
             source_message_ids=list(dict.fromkeys(source_message_ids)),
             reasoning=candidate.evidence.strip(),
         )
+
+    @staticmethod
+    def _explicit_unknown_text(value: Any) -> str | None:
+        """识别患者明确表示未知的回答，并保留其简短原值。"""
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        normalized = text.casefold().replace(" ", "").strip("。！？，,.!?；;：:")
+        if normalized in EXPLICIT_UNKNOWN_VALUES:
+            return text.strip("。！？，,.!?；;：:")
+        return None
 
     @staticmethod
     def _normalize_boolean(value: Any) -> bool:
