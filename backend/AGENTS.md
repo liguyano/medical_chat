@@ -226,6 +226,11 @@ from medagent.configs.agent_config import get_agent_config
   应用层必须依据当前任务量表题目补齐题目编码、答案类型、来源消息和临床得分。
   单个候选无效或 Extraction 重试耗尽只记录诊断状态，不得转换为
   `handoff_requested`、设置任务人工介入或向护士发送紧急呼叫。
+- Extraction 对“没问题”“可以”“没有”“不会”等自然短回答必须结合护理人员实际问句、
+  当前量表题目和选项语义交由模型判断，禁止后端把单个词固定映射为是或否。首次没有形成
+  有效答案时，只允许针对当前问句执行一次仍受 `RawExtractionResult` 约束的聚焦重判；
+  二次仍无法判断则保持未记录。当前问答已有 `related_question_id` 时必须限制到该题；
+  原先无关联的语音消息只有在本轮形成唯一有效题目后才能回填，多题或无答案时不得猜测关联。
 - 评估完成的唯一事实来源是全部生效量表中 `required=true` 且 `derived=false` 的结构化
   `assessment_answer`。Dialog 禁止按问题下标、消息轮数或 Task-todo 是否问完直接完成任务。
 - Extraction 更新结构化进度；进度完整后异步派发 Dialog CICARE Exit，结束语落库后再发布
@@ -264,6 +269,29 @@ from medagent.configs.agent_config import get_agent_config
   `SessionEndEvent`，不再借用文本 Dialog Exit 完成语音会话。Function Calling 的中间
   `response.done` 不得触发任务完成。Gateway 在发布任务结束状态前必须先通过患者
   WebSocket 发送 `response_completed`，作为浏览器等待最后音频排空的顺序屏障。
+- 实时语音新建上游连接或恢复会话时，必须从 PostgreSQL 读取满足
+  `valid_assessment_answer_condition()` 的结构化答案，从 Task-todo 中剔除对应题目，
+  并把题目和值作为“已记录、不得重复询问”的上下文传给模型；每次患者开始下一轮发言前
+  再同步一次。空值、低置信度、无效候选和“待人工确认”不得跳题。文本 Dialog 选择下一题
+  同样只以有效结构化答案为跳过依据，历史上曾经问过但未形成有效答案的题允许再次澄清。
+
+## 对话候选题与桌面进度
+
+- `app/services/dialog_question_service.py` 为文字、语音与患者进度页提供统一的任务绑定题目状态。
+  `GET /api/dialog/{session_no}/question-progress` 校验患者归属或任务责任护士；必填、非派生
+  有效结构化答案才计入总进度，题目状态区分 `unasked/asked/recorded`。
+- 每轮最多提供三道候选，未询问题优先。实际新提问所在交互轮 N 后，N+1、N+2 不再作为
+  新题候选，N+3 才可重新评估；仅向模型提供候选不算已问，澄清不重置新题冷却。
+- Dialog 首问、后续文本与 Qwen 语音均在可见回复前通过内部 `report_question_choice`
+  工具报告 `selected_question_id/active_question_id`。新提问两者相同且须来自候选；
+  澄清为 `null/原当前题`；普通回应为 `null/null`。空选择不得当作空回复或评估完成。
+- 完整 AI 消息保存后以既有 `interaction_event` 的 `question_turn` 事件记录选择、来源
+  患者消息编号和交互轮；同一来源幂等，重试、页面恢复和文字/语音切换不额外计轮。
+  语音预分配来源编号允许转写晚于回复落库；历史无题目关联的消息不得猜题或导致 Runner 崩溃。
+- 工具调用中间响应、失败、不完整及取消响应不能记录已问；取消同时废弃所属轮次的选择和
+  待续工具响应。迟到响应不得使用新患者轮上下文。选题工具只供内部协议使用，不产生患者业务卡片。
+- 候选、明确关联与输出门禁的确定性校验不能替代真实模型对文本语义的遵循验证；真实 Qwen
+  模型是否正确报告所问题目，仍须在联调时验证。
 
 ## 患者端身份边界
 

@@ -1,0 +1,39 @@
+{
+  "desktop": {
+    "sidebarVisible": "block",
+    "sidebarWidth": 360,
+    "frameWidth": 640,
+    "listClientHeight": 785,
+    "listScrollHeight": 1231,
+    "scrollTop": 250,
+    "pageStayed": true,
+    "documentWidth": 1430,
+    "viewportWidth": 1440,
+    "documentHeight": 1000,
+    "headerText": "1\n/ 11\nMock演示\n\n仅在您点击后使用麦克风"
+  },
+  "mobile": {
+    "sidebarDisplay": "none",
+    "frameWidth": 390,
+    "documentWidth": 390,
+    "viewportWidth": 390
+  },
+  "otherPage": {
+    "frameWidth": 430,
+    "sidebarCount": 0
+  },
+  "errors": [
+    "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED",
+    "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+  ],
+  "failedRequests": [
+    {
+      "url": "https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600&display=swap",
+      "error": "net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "url": "https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600&display=swap",
+      "error": "net::ERR_NETWORK_ACCESS_DENIED"
+    }
+  ]
+}

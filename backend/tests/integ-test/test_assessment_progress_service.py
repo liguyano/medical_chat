@@ -172,6 +172,12 @@ def test_only_required_structured_answers_can_complete_dialogue(
         progress = refresh_assessment_progress(db, session.session_no)
         assert (progress.current, progress.total, progress.completed) == (0, 2, False)
 
+        first_answer.answer_text = "待人工确认"
+        first_answer.extraction_confidence = Decimal("0.95")
+        db.commit()
+        progress = refresh_assessment_progress(db, session.session_no)
+        assert (progress.current, progress.total, progress.completed) == (0, 2, False)
+
         first_answer.answer_text = "有效回答"
         first_answer.extraction_confidence = Decimal("0.95")
         db.commit()

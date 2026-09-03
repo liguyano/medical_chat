@@ -123,6 +123,10 @@ class ExtractionAgentRunner:
                 interaction_session_id,
                 patient_message.turn_no,
             )
+            current_question_id = self._resolve_current_question_id(
+                patient_message,
+                asked_message,
+            )
             history_summary = await self.history_manager.summarize_history(
                 session_id,
                 self.model,
@@ -131,6 +135,7 @@ class ExtractionAgentRunner:
             writer = self.writer_factory()
             changed_fields: dict[str, Any] = {}
             confidence_scores: dict[str, float] = {}
+            extracted_question_ids: set[int] = set()
 
             for context in contexts:
                 submission_id = self._find_submission(context.instance_id)
@@ -237,6 +242,9 @@ class ExtractionAgentRunner:
                         answer.source_message_ids = [source_message_id]
                 if not result.extracted_answers:
                     continue
+                extracted_question_ids.update(
+                    answer.question_id for answer in result.extracted_answers
+                )
 
                 submission = await writer.upsert_submission(
                     interaction_session_id=interaction_session_id,
@@ -339,6 +347,18 @@ class ExtractionAgentRunner:
                         answer.extraction_confidence
                     )
 
+            self._backfill_question_association(
+                interaction_session_id=interaction_session_id,
+                message_numbers=[
+                    source_message_id,
+                    *(
+                        [asked_message.message_no]
+                        if asked_message is not None
+                        else []
+                    ),
+                ],
+                question_ids=extracted_question_ids,
+            )
             if changed_fields:
                 self.publisher_factory(session_id, self.redis).publish_extraction_result(
                     session_id=session_id,
@@ -457,6 +477,61 @@ class ExtractionAgentRunner:
         if isinstance(answer.answer_value, str):
             return bool(answer.answer_value.strip())
         return answer.answer_value is not None
+
+    @staticmethod
+    def _resolve_current_question_id(
+        patient_message: Any,
+        asked_message: Any | None,
+    ) -> int | None:
+        """解析当前问答已有的题目关联，患者消息优先。"""
+        patient_question_id = getattr(
+            patient_message,
+            "related_question_id",
+            None,
+        )
+        if patient_question_id is not None:
+            return int(patient_question_id)
+        asked_question_id = getattr(
+            asked_message,
+            "related_question_id",
+            None,
+        )
+        return int(asked_question_id) if asked_question_id is not None else None
+
+    @staticmethod
+    def _backfill_question_association(
+        *,
+        interaction_session_id: int,
+        message_numbers: list[str],
+        question_ids: set[int],
+    ) -> None:
+        """以本轮唯一有效抽取题目回填尚为空的问答消息关联。"""
+        if len(question_ids) != 1:
+            return
+        normalized_numbers = list(
+            dict.fromkeys(number for number in message_numbers if number)
+        )
+        if not normalized_numbers:
+            return
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        question_id = next(iter(question_ids))
+        with model_base.SessionLocal() as db:
+            messages = db.scalars(
+                select(InteractionMessage).where(
+                    InteractionMessage.interaction_session_id
+                    == interaction_session_id,
+                    InteractionMessage.message_no.in_(normalized_numbers),
+                    InteractionMessage.deleted == 0,
+                )
+            ).all()
+            changed = False
+            for message in messages:
+                if message.related_question_id is None:
+                    message.related_question_id = question_id
+                    changed = True
+            if changed:
+                db.commit()
 
     @staticmethod
     def _find_submission(instance_id: int) -> int | None:

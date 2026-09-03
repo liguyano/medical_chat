@@ -53,8 +53,7 @@ def test_system_prompt_contains_cicare_patient_and_tasks():
     assert "不得把诊断快照当作患者自述" in prompt
     assert "建议礼貌称呼：叔叔" in prompt
     assert "禁止每轮重复完整姓名" in prompt
-    assert "teach-back" in prompt
-    assert "用自己的话说说" in prompt
+    assert "get_education_material" not in prompt
 
 
 def test_system_prompt_uses_safe_gender_and_age_salutation():
@@ -96,7 +95,7 @@ def test_constraint_update_prompt_handles_empty_and_multiple_items():
 
 def test_dialog_tool_schemas_follow_openai_function_contract():
     """四个工具 Schema 必须具备名称、对象参数和必填字段。"""
-    assert len(DIALOG_TOOLS) == 4
+    assert len(DIALOG_TOOLS) == 3
     names = set()
     for tool in DIALOG_TOOLS:
         assert tool["type"] == "function"
@@ -105,33 +104,10 @@ def test_dialog_tool_schemas_follow_openai_function_contract():
         assert function["parameters"]["type"] == "object"
         assert function["parameters"]["required"]
     assert names == {
-        "get_education_material",
         "trigger_consent_form",
         "request_nurse_assistance",
         "play_audio",
     }
-
-
-@pytest.mark.asyncio
-async def test_education_material_returns_real_structured_content_and_validates():
-    """宣教工具返回可直接展示和播报的结构化材料，并拒绝非法枚举。"""
-    result = await execute_tool("get_education_material", {"category": "tobacco", "level": 2})
-    invalid_category = await execute_tool(
-        "get_education_material", {"category": "unknown", "level": 2}
-    )
-    invalid_level = await execute_tool(
-        "get_education_material", {"category": "tobacco", "level": 9}
-    )
-
-    assert result["success"] is True
-    assert result["original_content"]
-    assert result["patient_content"]
-    assert result["spoken_content"]
-    assert result["auto_play"] is True
-    assert result["teachback_required"] is True
-    assert "复述" in result["teachback_prompt"]
-    assert invalid_category["success"] is False
-    assert invalid_level["success"] is False
 
 
 @pytest.mark.asyncio

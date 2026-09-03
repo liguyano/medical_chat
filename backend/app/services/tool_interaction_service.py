@@ -28,8 +28,8 @@ from app.models.interaction import (
     InteractionMessage,
     InteractionSession,
 )
-from app.models.patient_task import CareTask, Patient, PatientEncounter
 from app.models.patient_portal import PatientNotification
+from app.models.patient_task import CareTask, Patient, PatientEncounter
 from app.schemas.events import (
     BaseEvent,
     ConsentStatusUpdatedEvent,
@@ -253,6 +253,9 @@ def publish_tool_result(
     source_invocation_id: str | None = None,
 ) -> BaseEvent | None:
     """持久化并发布 Agent 工具领域事件。"""
+    if tool_name == "report_question_choice":
+        # 内部选题只在完整 AI 消息落库后记 question_turn，不产生患者业务卡片。
+        return None
     if not isinstance(tool_result, dict) or not tool_result.get("success"):
         return None
     if model_base.SessionLocal is None:

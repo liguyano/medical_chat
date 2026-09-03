@@ -254,7 +254,7 @@ class ScheduleAgent:
         dialog_history: list[dict[str, str]],
         tool_calls: list[ToolCallRecord],
     ) -> list[str]:
-        """检查最近对话命中的宣教/同意工具是否已正确调用。"""
+        """检查最近对话命中的知情同意工具是否已正确调用。"""
         recent_user_text = "\n".join(
             message.get("content", "")
             for message in dialog_history[-10:]
@@ -264,23 +264,9 @@ class ScheduleAgent:
             (
                 ("抽烟", "吸烟"),
                 ("不抽烟", "不吸烟", "已经戒烟", "戒烟了"),
-                "get_education_material",
-                {"category": "tobacco"},
-                "get_education_material(category='tobacco')",
-            ),
-            (
-                ("抽烟", "吸烟"),
-                ("不抽烟", "不吸烟", "已经戒烟", "戒烟了"),
                 "trigger_consent_form",
                 {"form_type": "tobacco"},
                 "trigger_consent_form(form_type='tobacco')",
-            ),
-            (
-                ("喝酒", "饮酒"),
-                ("不喝酒", "不饮酒", "已经戒酒", "戒酒了"),
-                "get_education_material",
-                {"category": "alcohol"},
-                "get_education_material(category='alcohol')",
             ),
             (
                 ("手术",),
@@ -288,13 +274,6 @@ class ScheduleAgent:
                 "trigger_consent_form",
                 {"form_type": "surgery"},
                 "trigger_consent_form(form_type='surgery')",
-            ),
-            (
-                ("青霉素过敏", "药物过敏"),
-                ("无药物过敏", "没有药物过敏", "不过敏"),
-                "get_education_material",
-                {"category": "allergy"},
-                "get_education_material(category='allergy')",
             ),
         ]
 
@@ -338,14 +317,8 @@ class ScheduleAgent:
             if "tobacco" in tool:
                 if "consent" in tool:
                     prompts.append("必须触发戒烟知情宣教书。")
-                else:
-                    prompts.append("必须调用戒烟宣教工具，并完成吸烟频率与吸烟量追问。")
-            elif "alcohol" in tool:
-                prompts.append("必须调用饮酒宣教工具，并完成饮酒频率与饮酒量追问。")
             elif "surgery" in tool:
                 prompts.append("必须调用手术知情同意书工具，引导患者阅读并确认。")
-            elif "allergy" in tool:
-                prompts.append("必须完成药物过敏安全宣教并提醒患者以后就医主动告知医护人员。")
         return "\n".join(dict.fromkeys(prompts))
 
     def _build_output(

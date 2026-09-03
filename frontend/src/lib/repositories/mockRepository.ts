@@ -5,6 +5,7 @@ import {
   mockTasks,
 } from '@/lib/mock/data';
 import { getVisibleQuestions } from '@/lib/mock/assessment';
+import type { QuestionProgress } from '@/lib/types/questionProgress';
 import type {
   AssessmentScaleConfigDetail,
   AssessmentScaleConfigSummary,
@@ -499,6 +500,40 @@ function buildMockRecordFromInput(
 }
 
 export class MockCareRepository implements CareRepository {
+  async getQuestionProgress(sessionId: string, signal?: AbortSignal): Promise<QuestionProgress> {
+    await wait(signal);
+    const [{ useChatStore }, { useTaskStore }] = await Promise.all([
+      import('@/lib/stores/useChatStore'), import('@/lib/stores/useTaskStore'),
+    ]);
+    const state = useChatStore.getState();
+    const entry = Object.entries(state.sessions).find(([, session]) => session.id === sessionId);
+    if (!entry) throw new Error('找不到演示会话');
+    const [taskId, session] = entry;
+    const task = useTaskStore.getState().tasks.find((item) => item.id === taskId);
+    const answers = state.structuredAnswers[taskId] ?? [];
+    const aiMessages = session.messages.filter((message) => message.role === 'ai');
+    const activeQuestionId = aiMessages.at(-1)?.relatedQuestionIds?.[0] ?? null;
+    const asked = new Set(aiMessages.flatMap((message) => message.relatedQuestionIds ?? []));
+    const questions: QuestionProgress['questions'] = getVisibleQuestions({}, task?.scaleIds).map((question) => {
+      const recorded = answers.some((answer) => answer.questionId === question.id && !answer.invalid && (
+        Boolean(answer.answerText?.trim()) || answer.answerNumber !== undefined ||
+        answer.answerBoolean !== undefined || Boolean(answer.selectedOptions?.length)
+      ));
+      return {
+        questionId: question.id, questionCode: question.questionCode,
+        questionText: question.questionText, scaleName: question.sectionName ?? '评估题目',
+        required: question.required && !question.derived,
+        status: recorded ? 'recorded' : asked.has(question.id) ? 'asked' : 'unasked',
+        isCurrent: question.id === activeQuestionId, coolingUntilTurn: null,
+      };
+    });
+    return {
+      sessionId, current: questions.filter((question) => question.required && question.status === 'recorded').length,
+      total: questions.filter((question) => question.required).length,
+      turnNumber: aiMessages.length, activeQuestionId, candidateQuestionIds: [], questions,
+    };
+  }
+
   async listPatients(
     filters: PatientListFilters = {},
     signal?: AbortSignal

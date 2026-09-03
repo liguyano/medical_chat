@@ -11,7 +11,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .prompt import build_system_prompt, build_user_prompt
+from .prompt import build_focused_user_prompt, build_system_prompt, build_user_prompt
 from .types import normalize_answer_type
 from .validator import (
     ExtractedAnswer,
@@ -79,29 +79,43 @@ class FieldExtractionAgent:
             f"new_dialog_turns={len(new_dialog)}"
         )
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
+        source_message_ids = [
+            str(item.get("message_id"))
+            for item in new_dialog
+            if item.get("message_id")
         ]
+        result = await self._invoke_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            questions=questions,
+            source_message_ids=source_message_ids,
+        )
 
-        # 模型只返回题号、值、原话依据和置信度；数据库元数据由后端补齐。
-        structured = self.model.with_structured_output(RawExtractionResult)
-        raw_result = await structured.ainvoke(messages)
-        if isinstance(raw_result, ExtractionResult):
-            result = raw_result
-        else:
-            raw = raw_result if isinstance(raw_result, RawExtractionResult) else RawExtractionResult.model_validate(
-                self._coerce_object(raw_result)
-            )
-            result = self._build_result(
-                raw,
-                questions=questions,
-                source_message_ids=[
-                    str(item.get("message_id"))
-                    for item in new_dialog
-                    if item.get("message_id")
-                ],
-            )
+        # 首次没有形成有效答案时，只对当前实际问句执行一次结构化重判。
+        if not result.extracted_answers and new_dialog:
+            current_question_id = new_dialog[-1].get("current_question_id")
+            focused_questions = [
+                question
+                for question in questions
+                if current_question_id is None
+                or question.get("question_id") == current_question_id
+            ]
+            if focused_questions:
+                logger.info(
+                    "[Extraction Agent] 首次无有效答案，执行当前问句聚焦重判: "
+                    "session=%s, current_question_id=%s",
+                    self.session_id,
+                    current_question_id,
+                )
+                result = await self._invoke_structured(
+                    system_prompt=build_system_prompt(
+                        scale_version,
+                        focused_questions,
+                    ),
+                    user_prompt=build_focused_user_prompt(new_dialog),
+                    questions=focused_questions,
+                    source_message_ids=source_message_ids,
+                )
 
         # 计算派生字段
         result = self._calculate_derived_fields(result)
@@ -113,6 +127,34 @@ class FieldExtractionAgent:
             result.overall_confidence,
         )
         return result
+
+    async def _invoke_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        questions: list[dict],
+        source_message_ids: list[str],
+    ) -> ExtractionResult:
+        """调用结构化模型并补齐后端答案契约。"""
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        structured = self.model.with_structured_output(RawExtractionResult)
+        raw_result = await structured.ainvoke(messages)
+        if isinstance(raw_result, ExtractionResult):
+            return raw_result
+        raw = (
+            raw_result
+            if isinstance(raw_result, RawExtractionResult)
+            else RawExtractionResult.model_validate(self._coerce_object(raw_result))
+        )
+        return self._build_result(
+            raw,
+            questions=questions,
+            source_message_ids=source_message_ids,
+        )
 
     @classmethod
     def _build_result(
