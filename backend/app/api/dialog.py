@@ -18,11 +18,37 @@ from app.schemas.dialog import (
     SendMessageRequest,
     SendMessageResponse,
 )
+from app.schemas.dialog_question import DialogQuestionProgress
 from app.schemas.response import ApiResponse, ok
 from app.services import dialog_service, tool_interaction_service
+from app.services.dialog_question_service import load_question_context
 
 router = APIRouter(prefix="/api/dialog", tags=["dialog"])
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+@router.get(
+    "/{session_no}/question-progress",
+    response_model=ApiResponse[DialogQuestionProgress],
+    summary="获取对话题目进度",
+)
+async def get_question_progress(
+    session_no: str,
+    db: DbSession,
+    actor: Annotated[
+        StaffAccount | tuple[Patient, PatientEncounter],
+        Depends(require_staff_or_patient),
+    ],
+) -> dict:
+    """为当前患者或责任护士返回真实题目状态。"""
+    return ok(
+        load_question_context(
+            db,
+            session_no,
+            patient_id=actor[0].id if isinstance(actor, tuple) else None,
+            staff_id=None if isinstance(actor, tuple) else actor.id,
+        )
+    )
 
 
 @router.post(

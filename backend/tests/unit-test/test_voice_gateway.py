@@ -1,6 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from medagent.agents.service_agent.schedule_agent import QuestionTask
@@ -95,6 +95,251 @@ def make_session(tmp_path: Path) -> VoiceSession:
     )
 
 
+@pytest.mark.asyncio
+async def test_question_choice_missing_blocks_voice_text_and_audio(tmp_path):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [], "active_question_id": None}
+    )
+    session.question_source_message_no = "patient-1"
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    await gateway._start_generation(session, response_id="response-1")
+    await gateway._handle_text_delta(session, "重复的问句", source="text", response_id="response-1")
+    await gateway._handle_audio_delta(session, b"\x00\x00", response_id="response-1")
+    assert session.publisher.events == []
+    assert not session.current_generation.all_audio
+    assert not session.current_generation.text
+
+
+@pytest.mark.asyncio
+async def test_voice_generation_keeps_choice_of_its_own_patient_turn(tmp_path):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    first = QuestionTurnSelection({"candidate_question_ids": [1]})
+    session.question_turn = first
+    session.question_source_message_no = "patient-1"
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    await gateway._start_generation(session, response_id="old")
+    session.question_turn = QuestionTurnSelection({"candidate_question_ids": [2]})
+    session.question_source_message_no = "patient-2"
+    generation = session.generations["old"]
+    assert generation.question_turn is first
+    assert generation.source_message_no == "patient-1"
+
+
+@pytest.mark.asyncio
+async def test_invalid_choice_then_blocked_text_still_runs_tool_correction(tmp_path, monkeypatch):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [1], "active_question_id": None}
+    )
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    await gateway._handle_event(session, {"type": "response.created", "response": {"id": "r1"}})
+    await gateway._handle_tool_call(
+        session,
+        call_id="c1",
+        name="report_question_choice",
+        arguments={"selected_question_id": 99, "active_question_id": 99},
+        response_id="r1",
+    )
+    await gateway._handle_text_delta(session, "未经允许的问题", source="text", response_id="r1")
+    await gateway._handle_event(session, {"type": "response.done", "response": {"id": "r1"}})
+    assert not any(isinstance(event, DialogMessageEvent) for event in session.publisher.events)
+    session.client.create_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_changed_choice_after_visible_text_does_not_kill_voice_consumer(
+    tmp_path, monkeypatch
+):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [1, 2], "active_question_id": None}
+    )
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    await gateway._handle_event(session, {"type": "response.created", "response": {"id": "r1"}})
+    await gateway._handle_tool_call(
+        session,
+        call_id="c1",
+        name="report_question_choice",
+        arguments={"selected_question_id": 1, "active_question_id": 1},
+        response_id="r1",
+    )
+    await gateway._handle_text_delta(session, "问题一", source="text", response_id="r1")
+    await gateway._handle_tool_call(
+        session,
+        call_id="c2",
+        name="report_question_choice",
+        arguments={"selected_question_id": 2, "active_question_id": 2},
+        response_id="r1",
+    )
+    await gateway._handle_event(session, {"type": "response.done", "response": {"id": "r1"}})
+    assert not session.generations
+    assert not any(isinstance(event, DialogMessageEvent) for event in session.publisher.events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "incomplete", "cancelled"])
+async def test_unsuccessful_voice_response_does_not_record_question(tmp_path, monkeypatch, status):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [1], "active_question_id": None}
+    )
+    session.question_turn.report({"selected_question_id": 1, "active_question_id": 1})
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    save = AsyncMock()
+    monkeypatch.setattr(
+        voice_gateway_module, "DialogHistoryManager", lambda: SimpleNamespace(save_message=save)
+    )
+    await gateway._handle_event(session, {"type": "response.created", "response": {"id": "r1"}})
+    await gateway._handle_text_delta(session, "部分问题", source="text", response_id="r1")
+    await gateway._handle_event(
+        session, {"type": "response.done", "response": {"id": "r1", "status": status}}
+    )
+    save.assert_not_awaited()
+    assert not session.generations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected,active", [(1, 1), (None, 2), (None, None)])
+async def test_voice_choice_records_only_after_visible_response_completed(
+    tmp_path, monkeypatch, selected, active
+):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.question_source_message_no = "patient-stable"
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [1], "active_question_id": 2}
+    )
+    gateway._next_patient_message = lambda _: (1, "patient-stable")
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    save = AsyncMock()
+    monkeypatch.setattr(
+        voice_gateway_module, "DialogHistoryManager", lambda: SimpleNamespace(save_message=save)
+    )
+    monkeypatch.setattr(voice_gateway_module.model_base, "SessionLocal", MagicMock())
+    record = Mock()
+    monkeypatch.setattr("app.services.dialog_question_service.record_question_turn", record)
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        Mock(return_value=False),
+    )
+
+    await gateway._handle_event(session, {"type": "response.created", "response": {"id": "choice"}})
+    await gateway._handle_tool_call(
+        session,
+        call_id="c1",
+        name="report_question_choice",
+        arguments={"selected_question_id": selected, "active_question_id": active},
+        response_id="choice",
+    )
+    await gateway._handle_event(
+        session, {"type": "response.done", "response": {"id": "choice", "status": "completed"}}
+    )
+    record.assert_not_called()
+    save.assert_not_awaited()
+
+    await gateway._handle_event(
+        session, {"type": "response.created", "response": {"id": "visible"}}
+    )
+    await gateway._handle_text_delta(session, "自然回复", source="text", response_id="visible")
+    await gateway._handle_event(
+        session, {"type": "response.done", "response": {"id": "visible", "status": "completed"}}
+    )
+    await gateway._handle_event(
+        session, {"type": "response.done", "response": {"id": "visible", "status": "completed"}}
+    )
+    save.assert_awaited_once()
+    assert save.await_args.kwargs["related_question_id"] == active
+    assert save.await_args.kwargs["intent_type"] == (
+        "提问" if selected else "澄清" if active else "回应"
+    )
+    record.assert_called_once()
+    assert record.call_args.args[3:] == ("patient-stable", selected, active)
+    messages = [
+        event for event in session.publisher.events if isinstance(event, DialogMessageEvent)
+    ]
+    assert len(messages) == 1
+    assert messages[0].question_id == (str(active) if active else None)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_choice_tool_cannot_start_or_authorize_continuation(tmp_path, monkeypatch):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.question_source_message_no = "patient-1"
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [1], "active_question_id": None}
+    )
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    await gateway._handle_event(session, {"type": "response.created", "response": {"id": "r1"}})
+    await gateway._handle_tool_call(
+        session,
+        call_id="c1",
+        name="report_question_choice",
+        arguments={"selected_question_id": 1, "active_question_id": 1},
+        response_id="r1",
+    )
+    await gateway._handle_event(
+        session, {"type": "response.done", "response": {"id": "r1", "status": "cancelled"}}
+    )
+    session.client.create_response.assert_not_awaited()
+    assert not session.question_turn.allow_output
+
+
+@pytest.mark.asyncio
+async def test_suppressed_response_late_text_is_not_shown(tmp_path):
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    gateway._next_patient_message = lambda _: (1, "patient-1")
+    await gateway._handle_event(session, {"type": "response.created", "response": {"id": "r1"}})
+    session.suppressed_response_ids.add("r1")
+    await gateway._handle_text_delta(session, "旧响应迟到文本", source="text", response_id="r1")
+    assert session.publisher.events == []
+
+
+@pytest.mark.asyncio
+async def test_late_choice_for_removed_response_cannot_select_new_turn(tmp_path, monkeypatch):
+    from app.services.dialog_question_turn import QuestionTurnSelection
+
+    gateway = VoiceGateway()
+    monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
+    session = make_session(tmp_path)
+    session.question_turn = QuestionTurnSelection(
+        {"candidate_question_ids": [1], "active_question_id": None}
+    )
+    await gateway._handle_tool_call(
+        session,
+        call_id="old-call",
+        name="report_question_choice",
+        arguments={"selected_question_id": 1, "active_question_id": 1},
+        response_id="removed-old-response",
+    )
+    assert not session.question_turn.allow_output
+    session.client.create_response.assert_not_awaited()
+
+
 def make_question(question_id: int, code: str, name: str) -> QuestionTask:
     return QuestionTask(
         question_id=question_id,
@@ -167,15 +412,20 @@ async def test_refresh_guidance_reloads_recorded_answers_before_next_speech(
     ]
     monkeypatch.setattr(
         gateway,
-        "_load_recorded_answers",
-        lambda _session_no: [
-            {
-                "question_id": 1,
-                "question_code": "weakness",
-                "question_text": "虚弱/乏力",
-                "display_value": "无",
-            }
-        ],
+        "_load_question_context",
+        lambda _session_no, _source=None: {
+            "candidate_question_ids": [2],
+            "active_question_id": None,
+            "questions": [{"question_id": 2, "question_text": "视力情况", "status": "unasked"}],
+            "recorded_answers": [
+                {
+                    "question_id": 1,
+                    "question_code": "weakness",
+                    "question_text": "虚弱/乏力",
+                    "display_value": "无",
+                }
+            ],
+        },
     )
     monkeypatch.setattr(
         voice_gateway_module.ScheduleTaskStore,
@@ -248,8 +498,7 @@ async def test_server_vad_speech_events_segment_patient_audio_and_interrupt_resp
     assert session.client.create_response.await_count == 0
     assert session.input_audio_url is not None
     assert any(
-        isinstance(event, PatientAudioEvent)
-        and event.message_id == "MSG-PATIENT-VOICE-2"
+        isinstance(event, PatientAudioEvent) and event.message_id == "MSG-PATIENT-VOICE-2"
         for event in session.publisher.events
     )
     assert {"type": "speech_started"} in websocket.messages
@@ -336,8 +585,7 @@ async def test_function_call_uses_official_output_then_response_create(
             "call_id": "call_001",
             "name": "request_nurse_assistance",
             "arguments": (
-                '{"requested_action":"measure_blood_pressure",'
-                '"reason":"头晕","urgency":"urgent"}'
+                '{"requested_action":"measure_blood_pressure","reason":"头晕","urgency":"urgent"}'
             ),
         },
     )
@@ -535,9 +783,7 @@ async def test_response_ids_keep_mixed_tool_response_until_each_response_finishe
         "护士已经收到消息。",
     ]
     completed_events = [
-        event
-        for event in session.publisher.events
-        if isinstance(event, DialogMessageEvent)
+        event for event in session.publisher.events if isinstance(event, DialogMessageEvent)
     ]
     assert len(completed_events) == 2
     completed_response.assert_called_once()
@@ -753,8 +999,6 @@ async def test_visible_response_broadcasts_completion_marker_before_finalize(
     marker_index = websocket.messages.index(
         {"type": "response_completed", "response_id": "resp_final"}
     )
-    listening_index = websocket.messages.index(
-        {"type": "state", "state": "listening"}
-    )
+    listening_index = websocket.messages.index({"type": "state", "state": "listening"})
     assert marker_index < listening_index
     finalized.assert_called_once()

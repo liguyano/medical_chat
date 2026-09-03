@@ -1,6 +1,7 @@
 import type {
   SseEnvelope,
 } from '@/lib/api/contracts';
+import type { QuestionProgress } from '@/lib/types/questionProgress';
 import type {
   AssessmentScale,
   AssessmentReport,
@@ -206,6 +207,7 @@ export interface SendMessageInput {
 }
 
 export interface CareRepository {
+  getQuestionProgress(sessionId: string, signal?: AbortSignal): Promise<QuestionProgress>;
   listPatients(
     filters?: PatientListFilters,
     signal?: AbortSignal

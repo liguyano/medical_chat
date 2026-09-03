@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
 import PatientLayout from '@/components/layout/PatientLayout';
+import { QuestionProgressPanel } from '@/components/patient/QuestionProgressPanel';
+import { useQuestionProgress } from '@/hooks/useQuestionProgress';
 import ConsentInteractionCard from '@/components/chat/ConsentInteractionCard';
 import EducationMaterialCard from '@/components/chat/EducationMaterialCard';
 import HandoffHistoryCard from '@/components/chat/HandoffHistoryCard';
@@ -229,6 +231,10 @@ export default function PatientDialoguePage() {
     ]
   );
   const streamingTaskId = useChatStore((state) => state.streamingTaskId);
+  const questionProgress = useQuestionProgress(
+    session?.id,
+    `${session?.messages.length ?? 0}:${session?.answeredQuestionCount ?? 0}:${streamingTaskId === taskId}:${JSON.stringify(structuredAnswers[taskId] ?? [])}`
+  );
   const setSession = useChatStore((state) => state.setSession);
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
@@ -918,9 +924,10 @@ export default function PatientDialoguePage() {
           (voiceState === 'idle' || voiceState === 'closed')
         ? 'thinking'
         : voiceState;
-  const progressValue = session?.answeredQuestionCount ?? 0;
+  const progressValue = questionProgress.data?.current ?? session?.answeredQuestionCount ?? 0;
+  const progressTotal = questionProgress.data?.total ?? displayedTotalQuestions;
   const progressPercentage = Math.round(
-    (progressValue / Math.max(displayedTotalQuestions, 1)) * 100
+    (progressValue / Math.max(progressTotal, 1)) * 100
   );
 
   if (!task) {
@@ -944,6 +951,7 @@ export default function PatientDialoguePage() {
   return (
     <PatientLayout
       title="AI智能评估"
+      desktopAside={<QuestionProgressPanel data={questionProgress.data} error={questionProgress.error} onRetry={() => void questionProgress.refresh()} />}
       showBack
       onBack={() => router.push(`/patient/tasks/${taskId}`)}
       headerRight={
@@ -959,12 +967,12 @@ export default function PatientDialoguePage() {
         </button>
       }
     >
-      <div className="relative flex h-[calc(100dvh-64px)] flex-col overflow-hidden">
+      <div className="patient-dialogue-content relative flex h-[calc(100dvh-64px)] flex-col overflow-hidden">
         <section className="shrink-0 border-b border-border bg-[#fffaf6]/90 px-[18px] py-3">
           <div className="flex items-center gap-3">
             <span className="font-black text-primary">{progressValue}</span>
             <span className="-ml-2 text-sm text-foreground-muted">
-              / {displayedTotalQuestions}
+              / {progressTotal}
             </span>
             <div className="patient-progress-track flex-1">
               <div

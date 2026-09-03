@@ -18,6 +18,7 @@ interface PatientLayoutProps {
   showNavigation?: boolean;
   headerRight?: ReactNode;
   contentClassName?: string;
+  desktopAside?: ReactNode;
 }
 
 export default function PatientLayout({
@@ -28,6 +29,7 @@ export default function PatientLayout({
   showNavigation = false,
   headerRight,
   contentClassName,
+  desktopAside,
 }: PatientLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -47,6 +49,8 @@ export default function PatientLayout({
 
   return (
     <div className="patient-app scrollbar-soft">
+      <div className={desktopAside ? 'patient-dialogue-shell' : undefined}>
+      {desktopAside && <aside className="patient-dialogue-aside">{desktopAside}</aside>}
       <div className="patient-mobile-frame">
         {(showBack || title || headerRight) && (
           <header
@@ -122,6 +126,7 @@ export default function PatientLayout({
             </div>
           </nav>
         )}
+      </div>
       </div>
     </div>
   );

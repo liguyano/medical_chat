@@ -1,5 +1,6 @@
 import type {
   AssessmentScaleDto,
+  QuestionProgressDto,
   BackendTaskDto,
   CreateTaskResponse,
   DialogHistoryResponse,
@@ -27,6 +28,7 @@ import { apiRequest } from '@/lib/api/httpClient';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import {
   mapCreateTaskRequest,
+  mapQuestionProgress,
   mapAssessmentScale,
   mapDialogHistory,
   mapExtractedField,
@@ -399,6 +401,12 @@ function buildTaskFallback(
 }
 
 export class ApiCareRepository implements CareRepository {
+  async getQuestionProgress(sessionId: string, signal?: AbortSignal) {
+    return mapQuestionProgress(await apiRequest<QuestionProgressDto>(
+      `/api/dialog/${encodeURIComponent(sessionId)}/question-progress`, { signal }
+    ));
+  }
+
   async listPatients(
     filters: PatientListFilters = {},
     signal?: AbortSignal

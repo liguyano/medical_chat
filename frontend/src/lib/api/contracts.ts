@@ -663,3 +663,21 @@ export type VoiceServerMessage =
   | { type: 'transcript_discarded'; transcript_id: string }
   | { type: 'error'; code?: string; message: string }
   | { type: 'closed' };
+export interface QuestionProgressDto {
+  session_id: string;
+  current: number;
+  total: number;
+  turn_number: number;
+  active_question_id: number | null;
+  candidate_question_ids: number[];
+  questions: Array<{
+    question_id: number;
+    question_code: string;
+    question_text: string;
+    scale_name: string;
+    required: boolean;
+    status: 'unasked' | 'asked' | 'recorded';
+    is_current: boolean;
+    cooling_until_turn: number | null;
+  }>;
+}

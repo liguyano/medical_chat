@@ -1,5 +1,6 @@
 import type {
   ApiId,
+  QuestionProgressDto,
   BackendTaskDto,
   AssessmentScaleDto,
   CreateTaskRequest,
@@ -31,6 +32,7 @@ import type {
   TaskPreparation,
   User,
 } from '@/lib/types';
+import type { QuestionProgress } from '@/lib/types/questionProgress';
 
 function id(value: string | number | undefined, fallback = ''): string {
   return value === undefined ? fallback : String(value);
@@ -539,5 +541,25 @@ export function mapQualityReview(dto: QualityReviewDto): QualityReview {
     assessmentComments: dto.assessment_comments ?? {},
     comment: dto.comment,
     submittedAt: dto.submitted_at,
+  };
+}
+export function mapQuestionProgress(dto: QuestionProgressDto): QuestionProgress {
+  return {
+    sessionId: dto.session_id,
+    current: dto.current,
+    total: dto.total,
+    turnNumber: dto.turn_number,
+    activeQuestionId: dto.active_question_id === null ? null : String(dto.active_question_id),
+    candidateQuestionIds: dto.candidate_question_ids.map(String),
+    questions: dto.questions.map((question) => ({
+      questionId: String(question.question_id),
+      questionCode: question.question_code,
+      questionText: question.question_text,
+      scaleName: question.scale_name,
+      required: question.required,
+      status: question.status,
+      isCurrent: question.is_current,
+      coolingUntilTurn: question.cooling_until_turn,
+    })),
   };
 }

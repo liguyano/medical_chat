@@ -51,6 +51,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   宣教/知情同意工具结果和呼叫工具结果按时间合并展示，不能只渲染 `interaction_message`。
 - 患者发言次数不是评估进度。`answeredQuestionCount` 与任务进度只能由后端快照或
   `progress_updated`（必填、非派生结构化答案进度）更新。
+- 患者对话页在宽度 1024px 以上使用 `PatientLayout.desktopAside` 展开左侧题目进度，
+  其他患者页面保持 430px 画布，手机不显示侧栏。侧栏经 `CareRepository.getQuestionProgress`
+  获取 `/api/dialog/{session_no}/question-progress`，按量表显示全量题目、三种状态和当前题；
+  总进度只消费服务端有效必填答案计数，不以已提问数代替。`useQuestionProgress` 在会话进入、
+  消息完成和抽取变化后刷新，15 秒轮询补齐异步延迟，卸载取消请求及定时器；会话独立资源
+  与请求序号防止跨会话串数据及旧响应覆盖。失败显示错误及旧快照提示，不以 Mock 数据补齐 API。
+  聊天顶部进度优先使用同一题目快照，避免与侧栏计数不一致；桌面对话高度扣除顶部栏、
+  外框边距及边框，避免输入栏超出视口造成整页滚动。
 - AI 会话 `pending` 表示 Schedule Task-todo 与首问正在后台准备；该阶段患者输入保持禁用，
   首问完成并转为 `active` 后才允许发送。
 - API 模式进入患者对话页时必须以最新后端快照校正 Zustand 中的持久化会话，不能因为
