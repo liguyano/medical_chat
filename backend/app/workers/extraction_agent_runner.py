@@ -139,6 +139,15 @@ class ExtractionAgentRunner:
                     if submission_id
                     else {}
                 )
+                context_question_ids = {
+                    question.question_id for question in context.questions
+                }
+                current_question_id = (
+                    asked_message.related_question_id
+                    if asked_message is not None
+                    and asked_message.related_question_id in context_question_ids
+                    else None
+                )
                 agent = create_extraction_agent(
                     session_id=session_id,
                     scale_codes=[context.scale_code],
@@ -159,6 +168,7 @@ class ExtractionAgentRunner:
                             "ai_question": str(
                                 asked_message.content_text if asked_message else ""
                             ),
+                            "current_question_id": current_question_id,
                         }
                     ],
                     scale_version={
