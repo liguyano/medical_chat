@@ -860,20 +860,13 @@ class DialogAgentRunner:
         current_question: QuestionTask,
         questions: list[QuestionTask],
     ) -> tuple[QuestionTask, bool]:
-        """选择下一个尚未覆盖的 Task-todo 项。
-        作用：优先跳过已持久化答案和已问过的同编码问题；当计划已经问完但
-        Extraction 尚未确认完整时，返回当前问题作为核对上下文，不触发完成。
-        """
+        """选择下一个尚未形成有效结构化答案的 Task-todo 项。"""
         if model_base.SessionLocal is None:
             raise RuntimeError("数据库未初始化")
         with model_base.SessionLocal() as db:
-            answered_codes = set(
+            answered_question_ids = set(
                 db.scalars(
-                    select(AssessmentQuestion.question_code)
-                    .join(
-                        AssessmentAnswer,
-                        AssessmentAnswer.question_id == AssessmentQuestion.id,
-                    )
+                    select(AssessmentAnswer.question_id)
                     .join(
                         AssessmentSubmission,
                         AssessmentSubmission.id == AssessmentAnswer.submission_id,
@@ -887,24 +880,28 @@ class DialogAgentRunner:
                     )
                 ).all()
             )
-            asked_codes = set(
-                db.scalars(
-                    select(AssessmentQuestion.question_code)
-                    .join(
-                        InteractionMessage,
-                        InteractionMessage.related_question_id == AssessmentQuestion.id,
-                    )
-                    .where(
-                        InteractionMessage.interaction_session_id
-                        == self.interaction_session_id,
-                        InteractionMessage.role_type.in_(["AI", "assistant"]),
-                        InteractionMessage.deleted == 0,
-                    )
-                ).all()
-            )
-        covered_codes = answered_codes | asked_codes | {current_question.question_code}
-        for question in questions:
-            if question.question_code not in covered_codes:
+        return self._select_unanswered_question(
+            current_question=current_question,
+            questions=questions,
+            answered_question_ids=answered_question_ids,
+        )
+
+    @staticmethod
+    def _select_unanswered_question(
+        *,
+        current_question: QuestionTask,
+        questions: list[QuestionTask],
+        answered_question_ids: set[int],
+    ) -> tuple[QuestionTask, bool]:
+        """从当前题之后开始轮询；曾问过但未落成有效答案的题仍可再次询问。"""
+        current_index = DialogAgentRunner._question_index(
+            current_question.question_id,
+            questions,
+        )
+        candidates = questions[current_index + 1 :] + questions[:current_index]
+        covered_question_ids = answered_question_ids | {current_question.question_id}
+        for question in candidates:
+            if question.question_id not in covered_question_ids:
                 return question, False
         return current_question, True
 
@@ -979,7 +976,7 @@ class DialogAgentRunner:
                 f"{turn_instruction}"
                 "患者提出问题时先简短回答；不知道具体病区设施位置时，应说明需向本病区护士确认，"
                 "不得编造开水房、茶水室或微波炉的位置。"
-                "药物过敏、吸烟饮酒、手术等特征应按工具规则追问或宣教。"
+                "药物过敏、吸烟饮酒、手术等特征应按量表问题继续追问。"
                 + (f" Schedule Agent 最新引导：{schedule_prompt}" if schedule_prompt else "")
             )
         )

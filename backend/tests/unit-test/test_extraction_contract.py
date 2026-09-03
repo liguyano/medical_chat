@@ -1,8 +1,9 @@
 """字段抽取统一契约的纯单元测试。"""
 
-import pytest
-from pydantic import ValidationError
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
+import pytest
 from medagent.agents.service_agent.extraction_agent.agent import FieldExtractionAgent
 from medagent.agents.service_agent.extraction_agent.prompt import (
     build_system_prompt,
@@ -14,6 +15,7 @@ from medagent.agents.service_agent.extraction_agent.validator import (
     ExtractionCandidate,
     RawExtractionResult,
 )
+from pydantic import ValidationError
 
 
 def test_source_types_are_normalized_at_boundary() -> None:
@@ -188,3 +190,167 @@ def test_prompt_requests_minimal_output_instead_of_database_metadata() -> None:
     assert '"question_code"' not in output_section
     assert '"answer_type"' not in output_section
     assert '"clinical_score"' not in output_section
+
+
+def _contextual_choice_questions() -> list[dict]:
+    """构造上下文短回答测试使用的两道相邻题目。"""
+    return [
+        {
+            "question_id": 104,
+            "question_code": "passage_clear",
+            "question_text": "您家里的通道是否没有杂物，能够顺畅通行？",
+            "answer_type": "single_choice",
+            "options": [
+                {"option_code": "yes", "option_label": "是", "option_value": "yes"},
+                {"option_code": "no", "option_label": "否", "option_value": "no"},
+            ],
+            "required": True,
+        },
+        {
+            "question_id": 105,
+            "question_code": "floor_good_condition",
+            "question_text": "您家里的地板状况是否良好？",
+            "answer_type": "single_choice",
+            "options": [
+                {"option_code": "yes", "option_label": "是", "option_value": "yes"},
+                {"option_code": "no", "option_label": "否", "option_value": "no"},
+            ],
+            "required": True,
+        },
+    ]
+
+
+def _sequenced_extraction_model(*payloads: dict):
+    """构造按调用顺序返回结构化结果的模型替身。"""
+    invoke = AsyncMock(side_effect=list(payloads))
+    structured = SimpleNamespace(ainvoke=invoke)
+    model = SimpleNamespace(
+        with_structured_output=Mock(return_value=structured),
+    )
+    return model, invoke
+
+
+def test_prompt_allows_contextual_short_answer_semantics() -> None:
+    """提示词应让模型结合实际问句和选项语义理解短回答。"""
+    prompt = build_system_prompt(
+        {"scale_name": "居家环境", "version_code": "v1"},
+        _contextual_choice_questions(),
+    )
+
+    assert "实际问句" in prompt
+    assert "选项语义" in prompt
+    assert "没问题啊" in prompt
+    assert "没有" in prompt
+    assert "不会" in prompt
+    assert "通道能顺畅通行吗" in prompt
+
+
+@pytest.mark.asyncio
+async def test_empty_first_result_gets_one_focused_structured_recheck() -> None:
+    """首次空结果只针对已关联的当前题目执行一次结构化重判。"""
+    model, invoke = _sequenced_extraction_model(
+        {"answers": []},
+        {
+            "answers": [
+                {
+                    "question_id": 104,
+                    "value": "yes",
+                    "evidence": "没问题啊",
+                    "confidence": 0.92,
+                }
+            ]
+        },
+    )
+    agent = FieldExtractionAgent("SESS-1", ["home"], model)
+
+    result = await agent.extract_from_dialog(
+        previous_extraction={},
+        history_summary="",
+        new_dialog=[
+            {
+                "turn": 11,
+                "message_id": "MSG-22",
+                "patient": "没问题啊",
+                "ai_question": "通道里有没有杂物，能顺畅地走过去吗？",
+                "current_question_id": 104,
+            }
+        ],
+        scale_version={"scale_name": "居家环境", "version_code": "v1"},
+        questions=_contextual_choice_questions(),
+    )
+
+    assert invoke.await_count == 2
+    assert [
+        call.args[0] for call in model.with_structured_output.call_args_list
+    ] == [RawExtractionResult, RawExtractionResult]
+    assert result.extracted_answers[0].question_id == 104
+    assert result.extracted_answers[0].selected_option_codes == ["yes"]
+    focused_messages = invoke.await_args_list[1].args[0]
+    assert "passage_clear" in focused_messages[0].content
+    assert "floor_good_condition" not in focused_messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_valid_first_result_does_not_trigger_focused_recheck() -> None:
+    """首次已形成有效候选时不得增加模型调用。"""
+    model, invoke = _sequenced_extraction_model(
+        {
+            "answers": [
+                {
+                    "question_id": 104,
+                    "value": "yes",
+                    "evidence": "可以",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    agent = FieldExtractionAgent("SESS-2", ["home"], model)
+
+    result = await agent.extract_from_dialog(
+        previous_extraction={},
+        history_summary="",
+        new_dialog=[
+            {
+                "turn": 1,
+                "message_id": "MSG-1",
+                "patient": "可以",
+                "ai_question": "通道能顺畅通行吗？",
+                "current_question_id": 104,
+            }
+        ],
+        scale_version={"scale_name": "居家环境", "version_code": "v1"},
+        questions=_contextual_choice_questions(),
+    )
+
+    assert invoke.await_count == 1
+    assert result.extracted_answers[0].selected_option_codes == ["yes"]
+
+
+@pytest.mark.asyncio
+async def test_second_empty_result_remains_unrecorded() -> None:
+    """聚焦重判仍为空时保持未记录，不生成后端猜测答案。"""
+    model, invoke = _sequenced_extraction_model(
+        {"answers": []},
+        {"answers": []},
+    )
+    agent = FieldExtractionAgent("SESS-3", ["home"], model)
+
+    result = await agent.extract_from_dialog(
+        previous_extraction={},
+        history_summary="",
+        new_dialog=[
+            {
+                "turn": 1,
+                "message_id": "MSG-1",
+                "patient": "我也说不准",
+                "ai_question": "通道能顺畅通行吗？",
+                "current_question_id": 104,
+            }
+        ],
+        scale_version={"scale_name": "居家环境", "version_code": "v1"},
+        questions=_contextual_choice_questions(),
+    )
+
+    assert invoke.await_count == 2
+    assert result.extracted_answers == []

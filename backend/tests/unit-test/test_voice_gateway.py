@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from medagent.agents.service_agent.schedule_agent import QuestionTask
 
 import app.services.voice_gateway as voice_gateway_module
 from app.schemas.events import (
@@ -84,6 +85,7 @@ def make_session(tmp_path: Path) -> VoiceSession:
         patient_id=2,
         patient_info={"name": "患者"},
         scale_codes=["scale"],
+        task_list=[],
         instructions="基础提示词",
         client=FakeClient(),
         redis=FakeRedis(),
@@ -91,6 +93,103 @@ def make_session(tmp_path: Path) -> VoiceSession:
         publisher=FakePublisher(),
         turn_detection="server_vad",
     )
+
+
+def make_question(question_id: int, code: str, name: str) -> QuestionTask:
+    return QuestionTask(
+        question_id=question_id,
+        question_code=code,
+        question_name=name,
+        patient_text=f"请问您的{name}情况如何？",
+        question_type="text",
+        required=True,
+        sort_no=question_id,
+    )
+
+
+def test_resume_context_removes_recorded_questions_and_keeps_answer_summary():
+    questions = [
+        make_question(1, "weakness", "虚弱/乏力"),
+        make_question(2, "vision", "视力情况"),
+    ]
+
+    instructions, remaining = VoiceGateway._build_resume_context(
+        patient_info={"name": "患者"},
+        task_list=questions,
+        recorded_answers=[
+            {
+                "question_id": 1,
+                "question_code": "weakness",
+                "question_text": "虚弱/乏力",
+                "display_value": "无",
+            }
+        ],
+    )
+
+    assert [question.question_id for question in remaining] == [2]
+    assert "虚弱/乏力" in instructions
+    assert "无" in instructions
+    assert "不得重复询问" in instructions
+    assert "[vision]" in instructions
+
+
+def test_resume_context_for_completed_plan_forbids_restarting_scale():
+    question = make_question(1, "weakness", "虚弱/乏力")
+
+    instructions, remaining = VoiceGateway._build_resume_context(
+        patient_info={"name": "患者"},
+        task_list=[question],
+        recorded_answers=[
+            {
+                "question_id": 1,
+                "question_code": "weakness",
+                "question_text": "虚弱/乏力",
+                "display_value": "无",
+            }
+        ],
+    )
+
+    assert remaining == []
+    assert "全部必填题均已有有效记录" in instructions
+    assert "禁止重新开始量表" in instructions
+
+
+@pytest.mark.asyncio
+async def test_refresh_guidance_reloads_recorded_answers_before_next_speech(
+    tmp_path: Path,
+    monkeypatch,
+):
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.task_list = [
+        make_question(1, "weakness", "虚弱/乏力"),
+        make_question(2, "vision", "视力情况"),
+    ]
+    monkeypatch.setattr(
+        gateway,
+        "_load_recorded_answers",
+        lambda _session_no: [
+            {
+                "question_id": 1,
+                "question_code": "weakness",
+                "question_text": "虚弱/乏力",
+                "display_value": "无",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.ScheduleTaskStore,
+        "get_guidance",
+        lambda _self, _session_no: {"constraint_prompt": "下一题询问视力"},
+    )
+
+    await gateway._refresh_schedule_guidance(session)
+
+    updated = session.client.update_instructions.await_args.args[0]
+    assert "[vision]" in updated
+    assert "虚弱/乏力" in updated
+    assert "下一题询问视力" in updated
+    assert session.instructions in updated
 
 
 @pytest.mark.asyncio

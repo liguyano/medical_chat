@@ -373,7 +373,6 @@ async def play_audio(audio_url: str) -> dict[str, Any]:
 
 # LangChain BaseTool 注册表（名称 → 工具对象），供执行路由与 schema 生成复用
 _TOOL_OBJECTS: list[BaseTool] = [
-    get_education_material,
     trigger_consent_form,
     request_nurse_assistance,
     play_audio,

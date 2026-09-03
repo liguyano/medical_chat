@@ -33,6 +33,68 @@ def make_runner(model):
     )
 
 
+def make_question(question_id: int, code: str) -> QuestionTask:
+    return QuestionTask(
+        question_id=question_id,
+        question_code=code,
+        question_name=code,
+        patient_text=f"请回答 {code}",
+        question_type="text",
+        required=True,
+        sort_no=question_id,
+    )
+
+
+def test_select_unanswered_question_skips_only_valid_recorded_answers():
+    questions = [
+        make_question(1, "q1"),
+        make_question(2, "q2"),
+        make_question(3, "q3"),
+    ]
+
+    selected, exhausted = DialogAgentRunner._select_unanswered_question(
+        current_question=questions[0],
+        questions=questions,
+        answered_question_ids={1, 3},
+    )
+
+    assert selected.question_code == "q2"
+    assert exhausted is False
+
+
+def test_select_unanswered_question_wraps_to_previously_asked_but_unanswered_item():
+    questions = [
+        make_question(1, "q1"),
+        make_question(2, "q2"),
+        make_question(3, "q3"),
+    ]
+
+    selected, exhausted = DialogAgentRunner._select_unanswered_question(
+        current_question=questions[2],
+        questions=questions,
+        answered_question_ids={2, 3},
+    )
+
+    assert selected.question_code == "q1"
+    assert exhausted is False
+
+
+def test_select_unanswered_question_uses_id_when_scales_reuse_question_code():
+    questions = [
+        make_question(1, "shared_code"),
+        make_question(2, "shared_code"),
+    ]
+
+    selected, exhausted = DialogAgentRunner._select_unanswered_question(
+        current_question=questions[0],
+        questions=questions,
+        answered_question_ids={1},
+    )
+
+    assert selected.question_id == 2
+    assert exhausted is False
+
+
 @pytest.mark.asyncio
 async def test_opening_question_comes_from_model():
     """首问必须来自模型，不能直接返回量表原文。"""

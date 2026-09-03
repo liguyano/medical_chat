@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from medagent.agents.service_agent.dialog_agent.prompt import build_system_prompt
 from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS
+from medagent.agents.service_agent.schedule_agent import QuestionTask
 from sqlalchemy import func, select
 
 from app.configs.app_config import get_app_config
@@ -26,6 +27,8 @@ from app.errors.handlers import AppError
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.managers.keyword_matcher import get_keyword_matcher
 from app.models import base as model_base
+from app.models.assessment_execution import AssessmentAnswer, AssessmentSubmission
+from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.schemas.events import (
     AgentErrorEvent,
@@ -38,8 +41,10 @@ from app.schemas.events import (
     ToolCallEvent,
 )
 from app.services.agent_dispatch_service import dispatch_voice_answer_workers
+from app.services.assessment_progress_service import valid_assessment_answer_condition
 from app.services.dialog_audio_store import DialogAudioStore
 from app.services.dialog_tool_executor import execute_tool
+from app.services.extraction_service import get_extracted_fields
 from app.services.qwen_realtime_client import QwenRealtimeClient
 from app.services.tool_interaction_service import publish_tool_result
 from app.utils.redis_client import RedisClient, get_redis
@@ -90,6 +95,7 @@ class VoiceSession:
     redis: RedisClient
     audio_store: DialogAudioStore
     publisher: DialogEventPublisher
+    task_list: list[QuestionTask] = field(default_factory=list)
     turn_detection: str = "server_vad"
     connected_clients: set[WebSocket] = field(default_factory=set)
     input_audio: bytearray = field(default_factory=bytearray)
@@ -137,6 +143,119 @@ class VoiceGateway:
     def __init__(self) -> None:
         self._sessions: dict[str, VoiceSession] = {}
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _build_resume_context(
+        *,
+        patient_info: dict[str, Any],
+        task_list: list[QuestionTask],
+        recorded_answers: list[dict[str, Any]],
+    ) -> tuple[str, list[QuestionTask]]:
+        """按持久化有效答案过滤语音任务，并生成禁止重复询问的上下文。"""
+        recorded_ids = {
+            int(answer["question_id"])
+            for answer in recorded_answers
+            if answer.get("question_id") is not None
+        }
+        remaining = [
+            question
+            for question in task_list
+            if question.question_id not in recorded_ids
+        ]
+        instructions = build_system_prompt(
+            patient_info=patient_info,
+            task_list=remaining,
+        )
+        if recorded_answers:
+            summary = [
+                {
+                    "question_id": answer.get("question_id"),
+                    "question_code": answer.get("question_code"),
+                    "question": answer.get("question_text"),
+                    "answer": answer.get("display_value") or "已记录有效答案",
+                }
+                for answer in recorded_answers
+            ]
+            instructions += (
+                "\n\n【当前会话已记录的有效信息】\n"
+                + json.dumps(summary, ensure_ascii=False)
+                + "\n这些信息已由结构化答案确认，不得重复询问；只围绕剩余任务自然衔接。"
+            )
+        if task_list and not remaining:
+            instructions += (
+                "\n\n全部必填题均已有有效记录。禁止重新开始量表或重复核对；"
+                "请自然收尾，并等待系统发出的完成事件。"
+            )
+        return instructions, remaining
+
+    @staticmethod
+    def _load_recorded_answers(session_no: str) -> list[dict[str, Any]]:
+        """读取当前会话满足统一有效条件的结构化答案快照。"""
+        if model_base.SessionLocal is None:
+            raise RuntimeError("数据库未初始化")
+        with model_base.SessionLocal() as db:
+            session = db.scalar(
+                select(InteractionSession).where(
+                    InteractionSession.session_no == session_no,
+                    InteractionSession.deleted == 0,
+                )
+            )
+            if session is None:
+                return []
+            valid_question_ids = set(
+                db.scalars(
+                    select(AssessmentAnswer.question_id)
+                    .join(
+                        AssessmentSubmission,
+                        AssessmentSubmission.id == AssessmentAnswer.submission_id,
+                    )
+                    .where(
+                        AssessmentSubmission.interaction_session_id == session.id,
+                        AssessmentSubmission.deleted == 0,
+                        AssessmentAnswer.deleted == 0,
+                        valid_assessment_answer_condition(),
+                    )
+                ).all()
+            )
+            if not valid_question_ids:
+                return []
+            fields = get_extracted_fields(db, session_no).fields
+            by_question_id = {
+                field.question_id: field
+                for field in fields
+                if field.question_id in valid_question_ids and not field.invalid
+            }
+            questions = {
+                question.id: question
+                for question in db.scalars(
+                    select(AssessmentQuestion).where(
+                        AssessmentQuestion.id.in_(valid_question_ids),
+                        AssessmentQuestion.deleted == 0,
+                    )
+                ).all()
+            }
+            return [
+                {
+                    "question_id": question_id,
+                    "question_code": (
+                        by_question_id[question_id].question_code
+                        if question_id in by_question_id
+                        else questions[question_id].question_code
+                    ),
+                    "question_text": (
+                        by_question_id[question_id].question_text
+                        if question_id in by_question_id
+                        else questions[question_id].question_name
+                    ),
+                    "display_value": (
+                        by_question_id[question_id].display_value
+                        if question_id in by_question_id
+                        else None
+                    ),
+                }
+                for question_id in sorted(valid_question_ids)
+                if question_id in by_question_id or question_id in questions
+            ]
 
     @staticmethod
     def _is_no_active_response_error(error: dict[str, Any]) -> bool:
@@ -211,9 +330,11 @@ class VoiceGateway:
                 )
             plan = ScheduleTaskStore(get_redis()).get_plan(session_no)
             task_list = plan.tasks if plan is not None else []
-            instructions = build_system_prompt(
+            recorded_answers = self._load_recorded_answers(session_no)
+            instructions, _remaining_tasks = self._build_resume_context(
                 patient_info=patient_info,
                 task_list=task_list,
+                recorded_answers=recorded_answers,
             )
             client = QwenRealtimeClient(
                 api_key=voice_config.resolved_api_key(),
@@ -240,6 +361,7 @@ class VoiceGateway:
                 patient_id=patient_id,
                 patient_info=patient_info,
                 scale_codes=scale_codes,
+                task_list=task_list,
                 instructions=instructions,
                 client=client,
                 redis=get_redis(),
@@ -681,13 +803,25 @@ class VoiceGateway:
         await self._broadcast_state(session, "transcribing")
 
     async def _refresh_schedule_guidance(self, session: VoiceSession) -> None:
-        """在当前患者发言结束前注入上一轮已经生成的 Schedule 指引。"""
+        """患者下一轮说话前同步已记录答案，并注入最新 Schedule 指引。"""
+        try:
+            recorded_answers = self._load_recorded_answers(session.session_no)
+            instructions, _remaining_tasks = self._build_resume_context(
+                patient_info=session.patient_info,
+                task_list=session.task_list,
+                recorded_answers=recorded_answers,
+            )
+            session.instructions = instructions
+        except Exception:
+            instructions = session.instructions
+            logger.exception(
+                "刷新语音会话已记录答案失败，保留上一版指令: session=%s",
+                session.session_no,
+            )
         guidance = ScheduleTaskStore(session.redis).get_guidance(session.session_no)
         guidance_prompt = str(guidance.get("constraint_prompt") or "") if guidance else ""
-        if not guidance_prompt:
-            return
         await session.client.update_instructions(
-            session.instructions
+            instructions
             + (
                 "\n\n当前轮必须遵守的业务约束：\n" + guidance_prompt
                 if guidance_prompt

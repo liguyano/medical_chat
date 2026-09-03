@@ -38,6 +38,7 @@ class AssessmentProgress:
 
 
 MIN_VALID_EXTRACTION_CONFIDENCE = Decimal("0.6")
+PENDING_ANSWER_PLACEHOLDERS = ("待人工确认",)
 
 
 def valid_assessment_answer_condition() -> ColumnElement[bool]:
@@ -49,6 +50,9 @@ def valid_assessment_answer_condition() -> ColumnElement[bool]:
         and_(
             AssessmentAnswer.answer_text.is_not(None),
             func.length(func.trim(AssessmentAnswer.answer_text)) > 0,
+            func.trim(AssessmentAnswer.answer_text).notin_(
+                PENDING_ANSWER_PLACEHOLDERS
+            ),
         ),
         AssessmentAnswer.answer_number.is_not(None),
         AssessmentAnswer.answer_boolean.is_not(None),

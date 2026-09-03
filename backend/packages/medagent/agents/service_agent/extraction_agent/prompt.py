@@ -37,6 +37,11 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
 3. **多轮综合**：患者可能分多轮回答同一问题，需识别补充和更正
 4. **置信度标注**：每个候选必须给出可信度（0.0-1.0）
 5. **原话依据**：evidence 只写支持答案的患者原话，不写隐藏推理过程
+6. **结合语境理解短回答**：结合护理人员的实际问句、当前量表题目和选项语义，理解“没问题”“可以”“没有”“不会”等自然短回答；不要把词语脱离问句固定映射为是或否
+
+## 上下文短回答示例
+- 护理人员实际问：“通道能顺畅通行吗？”；患者答：“没问题啊。”；对应题目正向选项为“是”时，应返回该题目的“是”选项
+- 示例只说明应结合语境判断，不是关键词规则；如果结合实际问句仍无法可靠确定，就返回空 answers
 
 ## 量表信息
 量表名称：{scale_version.get("scale_name", "未知量表")}
@@ -121,6 +126,32 @@ def build_user_prompt(
         "请判断哪些题目已有明确答案，只返回题目ID、答案值、患者原话依据和置信度；无法确认时返回空 answers。"
     )
 
+    return "\n".join(prompt_parts)
+
+
+def build_focused_user_prompt(new_dialog: list[dict]) -> str:
+    """构建当前问句的单次聚焦重判提示词。
+
+    作用：首次未形成有效候选时，只让模型重新理解实际问句与患者短回答，
+    不引入历史字段或无关题目。
+    """
+    prompt_parts = [
+        "## 当前问句聚焦重判",
+        "首次判断没有形成有效答案。请只判断护理人员本轮实际问句对应的一个题目，不能扩散到其他题目。",
+    ]
+    for turn_data in new_dialog[-1:]:
+        prompt_parts.extend(
+            [
+                f"护理人员实际问：{turn_data.get('ai_question', turn_data.get('ai', ''))}",
+                f"患者实际答：{turn_data.get('patient', '')}",
+            ]
+        )
+    prompt_parts.extend(
+        [
+            "结合该题的题目定义和选项语义自由判断；不要对短回答做固定关键词映射。",
+            "能够可靠判断时返回一个候选；仍无法判断时返回空 answers。",
+        ]
+    )
     return "\n".join(prompt_parts)
 
 
