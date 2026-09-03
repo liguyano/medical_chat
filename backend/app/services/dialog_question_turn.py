@@ -19,19 +19,34 @@ def build_question_turn_prompt(context: dict[str, Any]) -> str:
         "recorded_count": context.get("current", 0),
         "required_count": context.get("total", 0),
     }
+    if candidate_ids and active_id is None:
+        liveness_rule = (
+            "当前候选非空且没有正在澄清的当前题，不能返回 null/null。"
+            "即使患者刚才在聊其他事情，也应先简短回应，再从 candidate_questions 中选择一题继续完成评估。"
+            "如果候选题状态为 asked，说明此前虽然问过，但后台仍没有形成有效结构化答案；"
+            "不要继续泛聊或无限等待抽取，应换一种自然、针对性的方式确认该题。"
+        )
+    elif candidate_ids:
+        liveness_rule = (
+            "当前仍有候选题，同时存在正在处理的 active_question。"
+            "确实需要澄清当前题时可以 selected_question_id=null 并保留 active_question_id；"
+            "当前题已经说明清楚并准备推进时，应从 candidate_questions 选择一题继续完成评估。"
+        )
+    else:
+        liveness_rule = (
+            "当前没有可用候选题，可能仍处于冷却或等待后台状态更新；"
+            "此时允许 null/null 自然回应，但不要自行从历史问题中伪造新题，也不要宣布评估完成。"
+        )
     return (
         "【本轮选题约束，优先于历史 Task-todo 和旧 Schedule 建议】\n"
         "每轮回复前必须先调用 report_question_choice，工具成功后才向患者说话。"
         "本轮最多选择一个候选问题，selected_question_id 与 active_question_id 均填该题 ID。"
-        "候选只是可选方向，不是本轮必须完成的清单，不能一次询问三个问题。"
-        "如果上一个问题未问清、患者话题未聊完或患者正在提问，可以完全不问新题："
-        "selected_question_id=null；仅在确实澄清当前题时保留 active_question_id，"
-        "普通回应或聊天时 active_question_id=null。不要因返回 null 而沉默或宣布评估完成。"
-        "候选为空也可自然回应，不要自行从历史问题中选新题。"
+        "新问题只能从 candidate_questions 中选择；候选为空时不得绕过冷却从历史中找题。"
+        "患者提出额外问题时先简短回答，但不能因此长期停留在泛聊而不推进仍未完成的必填评估。"
+        f"{liveness_rule}"
         "已记录的事实不得重复询问。患者说问过了时先根据历史回答回应，"
-        "确实缺信息才说明需要补充什么，禁止原样轮流重复。"
-        "准备选择已问待确认的候选时先回看历史：若患者已经明确回答，不要重新询问，"
-        "本轮可返回 null，等待后台抽取；若答案不清楚，才有针对性澄清。"
+        "如果该题仍作为候选出现，说明有效结构化答案尚未确认，应针对缺失信息重新确认，"
+        "而不是原样轮流重复问题或一直等待。"
         "工具参数、题目编号、冷却和抽取流程均不向患者朗读。\n"
         + json.dumps(payload, ensure_ascii=False, default=str)
     )
@@ -58,6 +73,15 @@ class QuestionTurnSelection:
             return {"success": False, "message": "本轮已取消，请等待患者下一次发言"}
         try:
             decision = validate_decision(self.context, arguments)
+            if (
+                self.context.get("candidate_question_ids")
+                and self.context.get("active_question_id") is None
+                and decision["selected_question_id"] is None
+                and decision["active_question_id"] is None
+            ):
+                raise ValueError(
+                    "当前仍有可问候选，不能继续普通聊天；请从候选中选择一题继续完成评估"
+                )
         except (ValueError, TypeError, KeyError) as exc:
             self.failed_reports += 1
             self.decision = None
