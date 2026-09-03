@@ -102,6 +102,18 @@ class FieldExtractionAgent:
             - ValidationError: JSON Schema 校验失败
             - openai.APITimeoutError: LLM 超时
         """
+        direct_unknown = self._build_bound_explicit_unknown_result(
+            new_dialog=new_dialog,
+            questions=questions,
+        )
+        if direct_unknown is not None:
+            logger.info(
+                "[Extraction Agent] 当前题收到明确未知回答，直接记录: session=%s question=%s",
+                self.session_id,
+                direct_unknown.extracted_answers[0].question_id,
+            )
+            return self._calculate_derived_fields(direct_unknown)
+
         system_prompt = build_system_prompt(scale_version, questions)
         user_prompt = build_user_prompt(
             previous_extraction, history_summary, new_dialog
@@ -191,6 +203,51 @@ class FieldExtractionAgent:
         )
 
     @classmethod
+    def _build_bound_explicit_unknown_result(
+        cls,
+        *,
+        new_dialog: list[dict],
+        questions: list[dict],
+    ) -> ExtractionResult | None:
+        """当前问答已绑定题目时，将患者明确未知直接转换为可持久化答案。"""
+        if not new_dialog:
+            return None
+        turn = new_dialog[-1]
+        question_id = turn.get("current_question_id")
+        if question_id is None:
+            return None
+        explicit_unknown = cls._explicit_unknown_text(turn.get("patient"))
+        if explicit_unknown is None:
+            return None
+        question = next(
+            (
+                item
+                for item in questions
+                if item.get("question_id") is not None
+                and int(item["question_id"]) == int(question_id)
+            ),
+            None,
+        )
+        if question is None:
+            return None
+        message_id = turn.get("message_id")
+        raw = RawExtractionResult(
+            answers=[
+                ExtractionCandidate(
+                    question_id=int(question_id),
+                    value=explicit_unknown,
+                    evidence=str(turn.get("patient") or explicit_unknown).strip(),
+                    confidence=1.0,
+                )
+            ]
+        )
+        return cls._build_result(
+            raw,
+            questions=[question],
+            source_message_ids=[str(message_id)] if message_id else [],
+        )
+
+    @classmethod
     def _build_result(
         cls,
         raw: RawExtractionResult,
@@ -268,7 +325,7 @@ class FieldExtractionAgent:
                 selected_option_codes=[],
                 extra_inputs={"explicit_unknown": True},
                 clinical_score=None,
-                extraction_confidence=candidate.confidence,
+                extraction_confidence=max(candidate.confidence, 0.95),
                 source_message_ids=list(dict.fromkeys(source_message_ids)),
                 reasoning=candidate.evidence.strip(),
             )
