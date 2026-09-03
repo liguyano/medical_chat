@@ -110,7 +110,14 @@ def build_user_prompt(
         message_id = turn_data.get("message_id", "")
         patient_text = turn_data.get("patient", "")
         ai_text = turn_data.get("ai_question", turn_data.get("ai", ""))
+        current_question_id = turn_data.get("current_question_id")
         prompt_parts.append(f"[轮次{turn_num} | message_id={message_id}]")
+        if current_question_id is not None:
+            prompt_parts.append(f"当前明确题目ID：{current_question_id}")
+            prompt_parts.append(
+                "该题号来自系统已保存的当前 AI 问句；患者使用“是/否/对/符合/就是”等短回答时，"
+                "优先按该题解释，只有回答与问句明显无关时才不要填写。"
+            )
         prompt_parts.append(f"护理人员问：{ai_text}")
         prompt_parts.append(f"患者答：{patient_text}")
         prompt_parts.append("")
@@ -118,7 +125,9 @@ def build_user_prompt(
     # 4. 任务指令
     prompt_parts.append("## 任务")
     prompt_parts.append(
-        "请判断哪些题目已有明确答案，只返回题目ID、答案值、患者原话依据和置信度；无法确认时返回空 answers。"
+        "请判断哪些题目已有明确答案，只返回题目ID、答案值、患者原话依据和置信度；"
+        "若当前轮提供了当前明确题目ID，必须先判断该题，短回答不得因为无法从全量题目中猜题号而直接返回空 answers；"
+        "确实无法确认答案时才返回空 answers。"
     )
 
     return "\n".join(prompt_parts)
