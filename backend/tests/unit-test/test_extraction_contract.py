@@ -57,6 +57,26 @@ def test_prompt_contains_only_compact_incremental_context() -> None:
     assert "m8" in prompt
 
 
+def test_prompt_marks_current_bound_question_for_short_answer() -> None:
+    """当前 AI 问句已绑定题目时，短回答必须携带明确题号上下文。"""
+    prompt = build_user_prompt(
+        {},
+        "",
+        [
+            {
+                "turn": 8,
+                "message_id": "m8",
+                "patient": "是，符合",
+                "ai_question": "请问 BMI 低于 18.5 这一项是否符合？",
+                "current_question_id": 123,
+            }
+        ],
+    )
+
+    assert "当前明确题目ID：123" in prompt
+    assert "短回答" in prompt
+
+
 def test_model_contract_contains_only_minimal_candidate_fields() -> None:
     """模型候选只携带题号、值、原话依据和置信度。"""
     candidate = ExtractionCandidate.model_validate(
