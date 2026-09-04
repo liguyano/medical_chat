@@ -1,5 +1,21 @@
 import type { InteractionMessage, StructuredAnswer } from '@/lib/types';
 
+export function isStructuredAnswerRecorded(
+  answer: StructuredAnswer
+): boolean {
+  if (typeof answer.recorded === 'boolean') return answer.recorded;
+  if (answer.invalid) return false;
+  return Boolean(
+    answer.displayValue?.trim() ||
+      answer.selectedOptionLabels?.length ||
+      answer.selectedOptionValues?.length ||
+      answer.selectedOptions?.length ||
+      answer.answerText?.trim() ||
+      answer.answerNumber !== undefined ||
+      answer.answerBoolean !== undefined
+  );
+}
+
 /**
  * 返回结构化答案的用户可见值。
  * option code 只用于审计和后端关联，禁止直接展示给患者或医护。
@@ -16,7 +32,7 @@ export function getStructuredAnswerDisplayValue(answer: StructuredAnswer): strin
   if (answer.answerText?.trim()) return answer.answerText.trim();
   if (answer.answerNumber !== undefined) return String(answer.answerNumber);
   if (answer.answerBoolean !== undefined) return answer.answerBoolean ? '是' : '否';
-  return '已记录';
+  return isStructuredAnswerRecorded(answer) ? '已记录' : '未记录';
 }
 
 /**
