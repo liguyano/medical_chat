@@ -23,7 +23,6 @@ from app.managers.assessment_loader import AssessmentQuestionLoader
 from app.managers.dialog_history_manager import DialogHistoryManager
 from app.models import base as model_base
 from app.models.assessment_execution import AssessmentAnswer, AssessmentSubmission
-from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.schemas.events import (
     AgentErrorEvent,
@@ -400,7 +399,9 @@ class DialogAgentRunner:
         """消费一条已落库的患者答案并生成下一问。"""
         processed = list(state.get("processed_message_ids") or [])
         patient_message = self._load_patient_message(source_message_id)
-        current_index = self._resolve_current_question_index(patient_message, questions)
+        current_index = self._resolve_current_question_index(
+            patient_message, questions, state
+        )
 
         existing_next = self._find_ai_message(turn_no=patient_message.turn_no + 1)
         if source_message_id in processed or existing_next is not None:
@@ -414,8 +415,16 @@ class DialogAgentRunner:
                 processed.append(source_message_id)
             self._save_state(
                 current_question_index=(
-                    self._question_index(existing_next.related_question_id, questions)
+                    self._optional_question_index(
+                        existing_next.related_question_id,
+                        questions,
+                    )
                     if existing_next is not None
+                    and self._optional_question_index(
+                        existing_next.related_question_id,
+                        questions,
+                    )
+                    is not None
                     else current_index
                 ),
                 turn_counter=(
@@ -439,7 +448,7 @@ class DialogAgentRunner:
             raise RuntimeError(f"患者答案为空: {source_message_id}")
 
         next_question, plan_exhausted = self._select_next_question(
-            current_question=questions[current_index],
+            current_index=current_index,
             questions=questions,
         )
         next_index = self._question_index(next_question.question_id, questions)
@@ -845,35 +854,39 @@ class DialogAgentRunner:
         self,
         patient_message: InteractionMessage,
         questions: list[QuestionTask],
+        state: dict[str, Any],
     ) -> int:
-        """根据患者答案同轮 AI 问句恢复 Task-todo 位置。"""
+        """恢复 Dialog 运行游标；问句题号只作为次级提示，不作为答案事实来源。"""
+        state_index = state.get("current_question_index")
+        if isinstance(state_index, int) and 0 <= state_index < len(questions):
+            return state_index
+
         asked = self._find_ai_message(turn_no=patient_message.turn_no)
-        if asked is None:
-            raise RuntimeError(
-                f"患者答案缺少对应 AI 问句: turn={patient_message.turn_no}"
+        if asked is not None:
+            related_index = self._optional_question_index(
+                asked.related_question_id,
+                questions,
             )
-        return self._question_index(asked.related_question_id, questions)
+            if related_index is not None:
+                return related_index
+
+        # 旧会话可能存在 related_question_id=NULL；从安全游标继续即可，
+        # 后续下一题仍以真实结构化答案缺口为依据，不因关联缺失中断对话。
+        return 0
 
     def _select_next_question(
         self,
         *,
-        current_question: QuestionTask,
+        current_index: int,
         questions: list[QuestionTask],
     ) -> tuple[QuestionTask, bool]:
-        """选择下一个尚未覆盖的 Task-todo 项。
-        作用：优先跳过已持久化答案和已问过的同编码问题；当计划已经问完但
-        Extraction 尚未确认完整时，返回当前问题作为核对上下文，不触发完成。
-        """
+        """仅以有效结构化答案选择下一道待收集题目。"""
         if model_base.SessionLocal is None:
             raise RuntimeError("数据库未初始化")
         with model_base.SessionLocal() as db:
-            answered_codes = set(
+            answered_question_ids = set(
                 db.scalars(
-                    select(AssessmentQuestion.question_code)
-                    .join(
-                        AssessmentAnswer,
-                        AssessmentAnswer.question_id == AssessmentQuestion.id,
-                    )
+                    select(AssessmentAnswer.question_id)
                     .join(
                         AssessmentSubmission,
                         AssessmentSubmission.id == AssessmentAnswer.submission_id,
@@ -887,37 +900,54 @@ class DialogAgentRunner:
                     )
                 ).all()
             )
-            asked_codes = set(
-                db.scalars(
-                    select(AssessmentQuestion.question_code)
-                    .join(
-                        InteractionMessage,
-                        InteractionMessage.related_question_id == AssessmentQuestion.id,
-                    )
-                    .where(
-                        InteractionMessage.interaction_session_id
-                        == self.interaction_session_id,
-                        InteractionMessage.role_type.in_(["AI", "assistant"]),
-                        InteractionMessage.deleted == 0,
-                    )
-                ).all()
-            )
-        covered_codes = answered_codes | asked_codes | {current_question.question_code}
-        for question in questions:
-            if question.question_code not in covered_codes:
+        return self._select_unanswered_question(
+            questions=questions,
+            current_index=current_index,
+            answered_question_ids=answered_question_ids,
+        )
+
+    @staticmethod
+    def _select_unanswered_question(
+        *,
+        questions: list[QuestionTask],
+        current_index: int,
+        answered_question_ids: set[int],
+    ) -> tuple[QuestionTask, bool]:
+        """按 Task-todo 游标循环寻找尚未形成有效结构化答案的题目。"""
+        if not questions:
+            raise RuntimeError("Task-todo 为空")
+        safe_index = current_index if 0 <= current_index < len(questions) else 0
+        ordered_indexes = [
+            (safe_index + offset) % len(questions)
+            for offset in range(1, len(questions) + 1)
+        ]
+        for index in ordered_indexes:
+            question = questions[index]
+            if question.question_id not in answered_question_ids:
                 return question, False
-        return current_question, True
+        return questions[safe_index], True
+
+    @staticmethod
+    def _optional_question_index(
+        question_id: int | None,
+        questions: list[QuestionTask],
+    ) -> int | None:
+        """把可选题号转换为运行游标；关联缺失或失效时返回 None。"""
+        for index, question in enumerate(questions):
+            if question.question_id == question_id:
+                return index
+        return None
 
     @staticmethod
     def _question_index(
         question_id: int | None,
         questions: list[QuestionTask],
     ) -> int:
-        """将数据库问题主键映射到 Task-todo 下标。"""
-        for index, question in enumerate(questions):
-            if question.question_id == question_id:
-                return index
-        raise RuntimeError(f"AI 问句未关联有效量表问题: {question_id}")
+        """严格题号映射，仅用于已知必须存在的内部目标题。"""
+        index = DialogAgentRunner._optional_question_index(question_id, questions)
+        if index is None:
+            raise RuntimeError(f"AI 问句未关联有效量表问题: {question_id}")
+        return index
 
     async def _build_agent(
         self,
@@ -1018,7 +1048,12 @@ class DialogAgentRunner:
                     "last_event_id": "0-0",
                     "processed_message_ids": [],
                 }
-            current_index = self._question_index(latest.related_question_id, questions)
+            current_index = self._optional_question_index(
+                latest.related_question_id,
+                questions,
+            )
+            if current_index is None:
+                current_index = 0
             patient_message_ids = list(
                 db.scalars(
                     select(InteractionMessage.message_no).where(
