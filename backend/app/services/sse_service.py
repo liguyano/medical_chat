@@ -114,11 +114,15 @@ def format_sse_event(message_id: str, fields: dict[bytes, bytes]) -> dict[str, s
         "payload": _build_payload(event_type, data),
     }
 
-    return {
-        "event": event_name,
+    result = {
         "id": message_id,
         "data": json.dumps(envelope, ensure_ascii=False),
     }
+    # 业务错误不能使用 SSE 协议保留的 error 事件名，否则浏览器 EventSource
+    # 会把它与网络连接错误混在一起并触发自动/手动重连。
+    if event_name != "error":
+        result["event"] = event_name
+    return result
 
 
 def _build_payload(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -499,9 +503,10 @@ def _format_snapshot_event(snapshot: dict[str, Any]) -> dict[str, str] | None:
         "payload": payload,
     }
     event = {
-        "event": event_name,
         "data": json.dumps(envelope, ensure_ascii=False),
     }
+    if event_name != "error":
+        event["event"] = event_name
     if stream_id:
         event["id"] = stream_id
     return event
