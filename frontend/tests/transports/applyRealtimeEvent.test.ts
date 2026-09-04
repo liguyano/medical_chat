@@ -267,6 +267,7 @@ describe('实时事件进度口径', () => {
     expect(answer.selectedOptions).toEqual(['option_3']);
     expect(answer.extractionConfidence).toBe(0.95);
     expect(answer.sourceMessageIds).toEqual(['MSG-PATIENT-1']);
+    expect(answer.recorded).toBe(true);
   });
 
   it('把工具领域事件写入宣教、同意和护士呼叫状态', async () => {
@@ -598,5 +599,77 @@ describe('实时事件进度口径', () => {
     expect(request.fullText).toBe('戒烟知情同意完整内容');
     expect(request.clauses[0].confirmed).toBe(true);
     expect(request.completedAt).toBe('2026-08-19T16:00:00Z');
+  });
+});
+
+
+describe('实时评估题目状态', () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('AI问句完成后把对应待填题从还没问标记为已问未记录', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+    useChatStore.setState({
+      sessions: {
+        '109': {
+          id: 'SESS-109',
+          sessionNo: 'SESS-109',
+          taskId: '109',
+          patientId: '1',
+          encounterId: '1',
+          interactionType: 'assessment',
+          channelType: 'mixed',
+          sessionStatus: 'active',
+          currentCicareStage: 'ask',
+          messages: [],
+        },
+      },
+      structuredAnswers: {
+        '109': [
+          {
+            questionId: '7',
+            questionCode: 'urine_leak',
+            questionText: '漏尿情况',
+            sourceMessageIds: [],
+            extractionConfidence: 0,
+            corrected: false,
+            recorded: false,
+            asked: false,
+          },
+        ],
+      },
+    });
+
+    applyRealtimeEvent({
+      event_id: 'ai-7',
+      event_type: 'assistant_message_completed',
+      task_id: '109',
+      session_id: 'SESS-109',
+      message_id: 'MSG-AI-7',
+      occurred_at: '2026-09-04T12:00:00Z',
+      payload: {
+        question_id: '7',
+        content_text: '请问您有没有漏尿？',
+        turn_no: 7,
+      },
+    });
+
+    expect(
+      useChatStore.getState().structuredAnswers['109'][0]?.asked
+    ).toBe(true);
+    expect(
+      useChatStore.getState().structuredAnswers['109'][0]?.recorded
+    ).toBe(false);
   });
 });
