@@ -222,9 +222,15 @@ from medagent.configs.agent_config import get_agent_config
   护理级别等字段不进入本次对话 Agent payload。
 - 患者答案进入 PostgreSQL 后，Dialog、Schedule observe、Extraction 必须独立派发。
   Dialog 不得等待另外两个 Agent；Schedule/Extraction 失败由各自 Celery 重试处理。
-- Extraction 模型只返回最小答案候选 `question_id`、`value`、`evidence`、`confidence`；
-  应用层必须依据当前任务量表题目补齐题目编码、答案类型、来源消息和临床得分。
-  单个候选无效或 Extraction 重试耗尽只记录诊断状态，不得转换为
+- Extraction 模型负责患者自然语言到量表结构化答案的语义归属与最终规范化，直接返回
+  `question_id`、`answer_type`、`answer_value` / `selected_option_codes`、`evidence`、
+  `confidence`。选择题必须返回题库真实 `option_code`；无法明确对应任何题目时返回空
+  `answers`。应用层只校验题目是否属于当前量表、类型/选项是否合法、置信度是否达到有效阈值，
+  不得根据“有/没有/是/否”等关键词、选项标签或 AI 问句关联二次猜测答案。
+- `interaction_message.related_question_id` 仅可作为 Dialog 目标题/诊断提示，不能作为
+  Extraction 答案归属事实来源；旧消息该字段为空时 Dialog 必须使用运行游标继续，不能因
+  `related_question_id=None` 中断患者对话。Dialog 下一题以有效结构化答案缺口为依据。
+  单个候选无效、低置信度或 Extraction 重试耗尽只记录诊断状态，不得转换为
   `handoff_requested`、设置任务人工介入或向护士发送紧急呼叫。
 - 评估完成的唯一事实来源是全部生效量表中 `required=true` 且 `derived=false` 的结构化
   `assessment_answer`。Dialog 禁止按问题下标、消息轮数或 Task-todo 是否问完直接完成任务。
