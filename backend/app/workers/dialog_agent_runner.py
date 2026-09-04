@@ -350,11 +350,14 @@ class DialogAgentRunner:
             if not turn_selection.allow_output:
                 return
             visible_chunks.append(text_chunk)
+            decision = turn_selection.decision
             self._publish_text_delta(
                 generation_id=generation_id,
                 message_id=message_id,
                 turn_number=1,
-                question_id=turn_selection.require_decision()["active_question_id"],
+                question_id=(
+                    decision["active_question_id"] if decision is not None else None
+                ),
                 text_chunk=text_chunk,
             )
 
@@ -365,7 +368,8 @@ class DialogAgentRunner:
                 "【系统发起护理评估开场，并非患者发言】请自然问候患者，完成 CICARE 自我介绍、"
                 "说明护理评估职责和配合方式。优先礼貌称呼，不反复直呼全名。"
                 "按本轮共享候选决定是否提出一个新问题，也可仅问候并报告 null/null；"
-                "不要宣布评估完成。必须先报告选题再向患者说话。"
+                "不要宣布评估完成。先自然完成本轮开场与选题，并在本轮结束前报告实际选择；"
+                "选题报告用于记录关联，不是患者可见输出的前置条件。"
             )
             agent = await self._build_agent(
                 questions=questions,
@@ -379,7 +383,7 @@ class DialogAgentRunner:
                 session_no=None,
                 context_metadata={"task_id": self.task_id, "metadata": {"is_opening": True}},
             )
-            decision = turn_selection.require_decision()
+            decision = turn_selection.decision
             opening_text = "".join(visible_chunks).strip()
             if not opening_text or generated_text == GENERIC_ERROR_MESSAGE:
                 raise RuntimeError("Dialog Agent 真实模型未返回有效开场")
@@ -401,7 +405,8 @@ class DialogAgentRunner:
             )
             self._save_state(
                 current_question_index=self._optional_question_index(
-                    decision["active_question_id"], questions
+                    decision["active_question_id"] if decision is not None else None,
+                    questions,
                 ),
                 turn_counter=1,
                 last_event_id=completed_event_id or started_event_id or "0-0",
@@ -484,16 +489,18 @@ class DialogAgentRunner:
         visible_chunks: list[str] = []
 
         async def text_delta_sink(text_chunk: str, _context: dict[str, Any]) -> None:
-            # 工具调用前的旁白与缺失选择的回复不推给患者，避免先问出再发现违规。
+            # 选题工具仅用于记录题目关联；模型可先自然回复，再在本轮完成前报告实际选择。
             if not turn_selection.allow_output:
                 return
             visible_chunks.append(text_chunk)
-            decision = turn_selection.require_decision()
+            decision = turn_selection.decision
             self._publish_text_delta(
                 generation_id=generation_id,
                 message_id=message_id,
                 turn_number=next_turn,
-                question_id=decision["active_question_id"],
+                question_id=(
+                    decision["active_question_id"] if decision is not None else None
+                ),
                 text_chunk=text_chunk,
             )
 
@@ -518,14 +525,23 @@ class DialogAgentRunner:
                     },
                 },
             )
-            decision = turn_selection.require_decision()
+            decision = turn_selection.decision
             next_text = "".join(visible_chunks).strip()
             if not next_text or next_text == GENERIC_ERROR_MESSAGE:
                 raise RuntimeError("Dialog Agent 真实模型未返回有效问句")
             if generated_text == GENERIC_ERROR_MESSAGE:
                 raise RuntimeError("Dialog Agent 本轮生成失败")
-            next_question = next(
-                (q for q in questions if q.question_id == decision["active_question_id"]), None
+            next_question = (
+                next(
+                    (
+                        q
+                        for q in questions
+                        if q.question_id == decision["active_question_id"]
+                    ),
+                    None,
+                )
+                if decision is not None
+                else None
             )
 
             message, completed_event_id = await self._persist_completed_question(
@@ -547,7 +563,8 @@ class DialogAgentRunner:
             processed.append(source_message_id)
             self._save_state(
                 current_question_index=self._optional_question_index(
-                    decision["active_question_id"], questions
+                    decision["active_question_id"] if decision is not None else None,
+                    questions,
                 ),
                 turn_counter=next_turn,
                 last_event_id=(completed_event_id or started_event_id or source_event_id or "0-0"),
@@ -751,9 +768,14 @@ class DialogAgentRunner:
             content_text=text,
             intent_type=(
                 "提问"
-                if decision is None or decision["selected_question_id"] is not None
+                if (
+                    decision is not None
+                    and decision["selected_question_id"] is not None
+                )
+                or (decision is None and question is not None)
                 else "澄清"
-                if decision["active_question_id"] is not None
+                if decision is not None
+                and decision["active_question_id"] is not None
                 else "回应"
             ),
             related_question_id=actual_question_id,
