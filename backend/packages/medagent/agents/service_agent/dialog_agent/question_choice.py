@@ -9,7 +9,7 @@ async def report_question_choice(
     selected_question_id: int | None,
     active_question_id: int | None,
 ) -> dict:
-    """在本轮患者可见回复之前报告选题，等待工具确认成功后再自然回复。
+    """在本轮完成前报告实际选题，用于记录题目关联，不作为患者输出前置门禁。
 
     Args:
         selected_question_id: 本轮新问的候选题 ID；不问新题时必须为 null。
