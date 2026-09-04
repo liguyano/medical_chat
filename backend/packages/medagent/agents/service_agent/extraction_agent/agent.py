@@ -84,7 +84,7 @@ class FieldExtractionAgent:
             HumanMessage(content=user_prompt),
         ]
 
-        # 模型只返回题号、值、原话依据和置信度；数据库元数据由后端补齐。
+        # 模型直接完成题目归属与答案规范化；后端只校验题库归属、类型和选项合法性。
         structured = self.model.with_structured_output(RawExtractionResult)
         raw_result = await structured.ainvoke(messages)
         if isinstance(raw_result, ExtractionResult):
@@ -181,38 +181,63 @@ class FieldExtractionAgent:
         question: dict,
         source_message_ids: list[str],
     ) -> ExtractedAnswer:
-        """依据题库定义补齐单个候选并规范化答案值。"""
+        """校验 AI 已完成规范化的答案，不再执行自然语言二次映射。"""
         raw_type = str(question.get("answer_type") or "text")
         try:
             answer_type = normalize_answer_type(raw_type)
         except ValueError:
             answer_type = "text"
 
+        if candidate.answer_type != answer_type:
+            raise ValueError(
+                f"答案类型与题库定义不一致: {candidate.answer_type} != {answer_type}"
+            )
+
         selected_option_codes: list[str] = []
         answer_value: str | float | bool | date | None = None
         if answer_type in {"single_choice", "multiple_choice"}:
-            selected_option_codes = cls._map_option_codes(
-                candidate.value,
-                options=list(question.get("options") or []),
-                multiple=answer_type == "multiple_choice",
-            )
-        elif answer_type == "number":
-            if isinstance(candidate.value, bool) or isinstance(candidate.value, list):
-                raise ValueError("数值题候选不是数值")
-            answer_value = float(candidate.value)
-        elif answer_type == "boolean":
-            answer_value = cls._normalize_boolean(candidate.value)
-        elif answer_type == "date":
-            if not isinstance(candidate.value, str):
-                raise ValueError("日期题候选不是日期字符串")
-            answer_value = date.fromisoformat(candidate.value.strip())
+            if candidate.answer_value is not None:
+                raise ValueError("选择题 answer_value 必须为空")
+            selected_option_codes = list(dict.fromkeys(candidate.selected_option_codes))
+            if not selected_option_codes:
+                raise ValueError("选择题必须返回 selected_option_codes")
+            if answer_type == "single_choice" and len(selected_option_codes) != 1:
+                raise ValueError("单选题只能返回一个 option_code")
+            valid_codes = {
+                str(option.get("option_code") or "")
+                for option in list(question.get("options") or [])
+                if option.get("option_code")
+            }
+            invalid_codes = [
+                code for code in selected_option_codes if code not in valid_codes
+            ]
+            if invalid_codes:
+                raise ValueError(
+                    f"选择题包含无效 option_code: {invalid_codes[0]}"
+                )
         else:
-            if isinstance(candidate.value, list):
-                answer_value = "、".join(candidate.value)
+            if candidate.selected_option_codes:
+                raise ValueError("非选择题不得返回 selected_option_codes")
+            if answer_type == "number":
+                if isinstance(candidate.answer_value, bool) or not isinstance(
+                    candidate.answer_value, (int, float)
+                ):
+                    raise ValueError("数值题 answer_value 必须是数字")
+                answer_value = float(candidate.answer_value)
+            elif answer_type == "boolean":
+                if type(candidate.answer_value) is not bool:
+                    raise ValueError("布尔题 answer_value 必须是 bool")
+                answer_value = candidate.answer_value
+            elif answer_type == "date":
+                if not isinstance(candidate.answer_value, str):
+                    raise ValueError("日期题 answer_value 必须是 YYYY-MM-DD 字符串")
+                answer_value = date.fromisoformat(candidate.answer_value.strip())
             else:
-                answer_value = str(candidate.value).strip()
-            if not answer_value:
-                raise ValueError("文本题候选为空")
+                if not isinstance(candidate.answer_value, str):
+                    raise ValueError("文本题 answer_value 必须是字符串")
+                answer_value = candidate.answer_value.strip()
+                if not answer_value:
+                    raise ValueError("文本题 answer_value 不能为空")
 
         return ExtractedAnswer(
             question_id=candidate.question_id,
@@ -226,52 +251,6 @@ class FieldExtractionAgent:
             source_message_ids=list(dict.fromkeys(source_message_ids)),
             reasoning=candidate.evidence.strip(),
         )
-
-    @staticmethod
-    def _normalize_boolean(value: Any) -> bool:
-        """将常见布尔表达规范化为布尔值。"""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, list):
-            raise ValueError("布尔题候选不是单值")
-        normalized = str(value).strip().casefold()
-        if normalized in {"true", "1", "yes", "是", "有"}:
-            return True
-        if normalized in {"false", "0", "no", "否", "无", "没有"}:
-            return False
-        raise ValueError("布尔题候选无法识别")
-
-    @staticmethod
-    def _map_option_codes(
-        value: str | float | bool | list[str],
-        *,
-        options: list[dict],
-        multiple: bool,
-    ) -> list[str]:
-        """在当前题目内把编码、标签或值唯一映射为选项编码。"""
-        values = value if isinstance(value, list) else [value]
-        if not values:
-            raise ValueError("选择题候选为空")
-        if not multiple and len(values) != 1:
-            raise ValueError("单选题候选包含多个值")
-
-        codes: list[str] = []
-        for raw_value in values:
-            target = str(raw_value).strip().casefold()
-            matched = []
-            for option in options:
-                aliases = {
-                    str(option.get("option_code", "")).strip().casefold(),
-                    str(option.get("option_label", "")).strip().casefold(),
-                    str(option.get("option_value", "")).strip().casefold(),
-                }
-                if target and target in aliases:
-                    matched.append(str(option.get("option_code") or ""))
-            matched = list(dict.fromkeys(code for code in matched if code))
-            if len(matched) != 1:
-                raise ValueError(f"选择题候选无法唯一映射: {raw_value}")
-            codes.append(matched[0])
-        return list(dict.fromkeys(codes))
 
     @staticmethod
     def _invalid_candidate(
