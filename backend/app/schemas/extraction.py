@@ -38,6 +38,8 @@ class ExtractedFieldDto(BaseModel):
         default=None, description="来源消息ID列表"
     )
     confidence: float | None = Field(default=None, description="抽取置信度")
+    recorded: bool = Field(default=False, description="是否已有有效结构化答案")
+    asked: bool = Field(default=False, description="该题是否至少被AI询问过一次")
     corrected: bool | None = Field(default=None, description="是否被护士修正")
     invalid: bool = Field(default=False, description="模型结果是否校验失败")
     invalid_reason: str | None = Field(default=None, description="校验失败原因")
