@@ -18,7 +18,7 @@ def test_idle_null_is_rejected_when_candidates_are_available():
 
     assert rejected["success"] is False
     assert rejected["retry_selection"] is True
-    assert turn.allow_output is False
+    assert turn.allow_output is True
 
     accepted = turn.report(
         {"selected_question_id": 23, "active_question_id": 23}
@@ -63,3 +63,4 @@ def test_prompt_tells_model_to_resume_candidate_after_idle_turn():
     assert "候选非空" in prompt
     assert "null/null" in prompt
     assert "继续完成评估" in prompt
+    assert "不是患者可见回复的前置门禁" in prompt
