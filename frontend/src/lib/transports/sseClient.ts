@@ -66,9 +66,13 @@ export function parseSseEnvelope(
   return {
     event_id: String(parsed.event_id ?? fallbackEventId ?? ''),
     stream_id:
-      parsed.stream_id === undefined && fallbackEventId === undefined
-        ? undefined
-        : String(parsed.stream_id ?? fallbackEventId),
+      parsed.stream_id === undefined ||
+      parsed.stream_id === null ||
+      parsed.stream_id === ''
+        ? fallbackEventId
+          ? String(fallbackEventId)
+          : undefined
+        : String(parsed.stream_id),
     event_type: eventType,
     task_id: String(parsed.task_id ?? ''),
     session_id:
@@ -95,11 +99,19 @@ function withLastEventId(path: string, lastEventId?: string): string {
   return url.toString();
 }
 
+function isRedisStreamId(value?: string): boolean {
+  return Boolean(value && /^\d+-\d+$/.test(value));
+}
+
 export function resolveTransportEventId(
   envelope: SseEnvelope,
   eventLastEventId?: string
 ): string | undefined {
-  return envelope.stream_id || eventLastEventId || undefined;
+  const envelopeStreamId =
+    typeof envelope.stream_id === 'string' ? envelope.stream_id : undefined;
+  if (isRedisStreamId(envelopeStreamId)) return envelopeStreamId;
+  if (isRedisStreamId(eventLastEventId)) return eventLastEventId;
+  return undefined;
 }
 
 export class SseClient {
