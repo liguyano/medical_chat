@@ -487,8 +487,10 @@ def _format_snapshot_event(snapshot: dict[str, Any]) -> dict[str, str] | None:
             "role": "assistant",
             "generation_id": snapshot.get("generation_id"),
         }
+    stream_id = str(snapshot.get("last_event_id") or "")
     envelope = {
         "event_id": f"snapshot:{snapshot.get('generation_id', '')}",
+        "stream_id": stream_id or None,
         "event_type": event_name,
         "task_id": str(snapshot.get("task_id", "")),
         "session_id": snapshot.get("session_id"),
@@ -496,7 +498,10 @@ def _format_snapshot_event(snapshot: dict[str, Any]) -> dict[str, str] | None:
         "occurred_at": snapshot.get("updated_at", ""),
         "payload": payload,
     }
-    return {
+    event = {
         "event": event_name,
         "data": json.dumps(envelope, ensure_ascii=False),
     }
+    if stream_id:
+        event["id"] = stream_id
+    return event
