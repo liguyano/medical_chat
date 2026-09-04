@@ -89,7 +89,7 @@ The response must be a valid json object and must not contain markdown or explan
 - multiple_choice：answer_value=null，selected_option_codes 可包含多个编码
 - 选择题必须直接返回题目定义中的 option_code，禁止返回 option_label、option_value 或自行创造编码
 - answer_type 必须与题目定义一致；题目原始类型无法识别时按 text 处理
-- 如果患者只是寒暄、反问、拒答、答非所问，或信息不足以映射题目，返回 {{"answers": []}}
+- 无法明确对应任何题目时返回 {{"answers": []}}；患者只是寒暄、反问、拒答、答非所问或信息不足时同样返回空 answers
 - AI 问句关联的题号不是答案事实来源；即使问句与题目关联缺失，也必须仅依据对话语义和题目定义判断
 """
 
