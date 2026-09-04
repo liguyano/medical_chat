@@ -1139,41 +1139,90 @@ export default function PatientDialoguePage() {
           {answers.length > 0 && (
             <details className="patient-card mt-3 p-4">
               <summary className="cursor-pointer font-bold">
-                查看已记录信息（{answers.length} 项）
+                查看评估信息（已记录 {recordedAnswers.length}/{answers.length}）
               </summary>
-              <div className="mt-3 space-y-2">
-                {answers.map((answer) => (
-                  <div
-                    key={answer.questionId}
-                    className="rounded-2xl bg-surface-secondary p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs text-foreground-muted">
-                          {answer.questionText}
-                        </p>
-                        <p className="mt-1 text-sm font-bold">
-                          {getStructuredAnswerDisplayValue(answer)}
-                        </p>
+              <div className="mt-3 space-y-4">
+                <section>
+                  <p className="mb-2 text-xs font-bold text-emerald-800">
+                    已记录（{recordedAnswers.length}）
+                  </p>
+                  <div className="space-y-2">
+                    {recordedAnswers.map((answer) => (
+                      <div
+                        key={answer.questionId}
+                        className="rounded-2xl bg-surface-secondary p-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs text-foreground-muted">
+                              {answer.questionText}
+                            </p>
+                            <p className="mt-1 text-sm font-bold">
+                              {getStructuredAnswerDisplayValue(answer)}
+                            </p>
+                          </div>
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingAnswerId(answer.questionId);
+                                setCorrection(
+                                  getStructuredAnswerDisplayValue(answer)
+                                );
+                              }}
+                              className="patient-touch-button h-10 min-h-10 w-10 min-w-10 text-primary"
+                              aria-label={`纠正${answer.questionText}`}
+                            >
+                              <PatientIcon name="edit" className="h-5 w-5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      {!readOnly && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingAnswerId(answer.questionId);
-                            setCorrection(
-                              getStructuredAnswerDisplayValue(answer)
-                            );
-                          }}
-                          className="patient-touch-button h-10 min-h-10 w-10 min-w-10 text-primary"
-                          aria-label={`纠正${answer.questionText}`}
-                        >
-                          <PatientIcon name="edit" className="h-5 w-5" />
-                        </button>
-                      )}
-                    </div>
+                    ))}
+                    {recordedAnswers.length === 0 && (
+                      <p className="text-xs text-foreground-muted">暂无</p>
+                    )}
                   </div>
-                ))}
+                </section>
+
+                <section>
+                  <p className="mb-2 text-xs font-bold text-amber-800">
+                    已问未记录（{askedPendingAnswers.length}）
+                  </p>
+                  <div className="space-y-2">
+                    {askedPendingAnswers.map((answer) => (
+                      <div
+                        key={answer.questionId}
+                        className="rounded-2xl bg-surface-secondary p-3 text-sm"
+                      >
+                        {answer.questionText}
+                      </div>
+                    ))}
+                    {askedPendingAnswers.length === 0 && (
+                      <p className="text-xs text-foreground-muted">暂无</p>
+                    )}
+                  </div>
+                </section>
+
+                <section>
+                  <p className="mb-2 text-xs font-bold text-foreground-muted">
+                    还没问（{unaskedAnswers.length}）
+                  </p>
+                  <div className="space-y-2">
+                    {unaskedAnswers.map((answer) => (
+                      <div
+                        key={answer.questionId}
+                        className="rounded-2xl bg-surface-secondary p-3 text-sm"
+                      >
+                        {answer.questionText}
+                      </div>
+                    ))}
+                    {unaskedAnswers.length === 0 && (
+                      <p className="text-xs text-foreground-muted">暂无</p>
+                    )}
+                  </div>
+                </section>
+
                 {!readOnly && editingAnswerId && (
                   <div className="rounded-2xl bg-primary-tint p-3">
                     <textarea
