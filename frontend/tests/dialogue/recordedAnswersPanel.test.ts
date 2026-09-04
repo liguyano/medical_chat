@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { RecordedAnswersPanel } from '@/components/patient/RecordedAnswersPanel';
 import type { StructuredAnswer } from '@/lib/types';
 
-const answers: StructuredAnswer[] = [
+const fields: StructuredAnswer[] = [
   {
     questionId: '12',
     questionCode: 'bowel_change',
@@ -15,36 +15,58 @@ const answers: StructuredAnswer[] = [
     sourceMessageIds: ['MSG-12'],
     extractionConfidence: 0.93,
     corrected: false,
+    recorded: true,
+    asked: true,
   },
   {
     questionId: '13',
     questionCode: 'vision_status',
     questionText: '视力情况',
-    answerText: '看远处有点模糊',
-    sourceMessageIds: ['MSG-13'],
-    extractionConfidence: 0.88,
+    sourceMessageIds: [],
+    extractionConfidence: 0,
     corrected: false,
+    recorded: false,
+    asked: true,
+  },
+  {
+    questionId: '14',
+    questionCode: 'sleep_status',
+    questionText: '睡眠情况',
+    sourceMessageIds: [],
+    extractionConfidence: 0,
+    corrected: false,
+    recorded: false,
+    asked: false,
   },
 ];
 
-describe('患者桌面已记录信息侧栏', () => {
-  it('展示AI已经实际写入的题目和值，不展示候选题或冷却状态', () => {
+describe('患者桌面评估信息侧栏', () => {
+  it('同时展示已记录、已问未记录和还没问，并只给已记录显示最终值', () => {
     const html = renderToStaticMarkup(
-      createElement(RecordedAnswersPanel, { answers })
+      createElement(RecordedAnswersPanel, { answers: fields })
     );
 
-    for (const text of ['已记录信息', '排泄情况', '有改变', '视力情况', '看远处有点模糊']) {
+    for (const text of [
+      '评估信息',
+      '已记录',
+      '已问未记录',
+      '还没问',
+      '排泄情况',
+      '有改变',
+      '视力情况',
+      '睡眠情况',
+    ]) {
       expect(html).toContain(text);
     }
-    expect(html).not.toContain('候选');
     expect(html).not.toContain('冷却');
+    expect(html).not.toContain('候选');
   });
 
-  it('没有结构化答案时显示空状态', () => {
+  it('没有字段时显示空状态', () => {
     const html = renderToStaticMarkup(
       createElement(RecordedAnswersPanel, { answers: [] })
     );
 
-    expect(html).toContain('暂时还没有已记录信息');
+    expect(html).toContain('暂时没有评估题目信息');
   });
 });
