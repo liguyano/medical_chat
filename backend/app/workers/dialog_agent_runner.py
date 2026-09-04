@@ -900,10 +900,24 @@ class DialogAgentRunner:
                     )
                 ).all()
             )
+            asked_question_ids = {
+                int(question_id)
+                for question_id in db.scalars(
+                    select(InteractionMessage.related_question_id).where(
+                        InteractionMessage.interaction_session_id
+                        == self.interaction_session_id,
+                        InteractionMessage.role_type.in_(["AI", "assistant"]),
+                        InteractionMessage.related_question_id.is_not(None),
+                        InteractionMessage.deleted == 0,
+                    )
+                ).all()
+                if question_id is not None
+            }
         return self._select_unanswered_question(
             questions=questions,
             current_index=current_index,
             answered_question_ids=answered_question_ids,
+            asked_question_ids=asked_question_ids,
         )
 
     @staticmethod
@@ -912,8 +926,9 @@ class DialogAgentRunner:
         questions: list[QuestionTask],
         current_index: int,
         answered_question_ids: set[int],
+        asked_question_ids: set[int],
     ) -> tuple[QuestionTask, bool]:
-        """按 Task-todo 游标循环寻找尚未形成有效结构化答案的题目。"""
+        """优先选择从未问过的缺失题，全部问过后才回访仍未记录的题。"""
         if not questions:
             raise RuntimeError("Task-todo 为空")
         safe_index = current_index if 0 <= current_index < len(questions) else 0
@@ -921,10 +936,17 @@ class DialogAgentRunner:
             (safe_index + offset) % len(questions)
             for offset in range(1, len(questions) + 1)
         ]
-        for index in ordered_indexes:
+        unanswered_indexes = [
+            index
+            for index in ordered_indexes
+            if questions[index].question_id not in answered_question_ids
+        ]
+        for index in unanswered_indexes:
             question = questions[index]
-            if question.question_id not in answered_question_ids:
+            if question.question_id not in asked_question_ids:
                 return question, False
+        if unanswered_indexes:
+            return questions[unanswered_indexes[0]], False
         return questions[safe_index], True
 
     @staticmethod
