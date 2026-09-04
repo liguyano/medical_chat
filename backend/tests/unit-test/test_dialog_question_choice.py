@@ -1,4 +1,4 @@
-"""可空选题协议与患者可见输出门禁回归测试。"""
+"""可空选题协议与患者可见输出软记录回归测试。"""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -52,13 +52,12 @@ def test_choice_prompt_only_exposes_candidates_and_active_question():
     assert "null" in prompt and "report_question_choice" in prompt
 
 
-def test_missing_question_choice_cannot_release_text():
+def test_missing_question_choice_does_not_block_patient_output():
     from app.services.dialog_question_turn import QuestionTurnSelection
 
     turn = QuestionTurnSelection({"candidate_question_ids": [], "active_question_id": None})
-    assert turn.allow_output is False
-    with pytest.raises(RuntimeError, match="选题"):
-        turn.require_decision()
+    assert turn.allow_output is True
+    assert turn.decision is None
 
 
 @pytest.fixture
@@ -110,10 +109,10 @@ def runner_harness(monkeypatch):
 def install_agent(runner, decision):
     async def build(**kwargs):
         async def handle(*args, **metadata):
-            await kwargs["text_delta_sink"]("工具前旁白", {})
+            await kwargs["text_delta_sink"]("您好，", {})
             if decision is not None:
                 assert kwargs["turn_selection"].report(decision)["success"]
-            await kwargs["text_delta_sink"]("您好，我会继续协助您。", {})
+            await kwargs["text_delta_sink"]("我会继续协助您。", {})
             return "您好，我会继续协助您。"
 
         return SimpleNamespace(handle_patient_input=handle, close=AsyncMock())
@@ -147,15 +146,19 @@ async def test_answer_persists_actual_choice_even_when_plan_missing(runner_harne
 
 
 @pytest.mark.asyncio
-async def test_answer_without_report_never_publishes_text(runner_harness):
+async def test_answer_without_report_still_persists_and_publishes_text(runner_harness):
     runner, saved, recorded = runner_harness
     install_agent(runner, None)
-    with pytest.raises(RuntimeError, match="选题"):
-        await runner._run_answer(
-            questions=[], state={}, source_message_id="p1", source_event_id=None
-        )
-    assert not saved and not recorded
-    runner._publish_text_delta.assert_not_called()
+
+    result = await runner._run_answer(
+        questions=[], state={}, source_message_id="p1", source_event_id=None
+    )
+
+    assert result["status"] == "turn_completed"
+    assert saved[0]["related_question_id"] is None
+    assert saved[0]["content_text"] == "您好，我会继续协助您。"
+    assert not recorded
+    assert runner._publish_text_delta.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -209,14 +212,18 @@ async def test_opening_uses_shared_choice_and_activates_even_without_question(
 
 
 @pytest.mark.asyncio
-async def test_opening_without_report_does_not_activate_or_publish_text(runner_harness):
+async def test_opening_without_report_still_activates_and_publishes_text(runner_harness):
     runner, saved, recorded = runner_harness
     install_agent(runner, None)
-    with pytest.raises(RuntimeError, match="选题"):
-        await runner._run_opening(questions=[], state={})
-    assert not saved and not recorded
-    runner._activate_session.assert_not_called()
-    runner._publish_text_delta.assert_not_called()
+
+    result = await runner._run_opening(questions=[], state={})
+
+    assert result["status"] == "opening_completed"
+    assert saved[0]["related_question_id"] is None
+    assert saved[0]["content_text"] == "您好，我会继续协助您。"
+    assert not recorded
+    runner._activate_session.assert_called_once()
+    assert runner._publish_text_delta.call_count == 2
 
 
 @pytest.mark.asyncio
