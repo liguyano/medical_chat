@@ -170,6 +170,43 @@ h1, h2 {
   min-height: auto;
 }
 
+.patient-dialogue-aside {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .patient-dialogue-shell {
+    display: grid;
+    grid-template-columns: minmax(300px, 360px) minmax(0, 640px);
+    align-items: start;
+    gap: 24px;
+    max-width: 1048px;
+    margin-inline: auto;
+    padding-inline: 12px;
+  }
+
+  .patient-dialogue-shell .patient-mobile-frame {
+    max-width: none;
+  }
+
+  .patient-dialogue-shell .patient-dialogue-content {
+    height: calc(100dvh - 98px);
+  }
+
+  .patient-dialogue-aside {
+    display: block;
+    position: sticky;
+    top: 16px;
+    height: calc(100dvh - 32px);
+    min-height: 0;
+    margin-top: 16px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: var(--background);
+  }
+}
+
 .patient-page-padding {
   padding: 20px 18px;
 }
