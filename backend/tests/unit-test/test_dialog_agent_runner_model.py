@@ -238,14 +238,30 @@ def test_missing_related_question_without_runtime_state_uses_safe_cursor():
     ) == 0
 
 
-def test_next_question_depends_on_structured_answers_not_asked_history():
-    """未形成结构化答案的题目仍属于待收集项，不能因曾经问过就永久跳过。"""
+def test_next_question_prefers_never_asked_unrecorded_question():
+    """未记录题中应先询问从未问过的题，避免刚问过的题连续重复。"""
+    questions = [_question(1, "q1"), _question(2, "q2"), _question(3, "q3")]
+
+    next_question, exhausted = DialogAgentRunner._select_unanswered_question(
+        questions=questions,
+        current_index=1,
+        answered_question_ids={1},
+        asked_question_ids={1, 2},
+    )
+
+    assert exhausted is False
+    assert next_question.question_id == 3
+
+
+def test_asked_unrecorded_question_can_be_revisited_after_unasked_exhausted():
+    """所有缺失题都至少问过后，仍允许回访未形成结构化答案的题。"""
     questions = [_question(1, "q1"), _question(2, "q2"), _question(3, "q3")]
 
     next_question, exhausted = DialogAgentRunner._select_unanswered_question(
         questions=questions,
         current_index=2,
         answered_question_ids={1, 3},
+        asked_question_ids={1, 2, 3},
     )
 
     assert exhausted is False
@@ -260,6 +276,7 @@ def test_all_structured_answers_exhaust_plan():
         questions=questions,
         current_index=1,
         answered_question_ids={1, 2},
+        asked_question_ids={1, 2},
     )
 
     assert exhausted is True
