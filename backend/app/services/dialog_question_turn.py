@@ -102,9 +102,3 @@ class QuestionTurnSelection:
             **decision,
             "message": "选择已确认，请自然回应患者；仅实际选新题才推进提问",
         }
-
-    def require_decision(self) -> dict[str, Any]:
-        if not self.allow_output:
-            raise RuntimeError("模型未报告有效选题，本轮回复未放行")
-        assert self.decision is not None
-        return self.decision
