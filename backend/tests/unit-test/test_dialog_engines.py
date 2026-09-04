@@ -395,7 +395,7 @@ def empty_chunk():
 
 @pytest.mark.asyncio
 async def test_text_engine_streams_text_and_preserves_history():
-    """文本流应逐片输出并保存完整 assistant 消息。"""
+    """普通文本无 </think> 时应完整输出并保存 assistant 历史。"""
     engine, client = text_engine([chunk(content="您"), chunk(content="好")])
     await engine.create_session("system", [])
     await engine.send_input("你好")
