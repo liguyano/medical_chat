@@ -229,7 +229,9 @@ from medagent.configs.agent_config import get_agent_config
   不得根据“有/没有/是/否”等关键词、选项标签或 AI 问句关联二次猜测答案。
 - `interaction_message.related_question_id` 仅可作为 Dialog 目标题/诊断提示，不能作为
   Extraction 答案归属事实来源；旧消息该字段为空时 Dialog 必须使用运行游标继续，不能因
-  `related_question_id=None` 中断患者对话。Dialog 下一题以有效结构化答案缺口为依据。
+  `related_question_id=None` 中断患者对话。Dialog 完成事实仍只看有效结构化答案；选下一题时
+  可用已询问题号做优先级：先问“未记录且从未问过”的题，所有缺失题都问过后才回访“已问未记录”，
+  禁止把“问过”本身当成已经完成。
   单个候选无效、低置信度或 Extraction 重试耗尽只记录诊断状态，不得转换为
   `handoff_requested`、设置任务人工介入或向护士发送紧急呼叫。
 - 评估完成的唯一事实来源是全部生效量表中 `required=true` 且 `derived=false` 的结构化
