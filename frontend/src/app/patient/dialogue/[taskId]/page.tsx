@@ -18,7 +18,10 @@ import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
 import { createClientInvocationId } from '@/lib/clientInvocation';
-import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
+import {
+  getStructuredAnswerDisplayValue,
+  isStructuredAnswerRecorded,
+} from '@/lib/structuredAnswer';
 import {
   buildDialogueSnapshotKey,
   shouldLoadDialogueSnapshot,
@@ -213,6 +216,26 @@ export default function PatientDialoguePage() {
   const educationCards = useChatStore((state) => state.educationCards);
   const consentRequests = useChatStore((state) => state.consentRequests);
   const answers = structuredAnswers[taskId] ?? [];
+  const recordedAnswers = useMemo(
+    () => answers.filter(isStructuredAnswerRecorded),
+    [answers]
+  );
+  const askedPendingAnswers = useMemo(
+    () =>
+      answers.filter(
+        (answer) =>
+          !isStructuredAnswerRecorded(answer) && Boolean(answer.asked)
+      ),
+    [answers]
+  );
+  const unaskedAnswers = useMemo(
+    () =>
+      answers.filter(
+        (answer) =>
+          !isStructuredAnswerRecorded(answer) && !answer.asked
+      ),
+    [answers]
+  );
   const historyTimeline = useMemo(
     () =>
       buildDialogueHistoryTimeline({
