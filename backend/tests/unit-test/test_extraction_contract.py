@@ -57,12 +57,14 @@ def test_prompt_contains_only_compact_incremental_context() -> None:
     assert "m8" in prompt
 
 
-def test_model_contract_contains_only_minimal_candidate_fields() -> None:
-    """模型候选只携带题号、值、原话依据和置信度。"""
+def test_model_contract_requires_ai_normalized_answer_fields() -> None:
+    """模型必须直接给出题目类型、最终值或真实选项编码。"""
     candidate = ExtractionCandidate.model_validate(
         {
             "question_id": 12,
-            "value": "腹泻3-4次/日",
+            "answer_type": "text",
+            "answer_value": "腹泻3-4次/日",
+            "selected_option_codes": [],
             "evidence": "我一天大概拉三四次",
             "confidence": 0.93,
         }
@@ -70,7 +72,9 @@ def test_model_contract_contains_only_minimal_candidate_fields() -> None:
 
     assert set(candidate.model_dump()) == {
         "question_id",
-        "value",
+        "answer_type",
+        "answer_value",
+        "selected_option_codes",
         "evidence",
         "confidence",
     }
@@ -78,21 +82,25 @@ def test_model_contract_contains_only_minimal_candidate_fields() -> None:
         ExtractionCandidate.model_validate(
             {
                 "question_id": 12,
-                "value": {"raw": "不允许任意对象"},
+                "answer_type": "text",
+                "answer_value": {"raw": "不允许任意对象"},
+                "selected_option_codes": [],
                 "evidence": "患者原话",
                 "confidence": 0.9,
             }
         )
 
 
-def test_minimal_candidate_is_enriched_from_question_definition() -> None:
-    """题目编码、类型、来源消息和选项编码均由后端题库事实补齐。"""
+def test_ai_option_code_is_used_without_backend_semantic_mapping() -> None:
+    """选择题由 AI 直接返回真实 option_code，后端只验证编码存在。"""
     raw = RawExtractionResult.model_validate(
         {
             "answers": [
                 {
                     "question_id": 12,
-                    "value": "有",
+                    "answer_type": "single_choice",
+                    "answer_value": None,
+                    "selected_option_codes": ["yes"],
                     "evidence": "最近确实有腹泻",
                     "confidence": 0.93,
                 }
@@ -139,7 +147,9 @@ def test_unknown_question_type_falls_back_to_text() -> None:
             "answers": [
                 {
                     "question_id": 13,
-                    "value": "视力模糊",
+                    "answer_type": "text",
+                    "answer_value": "视力模糊",
+                    "selected_option_codes": [],
                     "evidence": "最近看东西有点模糊",
                     "confidence": 0.88,
                 }
@@ -164,8 +174,8 @@ def test_unknown_question_type_falls_back_to_text() -> None:
     assert result.invalid_answers == []
 
 
-def test_prompt_requests_minimal_output_instead_of_database_metadata() -> None:
-    """提示词不得再要求模型重复生成题目编码、答案类型和临床得分。"""
+def test_prompt_requires_ai_to_return_final_structured_answer() -> None:
+    """提示词要求模型完成语义归属和答案规范化，后端不再二次猜测。"""
     prompt = build_system_prompt(
         {"scale_name": "测试量表", "version_code": "v1"},
         [
@@ -180,11 +190,123 @@ def test_prompt_requests_minimal_output_instead_of_database_metadata() -> None:
         ],
     )
 
-    assert '"question_id"' in prompt
-    assert '"value"' in prompt
-    assert '"evidence"' in prompt
-    assert '"confidence"' in prompt
     output_section = prompt.split("## 输出格式", maxsplit=1)[1]
+    for field in (
+        '"question_id"',
+        '"answer_type"',
+        '"answer_value"',
+        '"selected_option_codes"',
+        '"evidence"',
+        '"confidence"',
+    ):
+        assert field in output_section
+    assert "必须直接返回题目定义中的 option_code" in output_section
+    assert "无法明确对应任何题目时返回" in output_section
     assert '"question_code"' not in output_section
-    assert '"answer_type"' not in output_section
     assert '"clinical_score"' not in output_section
+
+
+def test_choice_label_is_not_guessed_into_option_code() -> None:
+    """AI 若返回展示标签而不是真实编码，后端不得再做语义映射。"""
+    raw = RawExtractionResult.model_validate(
+        {
+            "answers": [
+                {
+                    "question_id": 12,
+                    "answer_type": "single_choice",
+                    "answer_value": None,
+                    "selected_option_codes": ["有"],
+                    "evidence": "最近确实有腹泻",
+                    "confidence": 0.93,
+                }
+            ]
+        }
+    )
+    result = FieldExtractionAgent._build_result(
+        raw,
+        questions=[
+            {
+                "question_id": 12,
+                "question_code": "bowel_change",
+                "answer_type": "single_choice",
+                "options": [
+                    {"option_code": "yes", "option_label": "有", "option_value": "true"},
+                    {"option_code": "no", "option_label": "无", "option_value": "false"},
+                ],
+            }
+        ],
+        source_message_ids=["MSG-12"],
+    )
+
+    assert result.extracted_answers == []
+    assert result.invalid_answers[0].error == "选择题包含无效 option_code: 有"
+
+
+def test_boolean_must_be_normalized_by_ai_not_keyword_parser() -> None:
+    """布尔题只接受 AI 已规范化的 bool，不接受后端再解析“没有”等自然语言。"""
+    question = {
+        "question_id": 13,
+        "question_code": "allergy",
+        "answer_type": "boolean",
+        "options": [],
+    }
+    invalid = RawExtractionResult.model_validate(
+        {
+            "answers": [
+                {
+                    "question_id": 13,
+                    "answer_type": "boolean",
+                    "answer_value": "没有",
+                    "selected_option_codes": [],
+                    "evidence": "没有过敏",
+                    "confidence": 0.98,
+                }
+            ]
+        }
+    )
+    valid = RawExtractionResult.model_validate(
+        {
+            "answers": [
+                {
+                    "question_id": 13,
+                    "answer_type": "boolean",
+                    "answer_value": False,
+                    "selected_option_codes": [],
+                    "evidence": "没有过敏",
+                    "confidence": 0.98,
+                }
+            ]
+        }
+    )
+
+    invalid_result = FieldExtractionAgent._build_result(
+        invalid, questions=[question], source_message_ids=["MSG-13"]
+    )
+    valid_result = FieldExtractionAgent._build_result(
+        valid, questions=[question], source_message_ids=["MSG-13"]
+    )
+
+    assert invalid_result.extracted_answers == []
+    assert invalid_result.invalid_answers[0].error == "布尔题 answer_value 必须是 bool"
+    assert valid_result.extracted_answers[0].answer_value is False
+
+
+def test_ai_can_leave_turn_unmapped_without_backend_guess() -> None:
+    """无法对应题目时 answers 为空，本轮不形成结构化答案。"""
+    raw = RawExtractionResult.model_validate({"answers": []})
+    result = FieldExtractionAgent._build_result(
+        raw,
+        questions=[
+            {
+                "question_id": 1,
+                "question_code": "diet",
+                "answer_type": "text",
+                "options": [],
+            }
+        ],
+        source_message_ids=["MSG-1"],
+    )
+
+    assert result.extracted_answers == []
+    assert result.invalid_answers == []
+    assert result.missing_questions == [1]
