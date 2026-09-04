@@ -564,3 +564,53 @@ async def test_text_engine_model_failure_becomes_generic_error():
     events = [event async for event in engine.stream_response()]
 
     assert events == [{"type": "error", "message": "文本模型调用失败"}]
+
+
+@pytest.mark.asyncio
+async def test_text_engine_filters_think_block_from_stream_and_history():
+    """模型把思考块塞进 content 时，不得向患者输出或写入 assistant 历史。"""
+    engine, _ = text_engine(
+        [
+            chunk(content="<think>Picking a question from the candidates."),
+            chunk(content=" Let me report the choice first.</think>"),
+            chunk(content="好的，我们继续下一题。"),
+        ]
+    )
+    await engine.create_session("system", [])
+    await engine.send_input("继续")
+
+    events = [event async for event in engine.stream_response()]
+
+    assert events == [
+        {"type": "text", "content": "好的，我们继续下一题。"},
+        {"type": "response_done"},
+    ]
+    assert engine.messages[-1] == {
+        "role": "assistant",
+        "content": "好的，我们继续下一题。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_text_engine_filters_think_tags_split_across_chunks():
+    """think 标签被供应商拆成多个 chunk 时也不得泄漏内部思考。"""
+    engine, _ = text_engine(
+        [
+            chunk(content="<thi"),
+            chunk(content="nk>internal planning"),
+            chunk(content=" and tool choice</th"),
+            chunk(content="ink>好"),
+            chunk(content="的"),
+        ]
+    )
+    await engine.create_session("system", [])
+    await engine.send_input("继续")
+
+    events = [event async for event in engine.stream_response()]
+
+    assert events == [
+        {"type": "text", "content": "好"},
+        {"type": "text", "content": "的"},
+        {"type": "response_done"},
+    ]
+    assert engine.messages[-1] == {"role": "assistant", "content": "好的"}
