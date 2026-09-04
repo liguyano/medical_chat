@@ -36,6 +36,7 @@ describe('SSE envelope parser', () => {
     );
 
     expect(resolveTransportEventId(envelope, '')).toBeUndefined();
+    expect(resolveTransportEventId(envelope, 'snapshot:GEN-OLD')).toBeUndefined();
     expect(resolveTransportEventId(envelope, '1787205471545-0')).toBe(
       '1787205471545-0'
     );
