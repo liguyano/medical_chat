@@ -13,9 +13,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## 当前原型架构
 
 - 使用 Next.js App Router，医护端路由位于 `src/app/nurse`，患者端路由位于 `src/app/patient`。
-- 患者端新版 UI 以 390px 移动视口为主要验收基准，桌面端由
-  `src/components/layout/PatientLayout.tsx` 提供最大 430px 的居中移动画布；患者端设计令牌
-  统一放在 `src/app/globals.css` 的 `.patient-app` 作用域，禁止用患者端变量覆盖医护端。
+- 患者端新版 UI 以 390px 移动视口为主要验收基准；普通页面由
+  `src/components/layout/PatientLayout.tsx` 提供最大 430px 的居中移动画布。AI 对话页在
+  1024px 以上允许通过 `desktopAside` 使用双栏布局，左栏只展示现有 `structuredAnswers`
+  中已经实际写入的“题目 + 当前值”，不得把候选题、冷却状态或问句题号关联伪装成已记录答案。
+  患者端设计令牌统一放在 `src/app/globals.css` 的 `.patient-app` 作用域，禁止用患者端变量覆盖医护端。
 - 患者端交付素材复制到 `public/assets/patient`，页面不得直接引用 `docs/ui` 原型截图；
   通用图标、状态、语音 Orb、聊天气泡和呼叫护士入口位于 `src/components/patient`。
 - 患者端 UI 重构只能消费现有 Repository、Store、SSE 和语音 WebSocket 状态；原型有展示但
