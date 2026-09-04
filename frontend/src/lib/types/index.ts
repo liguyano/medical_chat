@@ -366,6 +366,8 @@ export interface StructuredAnswer {
   displayValue?: string; // normalized user-visible answer
   sourceMessageIds: string[];
   extractionConfidence: number;
+  recorded?: boolean;
+  asked?: boolean;
   corrected: boolean; // 患者是否已纠正
   answerType?: 'text' | 'number' | 'boolean' | 'date' | 'single_choice' | 'multiple_choice';
   options?: Array<{ code: string; label: string; value?: string; score?: number | null }>;
