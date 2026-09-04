@@ -19,7 +19,7 @@ from app.models.assessment_execution import (
     AssessmentSubmission,
 )
 from app.models.assessment_template import AssessmentOption, AssessmentQuestion
-from app.models.interaction import InteractionSession
+from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask
 from app.models.assessment_execution import AssessmentInstance
 from app.services.assessment_progress_service import refresh_assessment_progress
@@ -110,6 +110,18 @@ def get_extracted_fields(
         ).all()
     )
     question_by_id = {question.id: question for question in target_questions}
+    asked_question_ids = {
+        int(question_id)
+        for question_id in db.scalars(
+            select(InteractionMessage.related_question_id).where(
+                InteractionMessage.interaction_session_id == session.id,
+                InteractionMessage.role_type.in_(["AI", "assistant"]),
+                InteractionMessage.related_question_id.is_not(None),
+                InteractionMessage.deleted == 0,
+            )
+        ).all()
+        if question_id is not None
+    }
 
     # 4) 查询答案及题目；当前 ORM 未声明 relationship，使用显式 JOIN。
     answer_rows = list(
@@ -214,6 +226,8 @@ def get_extracted_fields(
                 display_value=display_value,
                 source_message_ids=source_ids,
                 confidence=answer.extraction_confidence,
+                recorded=True,
+                asked=answer.question_id in asked_question_ids,
                 corrected=False,  # 第一期无护士修正功能，默认 False
             )
         )
@@ -240,6 +254,8 @@ def get_extracted_fields(
                     options=option_definitions.get(question.id, []),
                     source_message_ids=None,
                     confidence=0,
+                    recorded=False,
+                    asked=question.id in asked_question_ids,
                     corrected=False,
                     invalid=True,
                     invalid_reason=invalid.get("error"),
@@ -260,6 +276,8 @@ def get_extracted_fields(
                 answer_type=question.question_type,
                 options=option_definitions.get(question.id, []),
                 confidence=None,
+                recorded=False,
+                asked=question.id in asked_question_ids,
                 corrected=False,
             )
         )
