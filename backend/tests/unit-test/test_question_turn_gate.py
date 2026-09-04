@@ -3,14 +3,15 @@
 from app.services.dialog_question_turn import QuestionTurnSelection
 
 
-def test_valid_then_invalid_selection_closes_output_gate():
+def test_invalid_selection_does_not_close_patient_output():
     turn = QuestionTurnSelection({"candidate_question_ids": [1, 2], "active_question_id": None})
+    assert turn.allow_output
     assert turn.report({"selected_question_id": 1, "active_question_id": 1})["success"]
     assert turn.allow_output
     assert not turn.report({"selected_question_id": 9, "active_question_id": 9})["success"]
-    assert not turn.allow_output
+    assert turn.allow_output
     assert not turn.report({"selected_question_id": 2, "active_question_id": 2})["success"]
-    assert not turn.allow_output
+    assert turn.allow_output
     assert turn.report({"selected_question_id": 1, "active_question_id": 1})["success"]
     assert turn.allow_output
 
