@@ -190,3 +190,77 @@ async def test_completion_generation_failure_does_not_complete_assessment(
 
     complete.assert_not_called()
     runner.output_store.fail.assert_called_once()
+
+
+def _question(question_id: int, code: str) -> QuestionTask:
+    return QuestionTask(
+        question_id=question_id,
+        question_code=code,
+        question_name=code,
+        patient_text=f"请问{code}？",
+        question_type="text",
+        required=True,
+        sort_no=question_id,
+    )
+
+
+def test_missing_related_question_uses_runtime_cursor_instead_of_crashing():
+    """AI 历史消息没有题号关联时，Dialog 使用运行游标继续，不把关联当事实来源。"""
+    runner = make_runner(StubModel(""))
+    runner._find_ai_message = Mock(
+        return_value=SimpleNamespace(related_question_id=None)
+    )
+    patient_message = SimpleNamespace(turn_no=2)
+    questions = [_question(1, "q1"), _question(2, "q2"), _question(3, "q3")]
+
+    index = runner._resolve_current_question_index(
+        patient_message,
+        questions,
+        {"current_question_index": 1},
+    )
+
+    assert index == 1
+
+
+def test_missing_related_question_without_runtime_state_uses_safe_cursor():
+    """Redis 状态也缺失时不因 related_question_id=None 终止整轮对话。"""
+    runner = make_runner(StubModel(""))
+    runner._find_ai_message = Mock(
+        return_value=SimpleNamespace(related_question_id=None)
+    )
+    patient_message = SimpleNamespace(turn_no=2)
+    questions = [_question(1, "q1"), _question(2, "q2")]
+
+    assert runner._resolve_current_question_index(
+        patient_message,
+        questions,
+        {},
+    ) == 0
+
+
+def test_next_question_depends_on_structured_answers_not_asked_history():
+    """未形成结构化答案的题目仍属于待收集项，不能因曾经问过就永久跳过。"""
+    questions = [_question(1, "q1"), _question(2, "q2"), _question(3, "q3")]
+
+    next_question, exhausted = DialogAgentRunner._select_unanswered_question(
+        questions=questions,
+        current_index=2,
+        answered_question_ids={1, 3},
+    )
+
+    assert exhausted is False
+    assert next_question.question_id == 2
+
+
+def test_all_structured_answers_exhaust_plan():
+    """只有所有题都已有有效结构化答案时才视为本轮计划已覆盖。"""
+    questions = [_question(1, "q1"), _question(2, "q2")]
+
+    next_question, exhausted = DialogAgentRunner._select_unanswered_question(
+        questions=questions,
+        current_index=1,
+        answered_question_ids={1, 2},
+    )
+
+    assert exhausted is True
+    assert next_question.question_id == 2
