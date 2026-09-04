@@ -506,6 +506,8 @@ export interface ExtractedFieldDto {
   display_value?: string;
   source_message_ids?: string[];
   confidence?: number;
+  recorded?: boolean;
+  asked?: boolean;
   corrected?: boolean;
   invalid?: boolean;
   invalid_reason?: string;
