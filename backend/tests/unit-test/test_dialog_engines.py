@@ -403,8 +403,7 @@ async def test_text_engine_streams_text_and_preserves_history():
     events = [event async for event in engine.stream_response()]
 
     assert events == [
-        {"type": "text", "content": "您"},
-        {"type": "text", "content": "好"},
+        {"type": "text", "content": "您好"},
         {"type": "response_done"},
     ]
     assert engine.messages[-1] == {"role": "assistant", "content": "您好"}
@@ -567,11 +566,11 @@ async def test_text_engine_model_failure_becomes_generic_error():
 
 
 @pytest.mark.asyncio
-async def test_text_engine_filters_think_block_from_stream_and_history():
-    """模型把思考块塞进 content 时，不得向患者输出或写入 assistant 历史。"""
+async def test_text_engine_discards_everything_before_think_close_marker():
+    """发现 </think> 时，应丢弃它以及之前的所有内容，只保留患者正文。"""
     engine, _ = text_engine(
         [
-            chunk(content="<think>Picking a question from the candidates."),
+            chunk(content="Picking a question from the candidates."),
             chunk(content=" Let me report the choice first.</think>"),
             chunk(content="好的，我们继续下一题。"),
         ]
@@ -592,12 +591,11 @@ async def test_text_engine_filters_think_block_from_stream_and_history():
 
 
 @pytest.mark.asyncio
-async def test_text_engine_filters_think_tags_split_across_chunks():
-    """think 标签被供应商拆成多个 chunk 时也不得泄漏内部思考。"""
+async def test_text_engine_handles_think_close_marker_split_across_chunks():
+    """</think> 被拆成多个 chunk 时，也应丢弃此前全部内部思考。"""
     engine, _ = text_engine(
         [
-            chunk(content="<thi"),
-            chunk(content="nk>internal planning"),
+            chunk(content="internal planning"),
             chunk(content=" and tool choice</th"),
             chunk(content="ink>好"),
             chunk(content="的"),
@@ -614,3 +612,22 @@ async def test_text_engine_filters_think_tags_split_across_chunks():
         {"type": "response_done"},
     ]
     assert engine.messages[-1] == {"role": "assistant", "content": "好的"}
+
+
+@pytest.mark.asyncio
+async def test_text_engine_preserves_plain_response_when_no_think_close_marker():
+    """整轮没有 </think> 时，不得误删正常模型回复。"""
+    engine, _ = text_engine([chunk(content="好的，"), chunk(content="继续下一题。")])
+    await engine.create_session("system", [])
+    await engine.send_input("继续")
+
+    events = [event async for event in engine.stream_response()]
+
+    assert events == [
+        {"type": "text", "content": "好的，继续下一题。"},
+        {"type": "response_done"},
+    ]
+    assert engine.messages[-1] == {
+        "role": "assistant",
+        "content": "好的，继续下一题。",
+    }
