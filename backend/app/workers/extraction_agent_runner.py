@@ -22,7 +22,10 @@ from app.models.assessment_template import AssessmentScale, AssessmentScaleVersi
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask
 from app.schemas.events import AgentErrorEvent, ProgressUpdatedEvent
-from app.services.assessment_progress_service import refresh_assessment_progress
+from app.services.assessment_progress_service import (
+    MIN_VALID_EXTRACTION_CONFIDENCE,
+    refresh_assessment_progress,
+)
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
 from app.workers.worker_lease import WorkerLease
@@ -220,7 +223,7 @@ class ExtractionAgentRunner:
                     answer
                     for answer in result.extracted_answers
                     if answer.question_id in valid_ids
-                    and self._has_extracted_value(answer)
+                    and self._is_persistable_answer(answer)
                 ]
                 for answer in result.extracted_answers:
                     if not answer.source_message_ids:
@@ -447,6 +450,16 @@ class ExtractionAgentRunner:
         if isinstance(answer.answer_value, str):
             return bool(answer.answer_value.strip())
         return answer.answer_value is not None
+
+
+    @staticmethod
+    def _is_persistable_answer(answer: Any) -> bool:
+        """只持久化有实际值且达到有效置信度的 AI 映射。"""
+        if not ExtractionAgentRunner._has_extracted_value(answer):
+            return False
+        return float(answer.extraction_confidence) >= float(
+            MIN_VALID_EXTRACTION_CONFIDENCE
+        )
 
     @staticmethod
     def _find_submission(instance_id: int) -> int | None:
