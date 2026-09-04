@@ -29,14 +29,16 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
     ]
 
     return f"""你是一个专业的护理评估答案识别助手。\
-你的任务是判断患者对话已经明确回答了哪些量表题目，并返回最小答案候选。
+你的任务是直接判断患者当前回答能够填写哪些量表题目，并输出已经规范化的最终结构化答案。
 
 ## 核心原则
-1. **忠实原文**：只抽取患者明确说过的内容，不推测、不脑补
-2. **当前问句优先**：优先判断当前护理人员问句对应的题目，不把一句短回答复制到无关题目
-3. **多轮综合**：患者可能分多轮回答同一问题，需识别补充和更正
-4. **置信度标注**：每个候选必须给出可信度（0.0-1.0）
-5. **原话依据**：evidence 只写支持答案的患者原话，不写隐藏推理过程
+1. **语义归属由你判断**：结合护理人员问句、患者回答、历史摘要和全部题目定义，决定能够填写哪些 question_id。
+2. **无法对应就不填**：如果患者回答无法明确对应任何题目，返回 {{"answers": []}}，禁止猜测题号。
+3. **忠实原文**：只使用患者明确表达的事实，不根据常识补全未说出的内容。
+4. **允许一轮多题**：患者一句话如果明确回答多个题目，可以返回多个答案；没有明确回答的题目不要返回。
+5. **最终值由你规范化**：布尔、数值、日期、文本以及选择题选项均由你直接转换成最终结构化值。
+6. **原话依据**：evidence 只引用支持答案的患者原话，不输出隐藏推理过程。
+7. **置信度标注**：每个答案给出 0.0-1.0 置信度；不确定时宁可不填。
 
 ## 量表信息
 量表名称：{scale_version.get("scale_name", "未知量表")}
@@ -46,25 +48,51 @@ def build_system_prompt(scale_version: dict, questions: list[dict]) -> str:
 {json.dumps(questions_schema, ensure_ascii=False, indent=2)}
 
 ## 输出格式（严格遵守 JSON Schema）
-只返回 question_id、value、evidence、confidence。不要返回 question_code、answer_type、来源消息、临床得分或其他数据库字段。
+每个答案只返回 question_id、answer_type、answer_value、selected_option_codes、evidence、confidence。
+不要返回 question_code、临床得分、来源消息或数据库字段。
 The response must be a valid json object and must not contain markdown or explanatory text.
+
+文本题示例：
 {{
   "answers": [
     {{
       "question_id": 101,
-      "value": "smoking_yes",
-      "evidence": "我现在还抽烟",
-      "confidence": 0.92
+      "answer_type": "text",
+      "answer_value": "夜间起床时偶尔头晕",
+      "selected_option_codes": [],
+      "evidence": "我晚上起来有时候会头晕",
+      "confidence": 0.94
     }}
   ]
 }}
 
-## 重要提示
-- 如果历史答案被新对话明确纠正，返回更正后的候选
-- 选择题的 value 可使用题目定义中的选项编码、标签或值；多选使用字符串数组
-- 文本、数字和布尔题直接返回对应的简单值；日期使用 YYYY-MM-DD
-- 无法确认题目或答案时返回 {{"answers": []}}，禁止猜测或返回“待人工确认”
+选择题示例：
+{{
+  "answers": [
+    {{
+      "question_id": 102,
+      "answer_type": "single_choice",
+      "answer_value": null,
+      "selected_option_codes": ["smoking_no"],
+      "evidence": "我不抽烟",
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+## 类型规范
+- text：answer_value 必须是患者事实对应的字符串，selected_option_codes=[]
+- number：answer_value 必须是数字，selected_option_codes=[]
+- boolean：answer_value 必须直接是 true/false，禁止返回“是”“否”“有”“没有”等自然语言
+- date：answer_value 使用 YYYY-MM-DD 字符串，selected_option_codes=[]
+- single_choice：answer_value=null，selected_option_codes 只能包含 1 个编码
+- multiple_choice：answer_value=null，selected_option_codes 可包含多个编码
+- 选择题必须直接返回题目定义中的 option_code，禁止返回 option_label、option_value 或自行创造编码
+- answer_type 必须与题目定义一致；题目原始类型无法识别时按 text 处理
+- 如果患者只是寒暄、反问、拒答、答非所问，或信息不足以映射题目，返回 {{"answers": []}}
+- AI 问句关联的题号不是答案事实来源；即使问句与题目关联缺失，也必须仅依据对话语义和题目定义判断
 """
+
 
 
 def build_user_prompt(
@@ -118,7 +146,7 @@ def build_user_prompt(
     # 4. 任务指令
     prompt_parts.append("## 任务")
     prompt_parts.append(
-        "请判断哪些题目已有明确答案，只返回题目ID、答案值、患者原话依据和置信度；无法确认时返回空 answers。"
+        "请直接判断本轮能够填写哪些题目，并给出最终 answer_type、answer_value 或 selected_option_codes；无法明确对应时返回空 answers。"
     )
 
     return "\n".join(prompt_parts)
