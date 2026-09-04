@@ -2,7 +2,7 @@
 
 import json
 
-from app.services.sse_service import _max_stream_id, format_sse_event
+from app.services.sse_service import _format_snapshot_event, _max_stream_id, format_sse_event
 
 
 def test_snapshot_event_id_does_not_break_redis_stream_read():
@@ -58,4 +58,28 @@ def test_sse_envelope_separates_domain_event_id_from_stream_cursor():
 
     assert event["id"] == "1787205471545-0"
     assert envelope["event_id"] == "EDU-EVENT-1"
+    assert envelope["stream_id"] == "1787205471545-0"
+
+
+def test_snapshot_event_carries_real_stream_cursor():
+    """快照事件的业务 ID 与 Redis Stream 续读游标必须分离。"""
+    event = _format_snapshot_event(
+        {
+            "status": "streaming",
+            "generation_id": "GEN-1",
+            "task_id": 1,
+            "session_id": "SESS-1",
+            "message_id": "MSG-1",
+            "turn_number": 2,
+            "question_id": "104",
+            "content": "正在生成",
+            "last_event_id": "1787205471545-0",
+            "updated_at": "2026-09-04T10:30:00Z",
+        }
+    )
+    assert event is not None
+    envelope = json.loads(event["data"])
+
+    assert event["id"] == "1787205471545-0"
+    assert envelope["event_id"] == "snapshot:GEN-1"
     assert envelope["stream_id"] == "1787205471545-0"
