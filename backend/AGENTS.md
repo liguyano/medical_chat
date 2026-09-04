@@ -282,9 +282,11 @@ from medagent.configs.agent_config import get_agent_config
   有效结构化答案才计入总进度，题目状态区分 `unasked/asked/recorded`。
 - 每轮最多提供三道候选，未询问题优先。实际新提问所在交互轮 N 后，N+1、N+2 不再作为
   新题候选，N+3 才可重新评估；仅向模型提供候选不算已问，澄清不重置新题冷却。
-- Dialog 首问、后续文本与 Qwen 语音均在可见回复前通过内部 `report_question_choice`
-  工具报告 `selected_question_id/active_question_id`。新提问两者相同且须来自候选；
-  澄清为 `null/原当前题`；普通回应为 `null/null`。空选择不得当作空回复或评估完成。
+- Dialog 首问、后续文本与 Qwen 语音使用内部 `report_question_choice`
+  工具记录 `selected_question_id/active_question_id`。该工具用于实际题目关联与冷却记录，
+  不再作为患者可见输出的前置门禁；模型可先自然回应，并在本轮完成前报告实际选择。
+  新提问两者相同且须来自候选；澄清为 `null/原当前题`；普通回应为 `null/null`。
+  模型漏报或报告校验失败时不得因此中断患者对话，也不得由后端猜测题目关联。
 - 完整 AI 消息保存后以既有 `interaction_event` 的 `question_turn` 事件记录选择、来源
   患者消息编号和交互轮；同一来源幂等，重试、页面恢复和文字/语音切换不额外计轮。
   语音预分配来源编号允许转写晚于回复落库；历史无题目关联的消息不得猜题或导致 Runner 崩溃。
