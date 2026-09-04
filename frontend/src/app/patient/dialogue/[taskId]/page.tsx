@@ -8,6 +8,7 @@ import ConsentInteractionCard from '@/components/chat/ConsentInteractionCard';
 import EducationMaterialCard from '@/components/chat/EducationMaterialCard';
 import HandoffHistoryCard from '@/components/chat/HandoffHistoryCard';
 import { PatientChatBubble } from '@/components/patient/PatientChatBubble';
+import { RecordedAnswersPanel } from '@/components/patient/RecordedAnswersPanel';
 import { PatientIcon } from '@/components/patient/PatientIcon';
 import { VoiceOrb } from '@/components/patient/VoiceOrb';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
@@ -944,6 +945,7 @@ export default function PatientDialoguePage() {
   return (
     <PatientLayout
       title="AI智能评估"
+      desktopAside={<RecordedAnswersPanel answers={answers} />}
       showBack
       onBack={() => router.push(`/patient/tasks/${taskId}`)}
       headerRight={
