@@ -259,6 +259,22 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           sessionStatus: 'active',
         });
       }
+      const askedQuestionId =
+        event.payload.question_id === undefined ||
+        event.payload.question_id === null
+          ? ''
+          : String(event.payload.question_id);
+      if (askedQuestionId) {
+        const existingField = (
+          useChatStore.getState().structuredAnswers[event.task_id] ?? []
+        ).find((item) => item.questionId === askedQuestionId);
+        if (existingField) {
+          chatStore.upsertStructuredAnswer(event.task_id, {
+            ...existingField,
+            asked: true,
+          });
+        }
+      }
       chatStore.setStreaming(null);
       break;
     }
@@ -271,8 +287,12 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
           item && typeof item === 'object'
             ? (item as Record<string, unknown>)
             : {};
+        const questionId = String(raw.question_id ?? raw.field_id ?? '');
+        const existingField = (
+          useChatStore.getState().structuredAnswers[event.task_id] ?? []
+        ).find((field) => field.questionId === questionId);
         const answer: StructuredAnswer = {
-          questionId: String(raw.question_id ?? raw.field_id ?? ''),
+          questionId,
           questionCode: String(raw.question_code ?? ''),
           questionText: String(raw.question_text ?? raw.field_name ?? '评估字段'),
           answerType: raw.answer_type as StructuredAnswer['answerType'],
@@ -324,6 +344,10 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
               : [],
           extractionConfidence:
             typeof raw.confidence === 'number' ? raw.confidence : 0,
+          recorded:
+            typeof raw.recorded === 'boolean' ? raw.recorded : true,
+          asked:
+            typeof raw.asked === 'boolean' ? raw.asked : existingField?.asked,
           corrected: Boolean(raw.corrected),
           invalid: Boolean(raw.invalid),
           invalidReason:
