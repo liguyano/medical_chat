@@ -39,7 +39,10 @@ def build_question_turn_prompt(context: dict[str, Any]) -> str:
         )
     return (
         "【本轮选题约束，优先于历史 Task-todo 和旧 Schedule 建议】\n"
-        "每轮回复前必须先调用 report_question_choice，工具成功后才向患者说话。"
+        "先根据 candidate_questions 与 active_question 决定本轮实际要回应或询问的内容；"
+        "在本轮完成前调用 report_question_choice 报告实际选择。"
+        "该工具仅用于记录题目关联，不是患者可见回复的前置门禁；"
+        "可以先自然回应患者，再报告本轮真正选择的题目，但报告必须与实际回复一致。"
         "本轮最多选择一个候选问题，selected_question_id 与 active_question_id 均填该题 ID。"
         "新问题只能从 candidate_questions 中选择；候选为空时不得绕过冷却从历史中找题。"
         "患者提出额外问题时先简短回答，但不能因此长期停留在泛聊而不推进仍未完成的必填评估。"
@@ -54,7 +57,7 @@ def build_question_turn_prompt(context: dict[str, Any]) -> str:
 
 @dataclass
 class QuestionTurnSelection:
-    """一次患者交互的选择；没有合法报告时不放行患者可见增量。"""
+    """一次患者交互的选题记录；报告用于关联题目，不作为患者输出门禁。"""
 
     context: dict[str, Any]
     decision: dict[str, Any] | None = None
@@ -64,7 +67,8 @@ class QuestionTurnSelection:
 
     @property
     def allow_output(self) -> bool:
-        return self.decision is not None and not self.cancelled
+        """患者输出只受取消状态约束，不再依赖选题工具是否已报告。"""
+        return not self.cancelled
 
     def report(self, arguments: dict[str, Any]) -> dict[str, Any]:
         from app.services.dialog_question_service import validate_decision
@@ -84,11 +88,9 @@ class QuestionTurnSelection:
                 )
         except (ValueError, TypeError, KeyError) as exc:
             self.failed_reports += 1
-            self.decision = None
             return {"success": False, "message": str(exc), "retry_selection": True}
         if self.confirmed_decision is not None and decision != self.confirmed_decision:
             self.failed_reports += 1
-            self.decision = None
             return {
                 "success": False,
                 "message": "本轮已经确认选题，不可再次更换；请按已确认选择回复",
