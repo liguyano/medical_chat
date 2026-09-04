@@ -20,13 +20,13 @@ def test_explicit_empty_selection_allows_natural_reply():
     turn = QuestionTurnSelection({"candidate_question_ids": [], "active_question_id": 1})
     assert turn.report({"selected_question_id": None, "active_question_id": None})["success"]
     assert turn.allow_output
-    assert turn.require_decision() == {"selected_question_id": None, "active_question_id": None}
+    assert turn.decision == {"selected_question_id": None, "active_question_id": None}
 
 
 def test_clarifying_active_question_is_not_a_new_selection():
     turn = QuestionTurnSelection({"candidate_question_ids": [2], "active_question_id": 1})
     assert turn.report({"selected_question_id": None, "active_question_id": 1})["success"]
-    assert turn.require_decision() == {"selected_question_id": None, "active_question_id": 1}
+    assert turn.decision == {"selected_question_id": None, "active_question_id": 1}
 
 
 def test_question_choice_report_is_not_a_patient_business_event(monkeypatch):
