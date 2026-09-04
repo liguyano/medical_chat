@@ -19,57 +19,32 @@ logger = logging.getLogger(__name__)
 
 
 class _ThinkStreamFilter:
-    """过滤文本模型 content 中的 <think> 思考块，支持标签跨 chunk 拆分。"""
+    """仅以 </think> 为边界，丢弃其之前的模型内部思考内容。"""
 
-    _OPEN_TAG = "<think>"
     _CLOSE_TAG = "</think>"
 
     def __init__(self) -> None:
-        self._inside_think = False
         self._pending = ""
-
-    @staticmethod
-    def _partial_suffix_length(text: str, marker: str) -> int:
-        """返回 text 末尾与 marker 开头重合的最长长度。"""
-        folded = text.casefold()
-        marker_folded = marker.casefold()
-        limit = min(len(text), len(marker) - 1)
-        for size in range(limit, 0, -1):
-            if folded.endswith(marker_folded[:size]):
-                return size
-        return 0
+        self._boundary_found = False
 
     def feed(self, chunk: str) -> str:
-        """消费一个流式文本分片，仅返回患者可见部分。"""
-        data = self._pending + chunk
+        """找到 </think> 前只缓存；找到后丢弃前缀并开始输出正文。"""
+        if self._boundary_found:
+            return chunk
+
+        self._pending += chunk
+        index = self._pending.casefold().find(self._CLOSE_TAG.casefold())
+        if index < 0:
+            return ""
+
+        visible = self._pending[index + len(self._CLOSE_TAG) :]
         self._pending = ""
-        visible_parts: list[str] = []
-
-        while data:
-            marker = self._CLOSE_TAG if self._inside_think else self._OPEN_TAG
-            index = data.casefold().find(marker.casefold())
-            if index >= 0:
-                if self._inside_think:
-                    self._inside_think = False
-                else:
-                    visible_parts.append(data[:index])
-                    self._inside_think = True
-                data = data[index + len(marker) :]
-                continue
-
-            suffix_length = self._partial_suffix_length(data, marker)
-            stable = data[:-suffix_length] if suffix_length else data
-            if not self._inside_think:
-                visible_parts.append(stable)
-            self._pending = data[-suffix_length:] if suffix_length else ""
-            break
-
-        return "".join(visible_parts)
+        self._boundary_found = True
+        return visible
 
     def finish(self) -> str:
-        """响应结束时释放普通文本尾部；未闭合思考块继续丢弃。"""
-        if self._inside_think:
-            self._pending = ""
+        """整轮没有 </think> 时按普通回复原样释放，避免误删正常文本。"""
+        if self._boundary_found:
             return ""
         tail = self._pending
         self._pending = ""
