@@ -18,6 +18,64 @@ from websockets.exceptions import ConnectionClosed
 logger = logging.getLogger(__name__)
 
 
+class _ThinkStreamFilter:
+    """过滤文本模型 content 中的 <think> 思考块，支持标签跨 chunk 拆分。"""
+
+    _OPEN_TAG = "<think>"
+    _CLOSE_TAG = "</think>"
+
+    def __init__(self) -> None:
+        self._inside_think = False
+        self._pending = ""
+
+    @staticmethod
+    def _partial_suffix_length(text: str, marker: str) -> int:
+        """返回 text 末尾与 marker 开头重合的最长长度。"""
+        folded = text.casefold()
+        marker_folded = marker.casefold()
+        limit = min(len(text), len(marker) - 1)
+        for size in range(limit, 0, -1):
+            if folded.endswith(marker_folded[:size]):
+                return size
+        return 0
+
+    def feed(self, chunk: str) -> str:
+        """消费一个流式文本分片，仅返回患者可见部分。"""
+        data = self._pending + chunk
+        self._pending = ""
+        visible_parts: list[str] = []
+
+        while data:
+            marker = self._CLOSE_TAG if self._inside_think else self._OPEN_TAG
+            index = data.casefold().find(marker.casefold())
+            if index >= 0:
+                if self._inside_think:
+                    self._inside_think = False
+                else:
+                    visible_parts.append(data[:index])
+                    self._inside_think = True
+                data = data[index + len(marker) :]
+                continue
+
+            suffix_length = self._partial_suffix_length(data, marker)
+            stable = data[:-suffix_length] if suffix_length else data
+            if not self._inside_think:
+                visible_parts.append(stable)
+            self._pending = data[-suffix_length:] if suffix_length else ""
+            break
+
+        return "".join(visible_parts)
+
+    def finish(self) -> str:
+        """响应结束时释放普通文本尾部；未闭合思考块继续丢弃。"""
+        if self._inside_think:
+            self._pending = ""
+            return ""
+        tail = self._pending
+        self._pending = ""
+        return tail
+
+
 class DialogEngine(ABC):
     """屏蔽语音和文本供应商差异的统一对话引擎接口。"""
 
@@ -417,6 +475,7 @@ class TextChatEngine(DialogEngine):
             response = await self.client.chat.completions.create(**request)
             full_text = ""
             pending_calls: dict[int, dict[str, Any]] = {}
+            content_filter = _ThinkStreamFilter()
             chunk_count = 0
             async for chunk in response:
                 chunk_count += 1
@@ -427,8 +486,10 @@ class TextChatEngine(DialogEngine):
                 if delta is None:
                     continue
                 if delta.content:
-                    full_text += delta.content
-                    yield {"type": "text", "content": delta.content}
+                    visible_content = content_filter.feed(str(delta.content))
+                    if visible_content:
+                        full_text += visible_content
+                        yield {"type": "text", "content": visible_content}
                 for tool_call in delta.tool_calls or []:
                     index = int(tool_call.index or 0)
                     pending = pending_calls.setdefault(
@@ -443,6 +504,11 @@ class TextChatEngine(DialogEngine):
                             pending["name"] += function.name
                         if function.arguments:
                             pending["arguments"] += function.arguments
+
+            trailing_content = content_filter.finish()
+            if trailing_content:
+                full_text += trailing_content
+                yield {"type": "text", "content": trailing_content}
 
             assistant_message: dict[str, Any] = {
                 "role": "assistant",
