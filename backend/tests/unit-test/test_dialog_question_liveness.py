@@ -24,7 +24,7 @@ def test_idle_null_is_rejected_when_candidates_are_available():
         {"selected_question_id": 23, "active_question_id": 23}
     )
     assert accepted["success"] is True
-    assert turn.require_decision() == {
+    assert turn.decision == {
         "selected_question_id": 23,
         "active_question_id": 23,
     }
