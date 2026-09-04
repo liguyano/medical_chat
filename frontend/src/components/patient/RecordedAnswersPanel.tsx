@@ -1,20 +1,9 @@
 import React from 'react';
-import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
+import {
+  getStructuredAnswerDisplayValue,
+  isStructuredAnswerRecorded,
+} from '@/lib/structuredAnswer';
 import type { StructuredAnswer } from '@/lib/types';
-
-function isRecorded(answer: StructuredAnswer): boolean {
-  if (typeof answer.recorded === 'boolean') return answer.recorded;
-  if (answer.invalid) return false;
-  return Boolean(
-    answer.displayValue?.trim() ||
-      answer.selectedOptionLabels?.length ||
-      answer.selectedOptionValues?.length ||
-      answer.selectedOptions?.length ||
-      answer.answerText?.trim() ||
-      answer.answerNumber !== undefined ||
-      answer.answerBoolean !== undefined
-  );
-}
 
 function QuestionList({
   answers,
@@ -50,12 +39,12 @@ export function RecordedAnswersPanel({
 }: {
   answers: StructuredAnswer[];
 }) {
-  const recorded = answers.filter(isRecorded);
+  const recorded = answers.filter(isStructuredAnswerRecorded);
   const askedPending = answers.filter(
-    (answer) => !isRecorded(answer) && Boolean(answer.asked)
+    (answer) => !isStructuredAnswerRecorded(answer) && Boolean(answer.asked)
   );
   const unasked = answers.filter(
-    (answer) => !isRecorded(answer) && !answer.asked
+    (answer) => !isStructuredAnswerRecorded(answer) && !answer.asked
   );
 
   return (
