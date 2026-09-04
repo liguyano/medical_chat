@@ -11,14 +11,23 @@ from .types import AnswerType
 
 
 class ExtractionCandidate(BaseModel):
-    """模型返回的最小答案候选。"""
+    """模型直接返回的最终答案候选。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    question_id: int = Field(..., description="能够填写的题目ID")
-    value: str | float | bool | list[str] = Field(..., description="患者答案值")
+    question_id: int = Field(..., description="AI 判断能够填写的题目ID")
+    answer_type: AnswerType = Field(..., description="AI 已规范化的答案类型")
+    answer_value: str | float | bool | None = Field(
+        None,
+        description="文本、数值、布尔或日期答案；选择题保持为空",
+    )
+    selected_option_codes: list[str] = Field(
+        default_factory=list,
+        description="选择题直接返回题目定义中的 option_code",
+    )
     evidence: str = Field(..., min_length=1, description="患者原话依据")
     confidence: float = Field(..., ge=0.0, le=1.0, description="候选置信度")
+
 
 class ExtractedAnswer(BaseModel):
     """单个字段的抽取结果"""
