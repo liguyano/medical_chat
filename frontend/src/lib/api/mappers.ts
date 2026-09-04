@@ -507,6 +507,8 @@ export function mapExtractedField(
     displayValue: field.display_value,
     sourceMessageIds: field.source_message_ids ?? [],
     extractionConfidence: field.confidence ?? 0,
+    recorded: field.recorded,
+    asked: field.asked,
     corrected: field.corrected ?? false,
     answerType: field.answer_type as StructuredAnswer['answerType'],
     options: field.options,
