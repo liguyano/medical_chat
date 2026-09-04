@@ -15,3 +15,10 @@
 - [X] 覆盖快照事件的 stream_id / SSE id。
 - [X] 覆盖业务 event_id 不得成为 transport cursor。
 - [X] 保持现有普通 SSE envelope 兼容行为。
+
+
+## 4. 重连死循环补强
+- [X] 业务错误不再使用 SSE 协议层 `event: error`，避免触发 EventSource 网络错误处理。
+- [X] failed 快照改为默认 message 事件，内部 `event_type` 仍保持 `error`。
+- [X] 前端仅接受 `数字-数字` 格式的 Redis Stream ID 作为续读游标。
+- [X] `snapshot:GEN-...` 等业务 ID 一律拒绝作为续读游标。
