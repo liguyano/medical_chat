@@ -95,6 +95,13 @@ function withLastEventId(path: string, lastEventId?: string): string {
   return url.toString();
 }
 
+export function resolveTransportEventId(
+  envelope: SseEnvelope,
+  eventLastEventId?: string
+): string | undefined {
+  return envelope.stream_id || eventLastEventId || undefined;
+}
+
 export class SseClient {
   private source?: EventSource;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -131,8 +138,10 @@ export class SseClient {
           eventType,
           event.lastEventId
         );
-        const transportEventId =
-          envelope.stream_id || event.lastEventId || envelope.event_id;
+        const transportEventId = resolveTransportEventId(
+          envelope,
+          event.lastEventId
+        );
         if (
           transportEventId &&
           this.processedEventIds.has(transportEventId)
@@ -168,7 +177,10 @@ export class SseClient {
       });
     }
 
-    source.onerror = () => {
+    source.onerror = (event) => {
+      // 服务端允许发送业务事件 event: error；它会以 MessageEvent 形式触发
+      // EventSource 的 error 监听器，但不代表连接断开，不能因此重连。
+      if (event instanceof MessageEvent && event.data) return;
       source.close();
       this.source = undefined;
       if (this.manuallyClosed) return;
