@@ -83,3 +83,48 @@ def test_snapshot_event_carries_real_stream_cursor():
     assert event["id"] == "1787205471545-0"
     assert envelope["event_id"] == "snapshot:GEN-1"
     assert envelope["stream_id"] == "1787205471545-0"
+
+
+def test_business_error_is_sent_as_default_message_not_sse_error_event():
+    """业务错误不得占用 EventSource 的 error 事件名，避免触发重连。"""
+    event = format_sse_event(
+        "1787205471545-2",
+        {
+            b"event_type": b"agent_error",
+            b"task_id": b"1",
+            b"session_id": b"SESS-1",
+            b"message_id": b"MSG-1",
+            b"agent_name": b"dialog_agent",
+            b"error_code": b"MODEL_CALL_FAILED",
+            b"message": "模型调用失败".encode(),
+        },
+    )
+
+    envelope = json.loads(event["data"])
+    assert envelope["event_type"] == "error"
+    assert "event" not in event
+    assert event["id"] == "1787205471545-2"
+
+
+def test_failed_snapshot_is_sent_as_default_message_not_sse_error_event():
+    """failed 快照也不得触发 EventSource 的连接 error 事件。"""
+    event = _format_snapshot_event(
+        {
+            "status": "failed",
+            "generation_id": "GEN-FAILED",
+            "task_id": 1,
+            "session_id": "SESS-1",
+            "message_id": "MSG-1",
+            "turn_number": 2,
+            "last_event_id": "1787205471545-3",
+            "error_code": "MODEL_CALL_FAILED",
+            "error_message": "失败",
+            "updated_at": "2026-09-04T10:30:00Z",
+        }
+    )
+    assert event is not None
+    envelope = json.loads(event["data"])
+
+    assert envelope["event_type"] == "error"
+    assert "event" not in event
+    assert event["id"] == "1787205471545-3"
