@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { mockTasks } from '@/lib/mock/data';
+import { runtimeConfig } from '@/lib/runtime/config';
 import type {
   AssessmentReview,
   CareTask,
@@ -45,7 +46,7 @@ interface TaskStore {
 }
 
 const initialState = {
-  tasks: mockTasks,
+  tasks: runtimeConfig.dataMode === 'mock' ? mockTasks : [],
   currentTask: null,
   formDrafts: {},
   submittedAnswers: {},
@@ -215,10 +216,14 @@ export const useTaskStore = create<TaskStore>()(
           ),
         })),
 
-      resetDemoData: () => set({ ...initialState, tasks: [...mockTasks] }),
+      resetDemoData: () =>
+        set({
+          ...initialState,
+          tasks: runtimeConfig.dataMode === 'mock' ? [...mockTasks] : [],
+        }),
     }),
     {
-      name: 'medical-evaluate-task-storage',
+      name: `medical-evaluate-task-storage-${runtimeConfig.dataMode}`,
       storage: createJSONStorage(() => sessionStorage),
     }
   )

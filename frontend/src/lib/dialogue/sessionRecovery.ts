@@ -15,6 +15,30 @@ export function buildDialogueSnapshotKey(
   return `${taskId}:${sessionId ?? ''}`;
 }
 
+export function isDialogueSnapshotLoading(
+  dataMode: DataMode,
+  snapshotKey: string,
+  resolvedSnapshotKey: string | null
+): boolean {
+  return dataMode === 'api' && resolvedSnapshotKey !== snapshotKey;
+}
+
+interface DialogueStreamInput {
+  hasTask: boolean;
+  hasSession: boolean;
+  readOnly: boolean;
+  snapshotLoading: boolean;
+}
+
+export function shouldEnableDialogueStream({
+  hasTask,
+  hasSession,
+  readOnly,
+  snapshotLoading,
+}: DialogueStreamInput): boolean {
+  return hasTask && hasSession && !readOnly && !snapshotLoading;
+}
+
 export function shouldLoadDialogueSnapshot({
   dataMode,
   hasTask,

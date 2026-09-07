@@ -5,6 +5,7 @@ import {
   mockSessions,
   mockStructuredAnswers,
 } from '@/lib/mock/dialogue';
+import { runtimeConfig } from '@/lib/runtime/config';
 import type {
   ConsentRequest,
   EducationCard,
@@ -70,10 +71,12 @@ interface ChatStore {
   resetDemoData: () => void;
 }
 
+const mockMode = runtimeConfig.dataMode === 'mock';
+
 const initialState = {
-  sessions: mockSessions,
-  structuredAnswers: mockStructuredAnswers,
-  events: mockInteractionEvents,
+  sessions: mockMode ? mockSessions : {},
+  structuredAnswers: mockMode ? mockStructuredAnswers : {},
+  events: mockMode ? mockInteractionEvents : {},
   educationCards: {},
   consentRequests: {},
   nurseAssistanceRequests: {},
@@ -409,6 +412,16 @@ export const useChatStore = create<ChatStore>()(
             events,
             educationCards,
             consentRequests,
+            nurseAssistanceRequests: Object.fromEntries(
+              Object.entries(state.nurseAssistanceRequests).filter(
+                ([, request]) => request.taskId !== taskId
+              )
+            ),
+            feedback: Object.fromEntries(
+              Object.entries(state.feedback).filter(
+                ([, item]) => item.taskId !== taskId
+              )
+            ),
             streamingTaskId: null,
           };
         }),
@@ -416,7 +429,7 @@ export const useChatStore = create<ChatStore>()(
       resetDemoData: () => set(initialState),
     }),
     {
-      name: 'medical-evaluate-chat-storage',
+      name: `medical-evaluate-chat-storage-${runtimeConfig.dataMode}`,
       storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         ...state,

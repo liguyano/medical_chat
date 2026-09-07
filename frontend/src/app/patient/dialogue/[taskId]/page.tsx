@@ -21,6 +21,8 @@ import { createClientInvocationId } from '@/lib/clientInvocation';
 import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
 import {
   buildDialogueSnapshotKey,
+  isDialogueSnapshotLoading,
+  shouldEnableDialogueStream,
   shouldLoadDialogueSnapshot,
 } from '@/lib/dialogue/sessionRecovery';
 import { isPatientTaskReadOnly } from '@/lib/patient/taskGroups';
@@ -285,6 +287,14 @@ export default function PatientDialoguePage() {
   const dialogueSnapshotKey = task
     ? buildDialogueSnapshotKey(taskId, task.sessionId)
     : '';
+  const [resolvedSnapshotKey, setResolvedSnapshotKey] = useState<string | null>(
+    null
+  );
+  const snapshotLoading = isDialogueSnapshotLoading(
+    runtimeConfig.dataMode,
+    dialogueSnapshotKey,
+    resolvedSnapshotKey
+  );
 
   useEffect(() => {
     const currentTask = useTaskStore
@@ -307,7 +317,7 @@ export default function PatientDialoguePage() {
     }
 
     if (runtimeConfig.dataMode === 'mock') {
-      const timestamp = Date.now();
+      const timestamp = new Date().getTime();
       const sessionId =
         currentTask.sessionId ?? `SESSION-${taskId}-${timestamp}`;
       const welcome: InteractionMessage = {
@@ -351,9 +361,9 @@ export default function PatientDialoguePage() {
     }
 
     loadedSnapshotKeyRef.current = dialogueSnapshotKey;
-    // API 快照是当前任务领域事件的事实来源，先移除 sessionStorage 中
-    // 可能残留的旧卡片，避免提交已经不存在的领域事件 ID。
-    useChatStore.getState().clearTaskDomainState(taskId);
+    // API 快照是当前任务的事实来源。加载前移除同任务编号下可能残留的
+    // Mock 或其他患者会话，禁止在请求期间展示旧患者数据。
+    useChatStore.getState().clearSession(taskId);
     const controller = new AbortController();
     void careRepository
       .getDialogueSnapshot(currentTask, controller.signal)
@@ -373,6 +383,9 @@ export default function PatientDialoguePage() {
         );
         snapshot.events.forEach(applyRealtimeEvent);
         setConnectionError('');
+        setResolvedSnapshotKey(
+          buildDialogueSnapshotKey(taskId, snapshot.session.id)
+        );
         updateTask(taskId, {
           sessionId: snapshot.session.id,
           ...(readOnly
@@ -393,6 +406,7 @@ export default function PatientDialoguePage() {
       .catch((loadError) => {
         if (controller.signal.aborted || isRequestCancelled(loadError)) return;
         loadedSnapshotKeyRef.current = null;
+        setResolvedSnapshotKey(dialogueSnapshotKey);
         setConnectionError(
           loadError instanceof Error
             ? `会话加载失败：${loadError.message}`
@@ -410,12 +424,15 @@ export default function PatientDialoguePage() {
 
   const streamPath = session?.id
     ? createDialogueSsePath(session.id)
-    : task?.sessionId
-      ? createDialogueSsePath(task.sessionId)
-      : undefined;
+    : undefined;
   const { status: streamStatus, error: streamError } = useRealtimeStream({
     path: streamPath,
-    enabled: Boolean(task) && !readOnly,
+    enabled: shouldEnableDialogueStream({
+      hasTask: Boolean(task),
+      hasSession: Boolean(session),
+      readOnly,
+      snapshotLoading,
+    }),
   });
 
   useEffect(
@@ -937,6 +954,26 @@ export default function PatientDialoguePage() {
             className="mx-auto h-24 w-24"
           />
           <p className="mt-4 font-bold">任务不存在或已经失效</p>
+        </div>
+      </PatientLayout>
+    );
+  }
+
+  if (snapshotLoading) {
+    return (
+      <PatientLayout title="AI智能评估" showBack>
+        <div className="flex min-h-[60dvh] items-center justify-center p-6">
+          <div className="text-center" role="status">
+            <Image
+              src="/assets/patient/states/loading.svg"
+              alt=""
+              width={80}
+              height={80}
+              priority
+              className="mx-auto h-20 w-20"
+            />
+            <p className="mt-4 font-bold">正在加载评估会话…</p>
+          </div>
         </div>
       </PatientLayout>
     );

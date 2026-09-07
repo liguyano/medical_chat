@@ -1,7 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { shouldLoadDialogueSnapshot } from '@/lib/dialogue/sessionRecovery';
+import {
+  isDialogueSnapshotLoading,
+  shouldEnableDialogueStream,
+  shouldLoadDialogueSnapshot,
+} from '@/lib/dialogue/sessionRecovery';
 
 describe('患者对话会话恢复策略', () => {
+  it('API 模式切换到尚未解析的新快照键时重新进入加载态', () => {
+    expect(isDialogueSnapshotLoading('api', '3:SESSION-NEW', '3:SESSION-OLD')).toBe(
+      true
+    );
+    expect(isDialogueSnapshotLoading('api', '3:SESSION-NEW', '3:SESSION-NEW')).toBe(
+      false
+    );
+    expect(isDialogueSnapshotLoading('mock', '3:SESSION-NEW', null)).toBe(false);
+  });
+
+  it('只有快照已解析且存在会话时才订阅对话事件流', () => {
+    expect(
+      shouldEnableDialogueStream({
+        hasTask: true,
+        hasSession: false,
+        readOnly: false,
+        snapshotLoading: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldEnableDialogueStream({
+        hasTask: true,
+        hasSession: true,
+        readOnly: false,
+        snapshotLoading: true,
+      })
+    ).toBe(false);
+    expect(
+      shouldEnableDialogueStream({
+        hasTask: true,
+        hasSession: true,
+        readOnly: false,
+        snapshotLoading: false,
+      })
+    ).toBe(true);
+  });
+
   it('API 模式即使已有持久化会话，也必须刷新后端快照', () => {
     expect(
       shouldLoadDialogueSnapshot({
