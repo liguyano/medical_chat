@@ -8,7 +8,11 @@
 import pytest
 from langchain_openai import ChatOpenAI
 from medagent.configs.model_config import ModelConfig, ModelType
-from medagent.providers import create_chat_model, create_voice_engine
+from medagent.providers import (
+    create_chat_model,
+    create_structured_chat_model,
+    create_voice_engine,
+)
 
 
 def language_model(**overrides) -> ModelConfig:
@@ -70,6 +74,16 @@ def test_create_chat_model_passes_thinking_mode_to_extra_body():
     model = create_chat_model(language_model(enable_thinking=True))
 
     assert model.extra_body["enable_thinking"] is True
+
+
+def test_create_structured_chat_model_forces_thinking_off():
+    """结构化输出必须关闭思考，避免推理 Token 耗尽后没有最终 JSON。"""
+    model = create_structured_chat_model(
+        language_model(enable_thinking=True, max_tokens=2000)
+    )
+
+    assert model.extra_body["enable_thinking"] is False
+    assert model.max_tokens == 2000
 
 
 # ---------------- create_voice_engine ----------------

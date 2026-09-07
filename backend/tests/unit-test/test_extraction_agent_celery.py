@@ -27,7 +27,9 @@ def test_completed_progress_dispatches_dialog_completion(monkeypatch):
         "get_app_config",
         lambda: SimpleNamespace(get_agent_model_config=lambda _: model_config),
     )
-    monkeypatch.setattr(providers, "create_chat_model", Mock(return_value=object()))
+    monkeypatch.setattr(
+        providers, "create_structured_chat_model", Mock(return_value=object())
+    )
     monkeypatch.setattr(runtime, "ensure_worker_runtime", Mock())
     monkeypatch.setattr(utils.redis_client, "get_redis", Mock(return_value=object()))
     runner = SimpleNamespace(
@@ -81,7 +83,9 @@ def test_completed_voice_progress_finalizes_session_without_text_dialog(
         "get_app_config",
         lambda: SimpleNamespace(get_agent_model_config=lambda _: model_config),
     )
-    monkeypatch.setattr(providers, "create_chat_model", Mock(return_value=object()))
+    monkeypatch.setattr(
+        providers, "create_structured_chat_model", Mock(return_value=object())
+    )
     monkeypatch.setattr(runtime, "ensure_worker_runtime", Mock())
     monkeypatch.setattr(utils.redis_client, "get_redis", Mock(return_value=object()))
     runner = SimpleNamespace(

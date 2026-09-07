@@ -94,6 +94,7 @@ models:
     max_retries: 2
     temperature: 0.1
     max_tokens: 2000
+    enable_thinking: false
     enable_prompt_caching: true
     prompt_cache_ttl: "5m"
     supports_thinking: false
@@ -144,7 +145,7 @@ agent_models:
     voice: dialog_agent_voice # Qwen Audio Realtime 语音引擎
 
   extraction_agent:
-    language: qwen-plus
+    language: qwen-plus-precise
 
   nursing_plan_agent:
     language: qwen-plus  # 患者画像与护理计划结构化生成

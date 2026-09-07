@@ -21,7 +21,7 @@ from medagent.configs.model_config import ModelConfig, ModelType
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["create_chat_model", "create_voice_engine"]
+__all__ = ["create_chat_model", "create_structured_chat_model", "create_voice_engine"]
 
 
 def _normalize_openai_base_url(settings: dict[str, Any], model_config: ModelConfig) -> None:
@@ -123,7 +123,7 @@ def create_chat_model(model_config: ModelConfig) -> BaseChatModel:
         "max_retries": model_config.max_retries,
     }
 
-    # 透传供应商特有字段，并显式关闭 qwen3.5 的思考模式，避免结构化结果被推理 token 截断。
+    # 透传供应商特有字段；结构化调用由 create_structured_chat_model 强制关闭思考模式。
     settings.update(model_config.chat_completion_options())
 
     # 规整 api_base → base_url
@@ -150,6 +150,11 @@ def create_chat_model(model_config: ModelConfig) -> BaseChatModel:
         settings.get("extra_body", {}).get("enable_thinking"),
     )
     return ChatOpenAI(**settings)
+
+
+def create_structured_chat_model(model_config: ModelConfig) -> BaseChatModel:
+    """创建强制关闭思考模式的结构化输出模型。"""
+    return create_chat_model(model_config.model_copy(update={"enable_thinking": False}))
 
 
 def create_voice_engine(model_config: ModelConfig) -> DoubaoVoiceEngine:

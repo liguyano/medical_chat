@@ -20,7 +20,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
     """
     import asyncio
 
-    from medagent.providers import create_chat_model
+    from medagent.providers import create_structured_chat_model
 
     from app.celery_app.runtime import ensure_worker_runtime
     from app.configs.app_config import get_app_config
@@ -62,7 +62,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
             return {"status": "failed", "reason": "llm_not_configured"}
 
         ensure_worker_runtime()
-        model = create_chat_model(model_config)
+        model = create_structured_chat_model(model_config)
         runner = ScheduleAgentRunner(
             loader=AssessmentQuestionLoader(),
             history_manager=DialogHistoryManager(),
@@ -380,7 +380,7 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
     """
     import asyncio
 
-    from medagent.providers import create_chat_model
+    from medagent.providers import create_structured_chat_model
 
     from app.celery_app.runtime import ensure_worker_runtime
     from app.configs.app_config import get_app_config
@@ -398,7 +398,7 @@ def extraction_agent_worker(self, session_id: str, task_config: dict):
             return {"status": "failed", "reason": "llm_not_configured"}
 
         ensure_worker_runtime()
-        model = create_chat_model(model_config)
+        model = create_structured_chat_model(model_config)
 
         runner = ExtractionAgentRunner(
             loader=AssessmentQuestionLoader(),

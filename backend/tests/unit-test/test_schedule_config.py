@@ -78,3 +78,9 @@ def test_config_example_resolves_schedule_agent_binding(monkeypatch):
     assert model is not None
     assert model.name == "qwen-plus-precise"
     assert model.api_base.endswith("/compatible-mode/v1")
+    assert model.enable_thinking is False
+
+    extraction_model = config.get_agent_model_config("extraction_agent")
+    assert extraction_model is not None
+    assert extraction_model.name == "qwen-plus-precise"
+    assert extraction_model.enable_thinking is False

@@ -37,7 +37,7 @@ def test_worker_reports_missing_model_binding(monkeypatch):
 
 
 def test_worker_builds_runner_with_chat_model(monkeypatch):
-    """任务应用 create_chat_model 构造 BaseChatModel 并注入运行器。"""
+    """任务应用结构化模型工厂构造 BaseChatModel 并注入运行器。"""
     import medagent.providers as providers_module
 
     import app.celery_app.runtime as runtime_module
@@ -53,7 +53,7 @@ def test_worker_builds_runner_with_chat_model(monkeypatch):
     )
     fake_model = object()
     model_factory = Mock(return_value=fake_model)
-    monkeypatch.setattr(providers_module, "create_chat_model", model_factory)
+    monkeypatch.setattr(providers_module, "create_structured_chat_model", model_factory)
     runtime_initializer = Mock()
     monkeypatch.setattr(runtime_module, "ensure_worker_runtime", runtime_initializer)
     monkeypatch.setattr(redis_module, "get_redis", lambda: object())
@@ -98,7 +98,9 @@ def test_worker_retries_unhandled_failure(monkeypatch):
         "get_app_config",
         lambda: SimpleNamespace(get_agent_model_config=lambda _: config),
     )
-    monkeypatch.setattr(providers_module, "create_chat_model", lambda _: object())
+    monkeypatch.setattr(
+        providers_module, "create_structured_chat_model", lambda _: object()
+    )
     monkeypatch.setattr(runtime_module, "ensure_worker_runtime", Mock())
     monkeypatch.setattr(redis_module, "get_redis", lambda: object())
     monkeypatch.setattr(
