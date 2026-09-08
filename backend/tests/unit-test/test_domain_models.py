@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "assessment_answer_option",
     "assessment_score",
     "assessment_review",
+    "assessment_report",
     "quality_review_template",
     "quality_review_dimension",
     "quality_review",
