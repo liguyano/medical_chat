@@ -752,11 +752,13 @@ async def test_premature_close_recovers_after_extraction_with_only_one_question(
     assert "您平时吸烟吗" not in recovery_prompt
     assert "提前结束恢复模式" in recovery_prompt
     assert "当前唯一允许询问的问题" in recovery_prompt
-    assert "生活习惯" in recovery_prompt
+    assert "生活习惯" not in recovery_prompt
+    assert "Task-todo" not in recovery_prompt
     assert "您平时吸烟吗" not in recovery_prompt
-    assert "Task-todo" in recovery_prompt
     assert session.next_response_is_recovery is True
     assert session.recovery_instruction_active is True
+    assert session.recovery_mode_active is True
+    assert session.recovery_current_question_id == 21
 
 
 @pytest.mark.asyncio
@@ -834,14 +836,16 @@ async def test_premature_close_does_not_recover_when_progress_is_complete(
 
 
 @pytest.mark.asyncio
-async def test_recovery_response_restores_base_instructions_without_recursive_guard(
+async def test_recovery_response_keeps_recovery_mode_without_recursive_guard(
     tmp_path: Path,
     monkeypatch,
 ):
-    """恢复轮完成后恢复长期提示词，且恢复轮本身不再次进入提前结束检查。"""
+    """恢复提问说完后仍保持恢复模式，且恢复轮本身不再次进入提前结束检查。"""
     gateway = VoiceGateway()
     session = make_session(tmp_path)
     session.recovery_instruction_active = True
+    session.recovery_mode_active = True
+    session.recovery_current_question_id = 21
     session.next_response_is_recovery = True
     monkeypatch.setattr(
         gateway,
@@ -888,21 +892,25 @@ async def test_recovery_response_restores_base_instructions_without_recursive_gu
     )
 
     closing_check.assert_not_called()
-    session.client.update_instructions.assert_awaited_once_with("基础提示词")
-    assert session.recovery_instruction_active is False
+    session.client.update_instructions.assert_not_awaited()
+    assert session.recovery_instruction_active is True
+    assert session.recovery_mode_active is True
+    assert session.recovery_current_question_id == 21
     assert session.recovery_task is None
 
 
 @pytest.mark.asyncio
-async def test_patient_speech_cancels_pending_close_recovery_and_restores_prompt(
+async def test_patient_speech_cancels_pending_recovery_task_but_keeps_recovery_mode(
     tmp_path: Path,
     monkeypatch,
 ):
-    """患者在自动恢复前重新开口时，以患者输入优先并撤销一次性恢复指令。"""
+    """患者在恢复模式中继续回答时取消旧推进任务，但不能退回完整题表。"""
     gateway = VoiceGateway()
     session = make_session(tmp_path)
     session.recovery_instruction_active = True
-    session.next_response_is_recovery = True
+    session.recovery_mode_active = True
+    session.recovery_current_question_id = 21
+    session.next_response_is_recovery = False
     pending_task = asyncio.create_task(asyncio.sleep(60))
     session.recovery_task = pending_task
     monkeypatch.setattr(
@@ -925,5 +933,110 @@ async def test_patient_speech_cancels_pending_close_recovery_and_restores_prompt
     assert pending_task.cancelled()
     assert session.recovery_task is None
     assert session.next_response_is_recovery is False
-    assert session.recovery_instruction_active is False
-    session.client.update_instructions.assert_awaited_once_with("基础提示词")
+    assert session.recovery_instruction_active is True
+    assert session.recovery_mode_active is True
+    assert session.recovery_current_question_id == 21
+    session.client.update_instructions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_progress_only_injects_next_remaining_question(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """恢复模式答完一题后，只能从最新 remaining 中注入下一题。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    answered_question = SimpleNamespace(
+        question_id=21,
+        question_code="Q21",
+        patient_text="最近三个月具体下降了多少公斤？",
+        required=True,
+    )
+    next_question = SimpleNamespace(
+        question_id=25,
+        question_code="Q25",
+        patient_text="夜间路灯和楼道照明是否良好？",
+        required=True,
+    )
+    session.task_list = [answered_question, next_question]
+    session.recovery_mode_active = True
+    session.recovery_instruction_active = True
+    session.recovery_current_question_id = 21
+    session.recovery_source_message_no = "MSG-PATIENT-3"
+
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "extraction_processed",
+        lambda _redis, _session_no, _message_no: True,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "build_recovery_decision",
+        lambda _session_no, _tasks: SimpleNamespace(
+            should_recover=True,
+            next_question=next_question,
+            progress=SimpleNamespace(
+                completed=False,
+                remaining_question_ids=(25,),
+            ),
+        ),
+    )
+
+    await gateway._advance_recovery_after_answer(
+        session,
+        source_message_no="MSG-PATIENT-3",
+    )
+
+    session.client.create_response.assert_awaited_once()
+    prompt = session.client.update_instructions.await_args.args[0]
+    assert "夜间路灯和楼道照明是否良好" in prompt
+    assert "最近三个月具体下降了多少公斤" not in prompt
+    assert "当前唯一允许询问的问题" in prompt
+    assert session.recovery_mode_active is True
+    assert session.recovery_current_question_id == 25
+    assert session.recovery_source_message_no is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_progress_with_no_remaining_question_never_restores_full_task_list(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """所有 null 清空后进入等待完成状态，不得重新暴露原完整 Task-todo。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.recovery_mode_active = True
+    session.recovery_instruction_active = True
+    session.recovery_current_question_id = 25
+    session.recovery_source_message_no = "MSG-PATIENT-4"
+
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "extraction_processed",
+        lambda _redis, _session_no, _message_no: True,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "build_recovery_decision",
+        lambda _session_no, _tasks: SimpleNamespace(
+            should_recover=False,
+            next_question=None,
+            progress=SimpleNamespace(
+                completed=True,
+                remaining_question_ids=(),
+            ),
+        ),
+    )
+
+    await gateway._advance_recovery_after_answer(
+        session,
+        source_message_no="MSG-PATIENT-4",
+    )
+
+    terminal_prompt = session.client.update_instructions.await_args.args[0]
+    assert "结构化评估已经确认完成" in terminal_prompt
+    assert terminal_prompt != session.instructions
+    assert session.client.create_response.await_count == 0
+    assert session.recovery_mode_active is False
+    assert session.recovery_current_question_id is None
