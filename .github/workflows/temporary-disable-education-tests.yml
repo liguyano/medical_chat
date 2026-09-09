@@ -1,0 +1,29 @@
+name: temporary-disable-education-tests
+
+on:
+  push:
+    branches:
+      - fix/voice-premature-close-recovery
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Run targeted tests
+        run: >
+          python -m pytest -q
+          tests/unit-test/test_dialog_prompt_tools.py
+          tests/unit-test/test_dialog_middleware.py
+          tests/unit-test/test_schedule_agent_prompts.py
+          tests/unit-test/test_voice_gateway.py
+          tests/unit-test/test_voice_turn_guard.py
+          tests/unit-test/test_keyword_matcher_education_disabled.py
