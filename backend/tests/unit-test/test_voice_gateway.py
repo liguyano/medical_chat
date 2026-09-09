@@ -1084,3 +1084,227 @@ async def test_voice_gateway_keeps_non_education_schedule_guidance(
     session.client.update_instructions.assert_awaited_once()
     prompt = session.client.update_instructions.await_args.args[0]
     assert "回到量表，只询问当前待完成问题" in prompt
+
+
+class FakeRealtimeClientForConnect:
+    instances = []
+
+    def __init__(self, **_kwargs):
+        self.connect = AsyncMock()
+        self.create_response = AsyncMock()
+        self.cancel_response = AsyncMock()
+        self.update_instructions = AsyncMock()
+        self.send_tool_result = AsyncMock()
+        self.instructions = ""
+        self.__class__.instances.append(self)
+
+    async def append_audio(self, _data: bytes) -> None:
+        return None
+
+
+def _question_task(question_id: int, text: str):
+    return SimpleNamespace(
+        question_id=question_id,
+        question_code=f"Q{question_id}",
+        question_name=text,
+        patient_text=text,
+        question_type="单选",
+        required=True,
+        sort_no=question_id,
+        options=[],
+    )
+
+
+def _mock_voice_gateway_connect_dependencies(
+    monkeypatch,
+    gateway,
+    *,
+    tasks,
+    progress,
+    next_question,
+):
+    voice_config = SimpleNamespace(
+        websocket_url="wss://example.invalid/realtime",
+        model="qwen-test",
+        voice="longanqian",
+        timeout=30,
+        model_extra={"provider": "qwen_audio_realtime", "turn_detection": "server_vad"},
+        resolved_api_key=lambda: "test-key",
+    )
+    app_config = SimpleNamespace(
+        get_agent_model_config=lambda *_args, **_kwargs: voice_config
+    )
+    redis = FakeRedis()
+    plan = SimpleNamespace(tasks=tasks)
+
+    monkeypatch.setattr(voice_gateway_module, "get_app_config", lambda: app_config)
+    monkeypatch.setattr(voice_gateway_module, "get_redis", lambda: redis)
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "ScheduleTaskStore",
+        lambda _redis: SimpleNamespace(get_plan=lambda _session_no: plan),
+    )
+    FakeRealtimeClientForConnect.instances = []
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "QwenRealtimeClient",
+        FakeRealtimeClientForConnect,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "build_recovery_decision",
+        lambda _session_no, _tasks: SimpleNamespace(
+            progress=progress,
+            next_question=next_question,
+            should_recover=(
+                not progress.completed and next_question is not None
+            ),
+        ),
+    )
+
+    async def consume_stub(_session):
+        return None
+
+    monkeypatch.setattr(gateway, "_consume_upstream", consume_stub)
+    return redis
+
+
+@pytest.mark.asyncio
+async def test_reenter_partial_session_connects_with_only_first_remaining_question(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """重新进入 20/22 会话时，Qwen 初始化只允许看到首个 null/remaining 问题。"""
+    gateway = VoiceGateway()
+    q1 = _question_task(1, "已经回答过的问题")
+    q21 = _question_task(21, "夜间路灯和楼道照明是否良好？")
+    q22 = _question_task(22, "室内楼梯是否有可用扶手？")
+    progress = SimpleNamespace(
+        current=20,
+        total=22,
+        completed=False,
+        remaining_question_ids=(21, 22),
+    )
+    _mock_voice_gateway_connect_dependencies(
+        monkeypatch,
+        gateway,
+        tasks=[q1, q21, q22],
+        progress=progress,
+        next_question=q21,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "DialogAudioStore",
+        lambda: DialogAudioStore(tmp_path),
+    )
+
+    session = await gateway.get_or_create(
+        session_no="SESS-RESUME-20-22",
+        task_id=1,
+        patient_id=2,
+        patient_info={"name": "赵敏", "gender": "女", "age": 60},
+        scale_codes=["scale"],
+    )
+
+    client = FakeRealtimeClientForConnect.instances[-1]
+    client.connect.assert_awaited_once()
+    connect_prompt = client.connect.await_args.kwargs["instructions"]
+
+    assert "会话恢复模式" in connect_prompt
+    assert "夜间路灯和楼道照明是否良好" in connect_prompt
+    assert "已经回答过的问题" not in connect_prompt
+    assert "室内楼梯是否有可用扶手" not in connect_prompt
+    assert "当前唯一允许询问的问题" in connect_prompt
+    assert session.recovery_mode_active is True
+    assert session.recovery_instruction_active is True
+    assert session.recovery_current_question_id == 21
+    assert len(session.task_list) == 3
+
+
+@pytest.mark.asyncio
+async def test_new_zero_progress_session_still_uses_normal_task_prompt(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """全新 0/N 会话仍按正常流程启动，不误进入恢复模式。"""
+    gateway = VoiceGateway()
+    q1 = _question_task(1, "第一个正常问题")
+    q2 = _question_task(2, "第二个正常问题")
+    progress = SimpleNamespace(
+        current=0,
+        total=2,
+        completed=False,
+        remaining_question_ids=(1, 2),
+    )
+    _mock_voice_gateway_connect_dependencies(
+        monkeypatch,
+        gateway,
+        tasks=[q1, q2],
+        progress=progress,
+        next_question=q1,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "DialogAudioStore",
+        lambda: DialogAudioStore(tmp_path),
+    )
+
+    session = await gateway.get_or_create(
+        session_no="SESS-NEW-0-2",
+        task_id=1,
+        patient_id=2,
+        patient_info={"name": "患者"},
+        scale_codes=["scale"],
+    )
+
+    client = FakeRealtimeClientForConnect.instances[-1]
+    connect_prompt = client.connect.await_args.kwargs["instructions"]
+
+    assert "第一个正常问题" in connect_prompt
+    assert "第二个正常问题" in connect_prompt
+    assert "会话恢复模式" not in connect_prompt
+    assert session.recovery_mode_active is False
+    assert session.recovery_current_question_id is None
+
+
+@pytest.mark.asyncio
+async def test_reenter_completed_session_does_not_expose_any_task_question(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """重新进入已完成会话时禁止再次询问任何历史量表问题。"""
+    gateway = VoiceGateway()
+    q1 = _question_task(1, "不应再次出现的问题")
+    progress = SimpleNamespace(
+        current=22,
+        total=22,
+        completed=True,
+        remaining_question_ids=(),
+    )
+    _mock_voice_gateway_connect_dependencies(
+        monkeypatch,
+        gateway,
+        tasks=[q1],
+        progress=progress,
+        next_question=None,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "DialogAudioStore",
+        lambda: DialogAudioStore(tmp_path),
+    )
+
+    session = await gateway.get_or_create(
+        session_no="SESS-COMPLETE-22-22",
+        task_id=1,
+        patient_id=2,
+        patient_info={"name": "患者"},
+        scale_codes=["scale"],
+    )
+
+    client = FakeRealtimeClientForConnect.instances[-1]
+    connect_prompt = client.connect.await_args.kwargs["instructions"]
+
+    assert "结构化评估已经确认完成" in connect_prompt
+    assert "不应再次出现的问题" not in connect_prompt
+    assert session.recovery_mode_active is False
