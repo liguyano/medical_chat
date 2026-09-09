@@ -273,17 +273,19 @@ from medagent.configs.agent_config import get_agent_config
   `SessionEndEvent`，不再借用文本 Dialog Exit 完成语音会话。Function Calling 的中间
   `response.done` 不得触发任务完成。Gateway 在发布任务结束状态前必须先通过患者
   WebSocket 发送 `response_completed`，作为浏览器等待最后音频排空的顺序屏障。
-- Qwen Realtime 患者可见回复完成后允许执行事后 `VoiceTurnGuard`：只对明确宣告评估完成/结束的
-  完整回复进入核验。Guard 必须先等待当前患者消息被 Extraction Agent 写入
-  `processed_message_ids`，再读取结构化 `remaining_question_ids`，避免 `response.done` 早于
-  抽取落库造成误判。若仍未完成，进入持续恢复模式：只可按当前 Schedule Task-todo 顺序从
-  `remaining_question_ids` 选择一条未完成题，Realtime instructions 仅暴露患者上下文与当前唯一
-  允许询问的问题，不得重新暴露完整 Task-todo、已完成题或其他示例问题。患者回答当前恢复题后，
-  必须再次等待该消息的 Extraction 完成和当前自动语音回复 `response.done`，再从最新 remaining
-  中选择下一题；恢复模式持续到 remaining 清空。患者重新开口可取消旧的恢复推进任务，但不得因此
-  退回完整题表。remaining 已清空时只进入“停止提问、等待完成屏障”状态；真正会话完成仍以
-  VoiceCompletionCoordinator 的结构化完成屏障为准。该机制是输出后的纠错兜底，不得改成阻塞
-  实时音频的输出前审核。
+- Qwen Realtime 恢复逻辑统一以结构化 `remaining_question_ids` 为事实来源，覆盖两种入口：
+  1) 患者可见回复明确提前宣告评估完成/结束后的事后 `VoiceTurnGuard`；
+  2) 重新进入已经存在有效结构化答案的旧语音会话。
+  建立新 Realtime 连接前必须刷新结构化进度；若 `current > 0` 且尚未完成，禁止把完整
+  Task-todo 作为 Qwen instructions 下发，只可按当前 Schedule 原顺序从 remaining 中选择一条，
+  进入持续恢复模式。若 remaining 无法映射到 Schedule，宁可停止提问也不得回退完整题表；
+  若结构化进度已完成，重新进入后禁止继续询问任何历史量表问题。
+- 持续恢复模式的 Realtime instructions 仅暴露患者上下文与“当前唯一允许询问的问题”。
+  已经形成有效结构化答案的问题不得重复询问、核对或换一种说法再问。患者回答当前恢复题后，
+  必须等待该患者消息被 Extraction Agent 写入 `processed_message_ids`，并等待当前自动语音
+  `response.done`，再刷新 remaining 并选择下一题；remaining 清空后进入停止提问状态并等待
+  VoiceCompletionCoordinator 完成屏障。患者重新开口可取消旧推进任务，但不得退出恢复模式或
+  重新加载完整题表。该机制不得改成阻塞实时音频的输出前审核。
 
 ## 患者端身份边界
 
