@@ -659,3 +659,230 @@ async def test_visible_response_broadcasts_completion_marker_before_finalize(
     )
     assert marker_index < listening_index
     finalized.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_premature_close_recovers_after_extraction_with_only_one_question(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """明确提前结束且结构化进度未完成时，只注入一题并自动创建恢复响应。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    next_question = SimpleNamespace(
+        question_id=21,
+        question_code="Q21",
+        patient_text="最近三个月具体下降了多少公斤？",
+        required=True,
+    )
+    other_question = SimpleNamespace(
+        question_id=25,
+        question_code="Q25",
+        patient_text="您平时吸烟吗？",
+        required=True,
+    )
+    session.task_list = [next_question, other_question]
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+
+    class FakeHistory:
+        async def save_message(self, _session_no: str, **kwargs):
+            return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "latest_patient_message_no",
+        lambda _session_no: "MSG-PATIENT-VOICE-2",
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "extraction_processed",
+        lambda _redis, _session_no, _message_no: True,
+    )
+    progress = SimpleNamespace(
+        completed=False,
+        remaining_question_ids=(21, 25),
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "build_recovery_decision",
+        lambda _session_no, _tasks: SimpleNamespace(
+            should_recover=True,
+            next_question=next_question,
+            progress=progress,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        Mock(return_value=False),
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_close"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "resp_close",
+            "delta": "感谢您的配合，本次评估已完成。",
+        },
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_close", "status": "completed"},
+        },
+    )
+
+    recovery_task = session.recovery_task
+    assert recovery_task is not None
+    await recovery_task
+
+    session.client.create_response.assert_awaited_once()
+    recovery_prompt = session.client.update_instructions.await_args_list[-1].args[0]
+    assert "最近三个月具体下降了多少公斤" in recovery_prompt
+    assert "您平时吸烟吗" not in recovery_prompt
+    assert "提前结束恢复指令" in recovery_prompt
+    assert session.next_response_is_recovery is True
+    assert session.recovery_instruction_active is True
+
+
+@pytest.mark.asyncio
+async def test_premature_close_does_not_recover_when_progress_is_complete(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """结束话术与结构化完成一致时维持既有完成流程，不额外创建语音响应。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+
+    class FakeHistory:
+        async def save_message(self, _session_no: str, **kwargs):
+            return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "latest_patient_message_no",
+        lambda _session_no: "MSG-PATIENT-VOICE-2",
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "extraction_processed",
+        lambda _redis, _session_no, _message_no: True,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "build_recovery_decision",
+        lambda _session_no, _tasks: SimpleNamespace(
+            should_recover=False,
+            next_question=None,
+            progress=SimpleNamespace(
+                completed=True,
+                remaining_question_ids=(),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        Mock(return_value=True),
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_final"}},
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "resp_final",
+            "delta": "感谢您的配合，本次评估已完成。",
+        },
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_final", "status": "completed"},
+        },
+    )
+
+    recovery_task = session.recovery_task
+    assert recovery_task is not None
+    await recovery_task
+
+    session.client.create_response.assert_not_awaited()
+    session.client.update_instructions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_response_restores_base_instructions_without_recursive_guard(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """恢复轮完成后恢复长期提示词，且恢复轮本身不再次进入提前结束检查。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.recovery_instruction_active = True
+    session.next_response_is_recovery = True
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+
+    class FakeHistory:
+        async def save_message(self, _session_no: str, **kwargs):
+            return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
+    closing_check = Mock(return_value=True)
+    monkeypatch.setattr(
+        voice_gateway_module.VoiceTurnGuard,
+        "has_closing_intent",
+        closing_check,
+    )
+    monkeypatch.setattr(
+        "app.services.voice_completion_service.mark_voice_response_completed",
+        Mock(return_value=False),
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "response.created", "response": {"id": "resp_recovery"}},
+    )
+    assert session.current_generation is not None
+    assert session.current_generation.is_recovery is True
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "resp_recovery",
+            "delta": "不好意思，刚才我说早了，还有一项需要确认。",
+        },
+    )
+    await gateway._handle_event(
+        session,
+        {
+            "type": "response.done",
+            "response": {"id": "resp_recovery", "status": "completed"},
+        },
+    )
+
+    closing_check.assert_not_called()
+    session.client.update_instructions.assert_awaited_once_with("基础提示词")
+    assert session.recovery_instruction_active is False
+    assert session.recovery_task is None
