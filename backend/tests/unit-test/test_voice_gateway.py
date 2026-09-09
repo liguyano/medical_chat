@@ -750,7 +750,11 @@ async def test_premature_close_recovers_after_extraction_with_only_one_question(
     recovery_prompt = session.client.update_instructions.await_args_list[-1].args[0]
     assert "最近三个月具体下降了多少公斤" in recovery_prompt
     assert "您平时吸烟吗" not in recovery_prompt
-    assert "提前结束恢复指令" in recovery_prompt
+    assert "提前结束恢复模式" in recovery_prompt
+    assert "当前唯一允许询问的问题" in recovery_prompt
+    assert "生活习惯" in recovery_prompt
+    assert "您平时吸烟吗" not in recovery_prompt
+    assert "Task-todo" in recovery_prompt
     assert session.next_response_is_recovery is True
     assert session.recovery_instruction_active is True
 
