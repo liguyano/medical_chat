@@ -13,6 +13,16 @@ from .base import DialogMiddleware
 logger = logging.getLogger(__name__)
 
 
+def _is_disabled_education_constraint(value: Any) -> bool:
+    text = str(value or "")
+    lowered = text.lower()
+    return (
+        "宣教" in text
+        or "get_education_material" in lowered
+        or "teach-back" in lowered
+    )
+
+
 class ScheduleConstraintMiddleware(DialogMiddleware):
     """读取 Schedule Agent 约束并注入当前上下文。"""
 
@@ -29,7 +39,13 @@ class ScheduleConstraintMiddleware(DialogMiddleware):
             result = self.constraint_source(str(session_id))
             constraints = await result if inspect.isawaitable(result) else result
             target = context.setdefault("constraints", [])
-            target.extend(item for item in constraints if item and item not in target)
+            target.extend(
+                item
+                for item in constraints
+                if item
+                and item not in target
+                and not _is_disabled_education_constraint(item)
+            )
         except Exception:
             logger.exception("[ScheduleConstraintMiddleware] 读取约束失败")
 
