@@ -1090,7 +1090,10 @@ class FakeRealtimeClientForConnect:
     instances = []
 
     def __init__(self, **_kwargs):
-        self.connect = AsyncMock()
+        async def connect_impl(**kwargs):
+            self.instructions = kwargs["instructions"]
+
+        self.connect = AsyncMock(side_effect=connect_impl)
         self.create_response = AsyncMock()
         self.cancel_response = AsyncMock()
         self.update_instructions = AsyncMock()
@@ -1149,6 +1152,11 @@ def _mock_voice_gateway_connect_dependencies(
         voice_gateway_module,
         "QwenRealtimeClient",
         FakeRealtimeClientForConnect,
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "DialogEventPublisher",
+        lambda _session_no: FakePublisher(),
     )
     monkeypatch.setattr(
         voice_gateway_module.VoiceTurnGuard,
