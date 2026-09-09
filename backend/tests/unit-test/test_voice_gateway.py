@@ -1040,3 +1040,47 @@ async def test_recovery_progress_with_no_remaining_question_never_restores_full_
     assert session.client.create_response.await_count == 0
     assert session.recovery_mode_active is False
     assert session.recovery_current_question_id is None
+
+
+@pytest.mark.asyncio
+async def test_voice_gateway_ignores_stale_education_schedule_guidance(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Redis 中残留的旧宣教 Schedule 指引不得再注入 Qwen。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    monkeypatch.setattr(
+        voice_gateway_module.ScheduleTaskStore,
+        "get_guidance",
+        lambda _self, _session_no: {
+            "constraint_prompt": "请调用 get_education_material 做戒烟宣教"
+        },
+    )
+
+    await gateway._refresh_schedule_guidance(session)
+
+    session.client.update_instructions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_voice_gateway_keeps_non_education_schedule_guidance(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """普通调度约束仍应正常下发，避免关闭宣教误伤其他 Schedule 能力。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    monkeypatch.setattr(
+        voice_gateway_module.ScheduleTaskStore,
+        "get_guidance",
+        lambda _self, _session_no: {
+            "constraint_prompt": "回到量表，只询问当前待完成问题"
+        },
+    )
+
+    await gateway._refresh_schedule_guidance(session)
+
+    session.client.update_instructions.assert_awaited_once()
+    prompt = session.client.update_instructions.await_args.args[0]
+    assert "回到量表，只询问当前待完成问题" in prompt
