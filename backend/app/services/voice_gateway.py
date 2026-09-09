@@ -1357,8 +1357,16 @@ class VoiceGateway:
                 session.session_no,
                 session.task_list,
             )
-            if decision.progress.completed or decision.next_question is None:
-                await self._restore_base_instructions(session)
+            if decision.progress.completed:
+                await self._finish_recovery_mode(session)
+                return
+            if decision.next_question is None:
+                logger.error(
+                    "恢复模式存在未完成问题但无法映射到 Task-todo，禁止退回完整题表: "
+                    "session=%s remaining=%s",
+                    session.session_no,
+                    list(decision.progress.remaining_question_ids),
+                )
                 return
 
             waited = 0.0
@@ -1459,6 +1467,22 @@ class VoiceGateway:
             "【当前唯一允许询问的问题】\n"
             f"{question.patient_text}\n"
         )
+
+    async def _finish_recovery_mode(self, session: VoiceSession) -> None:
+        """全部 remaining 清空后停止提问，等待既有完成屏障结束会话。"""
+        terminal_instructions = (
+            "你是一名专业的AI护理助手。结构化评估已经确认完成。"
+            "从现在开始不得再询问任何量表问题，也不要自行开启新的评估话题；"
+            "如患者继续说话，只做简短礼貌回应并等待系统结束会话。"
+        )
+        try:
+            await session.client.update_instructions(terminal_instructions)
+        finally:
+            session.recovery_instruction_active = False
+            session.recovery_mode_active = False
+            session.recovery_current_question_id = None
+            session.recovery_source_message_no = None
+            session.next_response_is_recovery = False
 
     async def _restore_base_instructions(self, session: VoiceSession) -> None:
         """退出恢复模式并恢复长期基础提示词。"""
