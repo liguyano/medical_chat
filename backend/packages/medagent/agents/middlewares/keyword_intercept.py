@@ -23,25 +23,13 @@ class KeywordInterceptMiddleware(DialogMiddleware):
         self.session_factory = session_factory
         # 内置最小关键词库（interaction_rule 表未就绪时的降级方案）
         self.builtin_keywords = {
-            "抽烟": (
-                "你必须追问吸烟频率与数量，调用 get_education_material(category='tobacco')，"
-                "并触发 trigger_consent_form(form_type='tobacco')"
-            ),
-            "吸烟": (
-                "你必须追问吸烟频率与数量，调用 get_education_material(category='tobacco')，"
-                "并触发 trigger_consent_form(form_type='tobacco')"
-            ),
-            "喝酒": "你必须对患者进行饮酒相关的健康宣教，调用 get_education_material(category='alcohol')",
-            "饮酒": "你必须对患者进行饮酒相关的健康宣教，调用 get_education_material(category='alcohol')",
+            "抽烟": "只按量表需要追问吸烟频率与数量，不进行健康宣教或戒烟知情同意。",
+            "吸烟": "只按量表需要追问吸烟频率与数量，不进行健康宣教或戒烟知情同意。",
+            "喝酒": "只按量表需要追问饮酒频率与数量，不进行健康宣教。",
+            "饮酒": "只按量表需要追问饮酒频率与数量，不进行健康宣教。",
             "手术": "你必须让患者阅读手术知情同意书，调用 trigger_consent_form(form_type='surgery')",
-            "青霉素过敏": (
-                "你必须追问过敏反应，调用 get_education_material(category='allergy', level=3)，"
-                "并提醒患者下次就医时主动告知医生和护士"
-            ),
-            "药物过敏": (
-                "你必须追问具体过敏药物名称和反应，"
-                "调用 get_education_material(category='allergy', level=3)"
-            ),
+            "青霉素过敏": "你必须追问具体过敏反应；不要主动发起健康宣教。",
+            "药物过敏": "你必须追问具体过敏药物名称和反应；不要主动发起健康宣教。",
             "量体温": (
                 "必须调用 request_nurse_assistance("
                 "requested_action='measure_temperature') 呼叫护士，禁止仅用文字等待"
@@ -76,54 +64,10 @@ class KeywordInterceptMiddleware(DialogMiddleware):
             ),
         }
         self.builtin_tool_calls: dict[str, list[dict[str, Any]]] = {
-            "抽烟": [
-                {
-                    "name": "get_education_material",
-                    "arguments": {"category": "tobacco", "level": 2},
-                },
-                {
-                    "name": "trigger_consent_form",
-                    "arguments": {"form_type": "tobacco"},
-                },
-            ],
-            "吸烟": [
-                {
-                    "name": "get_education_material",
-                    "arguments": {"category": "tobacco", "level": 2},
-                },
-                {
-                    "name": "trigger_consent_form",
-                    "arguments": {"form_type": "tobacco"},
-                },
-            ],
-            "喝酒": [
-                {
-                    "name": "get_education_material",
-                    "arguments": {"category": "alcohol", "level": 2},
-                }
-            ],
-            "饮酒": [
-                {
-                    "name": "get_education_material",
-                    "arguments": {"category": "alcohol", "level": 2},
-                }
-            ],
             "手术": [
                 {
                     "name": "trigger_consent_form",
                     "arguments": {"form_type": "surgery"},
-                }
-            ],
-            "青霉素过敏": [
-                {
-                    "name": "get_education_material",
-                    "arguments": {"category": "allergy", "level": 3},
-                }
-            ],
-            "药物过敏": [
-                {
-                    "name": "get_education_material",
-                    "arguments": {"category": "allergy", "level": 3},
                 }
             ],
             "量体温": [
