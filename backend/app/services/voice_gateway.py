@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from medagent.agents.service_agent.dialog_agent.prompt import build_system_prompt
 from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS
+from medagent.agents.service_agent.schedule_agent import QuestionTask
 from sqlalchemy import func, select
 
 from app.configs.app_config import get_app_config
@@ -42,6 +43,7 @@ from app.services.dialog_audio_store import DialogAudioStore
 from app.services.dialog_tool_executor import execute_tool
 from app.services.qwen_realtime_client import QwenRealtimeClient
 from app.services.tool_interaction_service import publish_tool_result
+from app.services.voice_turn_guard import VoiceTurnGuard
 from app.utils.redis_client import RedisClient, get_redis
 from app.workers.event_publisher import DialogEventPublisher
 from app.workers.schedule_task_store import ScheduleTaskStore
@@ -54,6 +56,8 @@ TRANSCRIPT_DRAFT_TTL_SECONDS = 900
 TRANSCRIPT_PENDING_KEY_PREFIX = "voice_transcript_pending:"
 MAX_AUDIO_BUFFER_BYTES = 12 * 1024 * 1024
 INPUT_PRE_ROLL_BYTES = 32_000
+VOICE_CLOSE_RECOVERY_POLL_SECONDS = 0.25
+VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass
@@ -74,6 +78,7 @@ class VoiceGeneration:
     tool_call_only: bool = False
     started_event_id: str | None = None
     completed: bool = False
+    is_recovery: bool = False
 
 
 @dataclass
@@ -90,6 +95,7 @@ class VoiceSession:
     redis: RedisClient
     audio_store: DialogAudioStore
     publisher: DialogEventPublisher
+    task_list: list[QuestionTask] = field(default_factory=list)
     turn_detection: str = "server_vad"
     connected_clients: set[WebSocket] = field(default_factory=set)
     input_audio: bytearray = field(default_factory=bytearray)
@@ -115,6 +121,9 @@ class VoiceSession:
     handled_tool_call_ids: set[str] = field(default_factory=set)
     receive_task: Any | None = None
     close_task: Any | None = None
+    recovery_task: Any | None = None
+    next_response_is_recovery: bool = False
+    recovery_instruction_active: bool = False
     closed: bool = False
     # 默认识别完成即提交；仅在显式启用时保留转写确认草稿协议，兼容历史客户端/测试。
     require_transcript_confirmation: bool = False
@@ -245,6 +254,7 @@ class VoiceGateway:
                 redis=get_redis(),
                 audio_store=DialogAudioStore(),
                 publisher=DialogEventPublisher(session_no),
+                task_list=task_list,
                 turn_detection=turn_detection,
                 require_transcript_confirmation=False,
             )
@@ -458,6 +468,9 @@ class VoiceGateway:
         session.closed = True
         if session.receive_task is not None:
             session.receive_task.cancel()
+        if session.recovery_task is not None:
+            session.recovery_task.cancel()
+            session.recovery_task = None
         await session.client.close()
         for websocket in list(session.connected_clients):
             await self._send_json(websocket, {"type": "closed"})
@@ -630,6 +643,21 @@ class VoiceGateway:
         """按官方 server_vad 事件开始一轮患者语音并处理打断。"""
         if session.speech_active:
             return
+        if session.recovery_task is not None and not session.recovery_task.done():
+            session.recovery_task.cancel()
+            session.recovery_task = None
+        if session.recovery_instruction_active:
+            session.next_response_is_recovery = False
+            if session.response_requested and not session.response_cancel_requested:
+                session.response_cancel_requested = True
+                try:
+                    await session.client.cancel_response()
+                except Exception:
+                    logger.exception(
+                        "患者打断提前结束恢复响应时取消失败: session=%s",
+                        session.session_no,
+                    )
+            await self._restore_base_instructions(session)
         if session.pending_transcript_id:
             await self._broadcast_json(
                 session,
@@ -848,7 +876,9 @@ class VoiceGateway:
             message_id=message_id,
             turn_no=turn_no,
             response_id=response_id,
+            is_recovery=session.next_response_is_recovery,
         )
+        session.next_response_is_recovery = False
         session.current_generation = generation
         if response_id:
             session.generations[response_id] = generation
@@ -1014,6 +1044,10 @@ class VoiceGateway:
                 await self._maybe_create_response(session)
             return
         generation.completed = True
+        closing_candidate = (
+            not generation.is_recovery
+            and VoiceTurnGuard.has_closing_intent(generation.text)
+        )
         await self._flush_audio_segment(session, generation)
         audio_url: str | None = None
         if generation.all_audio:
@@ -1087,6 +1121,18 @@ class VoiceGateway:
                 generation_id=generation.generation_id,
                 redis=session.redis,
             )
+        if generation.is_recovery:
+            await self._restore_base_instructions(session)
+        elif (
+            closing_candidate
+            and not session.closed
+            and not session.responding
+            and session.pending_tool_responses == 0
+        ):
+            self._schedule_premature_close_recovery(
+                session,
+                response_id=generation.response_id,
+            )
         if not session.closed:
             await self._broadcast_state(session, "listening")
             await self._maybe_create_response(session)
@@ -1107,6 +1153,8 @@ class VoiceGateway:
             ):
                 return
             self._remove_generation(session, generation)
+            if generation.is_recovery:
+                await self._restore_base_instructions(session)
         session.response_requested = False
         session.response_cancel_requested = False
         await self._broadcast_json(session, {"type": "interrupted"})
@@ -1132,6 +1180,138 @@ class VoiceGateway:
                 next(iter(session.generations), None)
             )
         session.responding = bool(session.active_response_ids)
+
+    def _schedule_premature_close_recovery(
+        self,
+        session: VoiceSession,
+        *,
+        response_id: str | None,
+    ) -> None:
+        """异步安排提前结束恢复，不阻塞 Qwen 上游事件消费。"""
+        if session.recovery_task is not None and not session.recovery_task.done():
+            return
+        session.recovery_task = asyncio.create_task(
+            self._recover_premature_close(
+                session,
+                response_id=response_id,
+            )
+        )
+
+    async def _recover_premature_close(
+        self,
+        session: VoiceSession,
+        *,
+        response_id: str | None,
+    ) -> None:
+        """等待当前患者答案抽取完成后，按权威进度自动纠正并补问一题。"""
+        current_task = asyncio.current_task()
+        try:
+            source_message_no = await asyncio.to_thread(
+                VoiceTurnGuard.latest_patient_message_no,
+                session.session_no,
+            )
+            waited = 0.0
+            while not VoiceTurnGuard.extraction_processed(
+                session.redis,
+                session.session_no,
+                source_message_no,
+            ):
+                if (
+                    session.closed
+                    or session.speech_active
+                    or session.responding
+                    or session.response_requested
+                ):
+                    return
+                if waited >= VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS:
+                    logger.warning(
+                        "提前结束恢复等待 Extraction 超时，保持当前会话继续监听: "
+                        "session=%s source=%s response=%s",
+                        session.session_no,
+                        source_message_no,
+                        response_id,
+                    )
+                    return
+                await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
+                waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
+
+            decision = await asyncio.to_thread(
+                VoiceTurnGuard.build_recovery_decision,
+                session.session_no,
+                session.task_list,
+            )
+            if not decision.should_recover or decision.next_question is None:
+                return
+            if (
+                session.closed
+                or session.speech_active
+                or session.responding
+                or session.response_requested
+            ):
+                return
+
+            recovery_instructions = self._build_premature_close_recovery_instructions(
+                session,
+                decision.next_question,
+            )
+            await session.client.update_instructions(recovery_instructions)
+            session.recovery_instruction_active = True
+            session.next_response_is_recovery = True
+            session.response_requested = True
+            try:
+                await session.client.create_response()
+            except Exception:
+                session.response_requested = False
+                session.next_response_is_recovery = False
+                await self._restore_base_instructions(session)
+                raise
+            logger.warning(
+                "检测到语音模型提前结束，已触发自动补问: "
+                "session=%s response=%s question_id=%s remaining=%s",
+                session.session_no,
+                response_id,
+                decision.next_question.question_id,
+                list(decision.progress.remaining_question_ids),
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception(
+                "提前结束自动恢复失败，不中断实时语音会话: session=%s",
+                session.session_no,
+            )
+        finally:
+            if session.recovery_task is current_task:
+                session.recovery_task = None
+
+    @staticmethod
+    def _build_premature_close_recovery_instructions(
+        session: VoiceSession,
+        question: QuestionTask,
+    ) -> str:
+        """只向恢复轮暴露一条未完成题，同时保留同一 Realtime 会话历史。"""
+        return (
+            build_system_prompt(
+                patient_info=session.patient_info,
+                task_list=[question],
+            )
+            + "\n\n【提前结束恢复指令】\n"
+            "你刚才过早使用了结束评估的话术，但结构化评估尚未完成。"
+            "继续沿用当前会话历史，不要重新自我介绍，也不要重问已经确认的信息。"
+            "先用一句自然、简短的话向患者纠正，例如说明刚才说早了；"
+            "然后只询问当前【评估任务列表】中的这一项。"
+            "不得询问其他量表问题，不得朗读题目编号或内部状态，不得再次宣布评估完成或结束。"
+        )
+
+    async def _restore_base_instructions(self, session: VoiceSession) -> None:
+        """恢复长期基础提示词，避免一次性恢复约束污染后续患者轮次。"""
+        if not session.recovery_instruction_active:
+            return
+        try:
+            await session.client.update_instructions(session.instructions)
+        finally:
+            session.recovery_instruction_active = False
+            session.next_response_is_recovery = False
 
     async def _handle_tool_call(
         self,
