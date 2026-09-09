@@ -11,10 +11,15 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from medagent.agents.service_agent.schedule_agent import QuestionTask
+from medagent.agents.service_agent.schedule_agent import QuestionOption, QuestionTask
 from sqlalchemy import select
 
 from app.models import base as model_base
+from app.models.assessment_template import (
+    AssessmentOption,
+    AssessmentQuestion,
+    AssessmentSection,
+)
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.services.assessment_progress_service import AssessmentProgress, refresh_assessment_progress
 
@@ -98,20 +103,93 @@ class VoiceTurnGuard:
         return source_message_no in processed
 
     @staticmethod
+    def _load_question_task_from_db(db: Any, question_id: int) -> QuestionTask | None:
+        """按 question_id 从当前数据库模板域恢复一条可问问题。
+
+        用于 Redis Schedule plan 过期、缺题或使用旧 question_id 时的兜底。question_id
+        来自 assessment_progress 的 remaining 集合，因此仍由当前任务绑定的结构化评估事实
+        决定是否允许询问。
+        """
+        row = db.execute(
+            select(AssessmentQuestion, AssessmentSection.section_name)
+            .outerjoin(
+                AssessmentSection,
+                AssessmentSection.id == AssessmentQuestion.section_id,
+            )
+            .where(
+                AssessmentQuestion.id == question_id,
+                AssessmentQuestion.required.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                AssessmentQuestion.deleted == 0,
+            )
+        ).first()
+        if row is None:
+            return None
+
+        question, section_name = row
+        options = list(
+            db.scalars(
+                select(AssessmentOption)
+                .where(
+                    AssessmentOption.question_id == question_id,
+                    AssessmentOption.deleted == 0,
+                )
+                .order_by(AssessmentOption.sort_no, AssessmentOption.id)
+            ).all()
+        )
+        return QuestionTask(
+            question_id=question.id,
+            question_code=question.question_code,
+            question_name=question.question_name,
+            patient_text=question.patient_text,
+            question_type=question.question_type,
+            required=question.required,
+            sort_no=question.sort_no,
+            section_name=section_name,
+            options=[
+                QuestionOption(
+                    option_code=option.option_code,
+                    option_label=option.option_label,
+                    option_value=option.option_value,
+                    clinical_score=(
+                        float(option.clinical_score)
+                        if option.clinical_score is not None
+                        else None
+                    ),
+                    requires_follow_up=option.requires_follow_up,
+                )
+                for option in options
+            ],
+        )
+
+    @staticmethod
     def build_recovery_decision(
         session_no: str,
         task_list: Iterable[QuestionTask],
     ) -> VoiceRecoveryDecision:
-        """刷新权威结构化进度，并按原 Task-todo 顺序选择一条未完成必填题。"""
+        """刷新权威结构化进度，并选择一条未完成必填题。
+
+        优先保留 Schedule plan 的原有排序；若 Redis 中的 plan 已过期、缺题或 question_id
+        与当前评估实例不一致，则直接按 remaining_question_ids 从 PostgreSQL 当前题目快照
+        恢复问题文本。不得因为 Redis 缓存不一致而退回完整题表。
+        """
         if model_base.SessionLocal is None:
             raise RuntimeError("数据库未初始化")
         with model_base.SessionLocal() as db:
             progress = refresh_assessment_progress(db, session_no)
-        remaining = set(progress.remaining_question_ids)
-        next_question = next(
-            (question for question in task_list if question.question_id in remaining),
-            None,
-        )
+            remaining = set(progress.remaining_question_ids)
+            next_question = next(
+                (question for question in task_list if question.question_id in remaining),
+                None,
+            )
+            if next_question is None and progress.remaining_question_ids:
+                for question_id in progress.remaining_question_ids:
+                    next_question = VoiceTurnGuard._load_question_task_from_db(
+                        db,
+                        question_id,
+                    )
+                    if next_question is not None:
+                        break
         return VoiceRecoveryDecision(
             progress=progress,
             next_question=next_question,
