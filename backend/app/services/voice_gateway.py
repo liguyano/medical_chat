@@ -125,6 +125,7 @@ class VoiceSession:
     recovery_mode_active: bool = False
     recovery_current_question_id: int | None = None
     recovery_source_message_no: str | None = None
+    recovery_answer_response_pending: bool = False
     next_response_is_recovery: bool = False
     recovery_instruction_active: bool = False
     closed: bool = False
@@ -853,6 +854,7 @@ class VoiceGateway:
         )
         if session.recovery_mode_active:
             session.recovery_source_message_no = message_id
+            session.recovery_answer_response_pending = True
             self._schedule_recovery_progress(
                 session,
                 source_message_no=message_id,
@@ -1056,6 +1058,8 @@ class VoiceGateway:
             return
         if not generation.text and not generation.all_audio:
             self._remove_generation(session, generation)
+            if generation.is_recovery and session.recovery_source_message_no is not None:
+                session.recovery_answer_response_pending = False
             session.response_requested = False
             session.response_cancel_requested = False
             if not session.closed:
@@ -1117,6 +1121,8 @@ class VoiceGateway:
                 )
             )
         self._remove_generation(session, generation)
+        if generation.is_recovery and session.recovery_source_message_no is not None:
+            session.recovery_answer_response_pending = False
         session.response_requested = False
         session.response_cancel_requested = False
         if not session.responding and session.pending_tool_responses == 0:
@@ -1172,6 +1178,8 @@ class VoiceGateway:
             ):
                 return
             self._remove_generation(session, generation)
+            if generation.is_recovery and session.recovery_source_message_no is not None:
+                session.recovery_answer_response_pending = False
         session.response_requested = False
         session.response_cancel_requested = False
         await self._broadcast_json(session, {"type": "interrupted"})
@@ -1276,6 +1284,7 @@ class VoiceGateway:
             session.recovery_mode_active = True
             session.recovery_current_question_id = decision.next_question.question_id
             session.recovery_source_message_no = None
+            session.recovery_answer_response_pending = False
             session.recovery_instruction_active = True
             session.next_response_is_recovery = True
             session.response_requested = True
@@ -1371,7 +1380,8 @@ class VoiceGateway:
 
             waited = 0.0
             while (
-                session.responding
+                session.recovery_answer_response_pending
+                or session.responding
                 or session.active_response_ids
                 or session.response_requested
                 or session.speech_active
@@ -1482,6 +1492,7 @@ class VoiceGateway:
             session.recovery_mode_active = False
             session.recovery_current_question_id = None
             session.recovery_source_message_no = None
+            session.recovery_answer_response_pending = False
             session.next_response_is_recovery = False
 
     async def _restore_base_instructions(self, session: VoiceSession) -> None:
@@ -1495,6 +1506,7 @@ class VoiceGateway:
             session.recovery_mode_active = False
             session.recovery_current_question_id = None
             session.recovery_source_message_no = None
+            session.recovery_answer_response_pending = False
             session.next_response_is_recovery = False
 
     async def _handle_tool_call(
