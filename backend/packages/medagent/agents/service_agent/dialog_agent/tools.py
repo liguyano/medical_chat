@@ -261,14 +261,13 @@ async def trigger_consent_form(
         "surgery",
         "anesthesia",
         "blood_transfusion",
-        "tobacco",
     ],
 ) -> dict[str, Any]:
     """触发知情同意书签署流程（手术、麻醉、输血等）。
 
     Args:
         form_type: 知情同意书类型（surgery=手术, anesthesia=麻醉,
-            blood_transfusion=输血, tobacco=戒烟）。
+            blood_transfusion=输血）。
     """
     if form_type not in _CONSENT_DOCUMENTS:
         return {"success": False, "message": f"不支持的知情同意书类型: {form_type}"}
@@ -371,7 +370,7 @@ async def play_audio(audio_url: str) -> dict[str, Any]:
 
 # ==================== 工具注册表 ====================
 
-# LangChain BaseTool 注册表（名称 → 工具对象），供执行路由与 schema 生成复用
+# 执行注册表保留历史工具，兼容旧事件回放/历史测试；模型侧只暴露当前允许主动调用的工具。
 _TOOL_OBJECTS: list[BaseTool] = [
     get_education_material,
     trigger_consent_form,
@@ -380,14 +379,18 @@ _TOOL_OBJECTS: list[BaseTool] = [
 ]
 _TOOL_REGISTRY: dict[str, BaseTool] = {t.name: t for t in _TOOL_OBJECTS}
 
+_MODEL_TOOL_OBJECTS: list[BaseTool] = [
+    trigger_consent_form,
+    request_nurse_assistance,
+]
+
 
 def build_openai_tool_schemas() -> list[dict[str, Any]]:
-    """构建 OpenAI function 调用 schema 列表
-    作用：从 @tool 对象生成引擎侧所需的 OpenAI function dict，保证 schema 与实现单一来源。
-    Return:
-        - OpenAI function dict 列表
+    """构建模型可见的 OpenAI function schema。
+
+    健康宣教工具与兼容 play_audio 不再暴露给 Dialog/Qwen，防止模型主动触发。
     """
-    return [convert_to_openai_tool(t) for t in _TOOL_OBJECTS]
+    return [convert_to_openai_tool(t) for t in _MODEL_TOOL_OBJECTS]
 
 
 # 引擎侧使用的 OpenAI function dict 列表（对外名保持 DIALOG_TOOLS 不变）
