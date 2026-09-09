@@ -720,6 +720,17 @@ class VoiceGateway:
         guidance_prompt = str(guidance.get("constraint_prompt") or "") if guidance else ""
         if not guidance_prompt:
             return
+        lowered = guidance_prompt.lower()
+        if (
+            "宣教" in guidance_prompt
+            or "get_education_material" in lowered
+            or "teach-back" in lowered
+        ):
+            logger.info(
+                "忽略已停用的主动宣教 Schedule 指引: session=%s",
+                session.session_no,
+            )
+            return
         await session.client.update_instructions(
             session.instructions
             + (
