@@ -272,6 +272,14 @@ from medagent.configs.agent_config import get_agent_config
   `SessionEndEvent`，不再借用文本 Dialog Exit 完成语音会话。Function Calling 的中间
   `response.done` 不得触发任务完成。Gateway 在发布任务结束状态前必须先通过患者
   WebSocket 发送 `response_completed`，作为浏览器等待最后音频排空的顺序屏障。
+- Qwen Realtime 患者可见回复完成后允许执行事后 `VoiceTurnGuard`：只对明确宣告评估完成/结束的
+  完整回复进入核验。Guard 必须先等待当前患者消息被 Extraction Agent 写入
+  `processed_message_ids`，再读取结构化 `remaining_question_ids`，避免 `response.done` 早于
+  抽取落库造成误判。若仍未完成，只可按当前 Schedule Task-todo 顺序选择一条 remaining 题，
+  临时用“全局护理约束 + 患者信息 + 当前一题”更新 Realtime instructions 后自动
+  `response.create`；不得重新暴露整张后续问题表。患者重新开口优先取消恢复，恢复响应结束或
+  取消后必须恢复长期基础 instructions。该机制是输出后的纠错兜底，不得改成阻塞实时音频的
+  输出前审核；真正会话完成仍以 VoiceCompletionCoordinator 的结构化完成屏障为准。
 
 ## 患者端身份边界
 
