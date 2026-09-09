@@ -71,8 +71,10 @@ async def test_keyword_middleware_matches_and_deduplicates_constraints():
     await middleware.before_agent(context)
 
     assert len(context["constraints"]) == 1
-    assert "get_education_material" in context["constraints"][0]
-    assert "trigger_consent_form" in context["constraints"][0]
+    assert "吸烟频率与数量" in context["constraints"][0]
+    assert "get_education_material" not in context["constraints"][0]
+    assert "trigger_consent_form" not in context["constraints"][0]
+    assert context["required_tool_calls"] == []
 
 
 @pytest.mark.asyncio
@@ -81,7 +83,7 @@ async def test_keyword_middleware_matches_and_deduplicates_constraints():
     ["我不抽烟", "从不吸烟", "已经戒烟", "不喝酒", "无需手术"],
 )
 async def test_keyword_middleware_respects_negative_semantics(patient_input):
-    """否定语义不得触发宣教或知情同意约束。"""
+    """否定语义不得触发额外追问或工具约束。"""
     context = {"patient_input": patient_input, "constraints": []}
 
     await KeywordInterceptMiddleware().before_agent(context)
@@ -97,12 +99,14 @@ async def test_schedule_constraint_accepts_sync_and_async_sources():
         lambda _: ["已有约束", "回到量表"]
     ).before_agent(sync_context)
 
-    async_source = AsyncMock(return_value=["调用宣教工具"])
+    async_source = AsyncMock(
+        return_value=["调用宣教工具", "调用 get_education_material", "回到量表"]
+    )
     async_context = {"session_id": "s2", "constraints": []}
     await ScheduleConstraintMiddleware(async_source).before_agent(async_context)
 
     assert sync_context["constraints"] == ["已有约束", "回到量表"]
-    assert async_context["constraints"] == ["调用宣教工具"]
+    assert async_context["constraints"] == ["回到量表"]
     async_source.assert_awaited_once_with("s2")
 
 
@@ -128,15 +132,18 @@ async def test_event_publish_emits_turn_and_tool_events():
         "patient_input": "我吸烟",
         "tool_calls": [
             {
-                "call_id": "tool-call-education-1",
-                "name": "get_education_material",
-                "arguments": {"category": "tobacco"},
+                "call_id": "tool-call-nurse-1",
+                "name": "request_nurse_assistance",
+                "arguments": {
+                    "requested_action": "measure_temperature",
+                    "reason": "需要测量体温",
+                },
                 "result": {"success": True},
             }
         ],
     }
 
-    await middleware.after_agent(context, "我为您提供戒烟建议")
+    await middleware.after_agent(context, "我已通知护士协助测量体温")
 
     assert [event["event_type"] for event in events] == [
         "dialog_turn",
@@ -144,8 +151,8 @@ async def test_event_publish_emits_turn_and_tool_events():
     ]
     assert events[0]["question"] == "我吸烟"
     assert events[0]["tool_calls"] == context["tool_calls"]
-    assert events[1]["tool_args"] == {"category": "tobacco"}
-    assert events[1]["call_id"] == "tool-call-education-1"
+    assert events[1]["tool_args"]["requested_action"] == "measure_temperature"
+    assert events[1]["call_id"] == "tool-call-nurse-1"
 
 
 @pytest.mark.asyncio
