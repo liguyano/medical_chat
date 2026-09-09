@@ -1289,18 +1289,35 @@ class VoiceGateway:
         session: VoiceSession,
         question: QuestionTask,
     ) -> str:
-        """只向恢复轮暴露一条未完成题，同时保留同一 Realtime 会话历史。"""
+        """构建提前结束恢复专用提示词。
+
+        作用：恢复轮只暴露当前一个仍未形成有效结构化答案的问题；不复用通用
+        build_system_prompt，避免其中完整 Task-todo 或示例话术诱导模型询问其他内容。
+        同一个 Realtime 会话的既有 conversation history 仍由供应商保留。
+        """
+        patient_name = str(session.patient_info.get("name") or "患者")
+        patient_age = session.patient_info.get("age")
+        patient_gender = str(session.patient_info.get("gender") or "未知")
+        patient_context = (
+            f"患者姓名：{patient_name}；"
+            f"性别：{patient_gender}；"
+            f"年龄：{patient_age if patient_age is not None else '未知'}。"
+        )
         return (
-            build_system_prompt(
-                patient_info=session.patient_info,
-                task_list=[question],
-            )
-            + "\n\n【提前结束恢复指令】\n"
-            "你刚才过早使用了结束评估的话术，但结构化评估尚未完成。"
-            "继续沿用当前会话历史，不要重新自我介绍，也不要重问已经确认的信息。"
-            "先用一句自然、简短的话向患者纠正，例如说明刚才说早了；"
-            "然后只询问当前【评估任务列表】中的这一项。"
-            "不得询问其他量表问题，不得朗读题目编号或内部状态，不得再次宣布评估完成或结束。"
+            "你是一名专业的AI护理助手。当前处于【提前结束恢复模式】。\n\n"
+            f"【患者上下文】\n{patient_context}\n\n"
+            "【恢复规则】\n"
+            "1. 你刚才过早使用了结束评估的话术，但系统确认评估尚未完成。\n"
+            "2. 继续沿用当前会话历史，不要重新自我介绍，不要重复已经确认过的问题。\n"
+            "3. 当前只允许询问下面这一项；除这一项外，禁止主动询问任何其他量表问题、"
+            "生活习惯、症状、宣教内容或延伸问题。\n"
+            "4. 不得根据过去看到过的 Task-todo 自行选择其他问题。\n"
+            "5. 先用一句自然、简短的话纠正刚才的结束，例如“抱歉，刚才我说早了，"
+            "还有一项需要和您确认。”然后立即询问下面这一项。\n"
+            "6. 一次只问一个问题，不得朗读内部题号、数据库状态、null、remaining 等内部信息。\n"
+            "7. 不得再次宣布评估完成或结束。\n\n"
+            "【当前唯一允许询问的问题】\n"
+            f"{question.patient_text}\n"
         )
 
     async def _restore_base_instructions(self, session: VoiceSession) -> None:
