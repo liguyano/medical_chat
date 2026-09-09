@@ -244,15 +244,16 @@ from medagent.configs.agent_config import get_agent_config
 - SSE 信封中的 `event_id` 是持久化领域事件编号，用于宣教确认、知情同意和呼叫处理等
   业务关联；`stream_id` 是 Redis Stream 游标，只用于断线续读。SSE 的 `id:` 行继续使用
   Redis Stream ID，禁止用传输游标覆盖领域事件编号。
-- Dialog 原生工具结果必须转换为独立业务事件并保存到 `interaction_event`：
-  `education_triggered`、`consent_triggered`、`handoff_requested`；通用
-  `tool_call` 仅用于内部审计，不得直接推给患者端。模型漏掉关键词规则要求的工具时，
-  Dialog Agent 可执行安全兜底工具并要求模型基于真实结果继续回答。
-- 宣教材料在患者端保留原文、通俗文本与播报文本三个快照；知情同意条款在对话内确认和
-  签名，签名图片保存到 `backend/storage/consent-signatures`，禁止把 data URL 直接写入
-  PostgreSQL。患者确认宣教阅读时必须持久化 `education_status_updated` 事件，携带材料编号、
-  确认状态和确认时间，供医护端回放恢复。呼叫医护同时写入会话流与
-  `nurse_stream:{staff_id}` 全局提醒流。
+- 当前 Dialog/Qwen 主链路已关闭主动健康宣教：模型工具 schema 不得暴露
+  `get_education_material`，关键词中间件不得生成宣教 required_tool_calls，Schedule/Redis
+  中包含“宣教”、`get_education_material` 或 teach-back 的旧约束必须在运行时过滤。
+  新对话不得主动产生 `education_triggered`；该事件类型、宣教表和患者端历史卡片仅用于
+  兼容已经存在的历史记录。知情同意与呼叫护士仍分别通过 `consent_triggered`、
+  `handoff_requested` 持久化；通用 `tool_call` 仅用于内部审计。
+- 旧宣教材料的原文、通俗文本、播报文本及 `education_status_updated` 历史事件继续可读，
+  但不得据此重新触发患者宣教、自动播报或 teach-back。知情同意条款仍在对话内确认和签名，
+  签名图片保存到 `backend/storage/consent-signatures`，禁止把 data URL 直接写入
+  PostgreSQL。呼叫医护同时写入会话流与 `nurse_stream:{staff_id}` 全局提醒流。
   呼叫请求必须永久保留在 `interaction_event`：事件 payload 需区分
   `request_source=patient|agent`，Agent 呼叫还需保存 `tool_name`、`tool_args`、
   `tool_result`；护士处理时更新原请求事件的处理状态，并记录处理护士 ID、工号、姓名、
@@ -333,12 +334,13 @@ from medagent.configs.agent_config import get_agent_config
 
 ## Demo 系统配置中心
 
-- `/api/system-config` 只允许已登录医护访问，提供宣教材料、交互拦截规则和评估量表的
-  查看与直接更新；本 Demo 不建设草稿、审批、发布和操作审计流程。
-- 宣教材料使用 `education_program`、`education_program_version`、`education_unit`，
-  文本 Dialog 与实时语音工具统一通过 App 层执行器读取当前启用材料并保留事件快照。
-- `interaction_rule` 保存后立即生效。为避免 API 与 Celery Worker 的进程内缓存漂移，
-  每条患者文本匹配前重新加载当前数据库规则。
+- `/api/system-config` 只允许已登录医护访问，仍可查看历史宣教材料、交互拦截规则和
+  评估量表；本 Demo 不建设草稿、审批、发布和操作审计流程。
+- `education_program`、`education_program_version`、`education_unit` 继续作为历史数据与
+  配置兼容域存在，但当前文本 Dialog 与实时语音不得主动读取或触发宣教材料。
+- `interaction_rule` 保存后立即生效；但 `action_type=trigger_education` 的规则属于已停用能力，
+  运行时必须忽略。旧 `constraint_prompt` 中包含宣教工具或 teach-back 指令时也必须过滤。
+  为避免 API 与 Celery Worker 的进程内缓存漂移，每条患者文本匹配前重新加载当前数据库规则。
 - 量表配置接口返回主档、当前版本、分组、题目、选项、规则和护理措施；Demo 编辑只允许
   更新已有记录，必须保持全部 ID 集合和量表内部关联完整。
 
