@@ -122,6 +122,9 @@ class VoiceSession:
     receive_task: Any | None = None
     close_task: Any | None = None
     recovery_task: Any | None = None
+    recovery_mode_active: bool = False
+    recovery_current_question_id: int | None = None
+    recovery_source_message_no: str | None = None
     next_response_is_recovery: bool = False
     recovery_instruction_active: bool = False
     closed: bool = False
@@ -646,18 +649,19 @@ class VoiceGateway:
         if session.recovery_task is not None and not session.recovery_task.done():
             session.recovery_task.cancel()
             session.recovery_task = None
-        if session.recovery_instruction_active:
-            session.next_response_is_recovery = False
-            if session.response_requested and not session.response_cancel_requested:
-                session.response_cancel_requested = True
-                try:
-                    await session.client.cancel_response()
-                except Exception:
-                    logger.exception(
-                        "患者打断提前结束恢复响应时取消失败: session=%s",
-                        session.session_no,
-                    )
-            await self._restore_base_instructions(session)
+        if (
+            session.recovery_mode_active
+            and session.response_requested
+            and not session.response_cancel_requested
+        ):
+            session.response_cancel_requested = True
+            try:
+                await session.client.cancel_response()
+            except Exception:
+                logger.exception(
+                    "患者打断恢复模式响应时取消失败: session=%s",
+                    session.session_no,
+                )
         if session.pending_transcript_id:
             await self._broadcast_json(
                 session,
@@ -682,7 +686,8 @@ class VoiceGateway:
         session.pending_transcript_audio_url = None
         session.pending_transcript_turn_no = 0
         session.input_committed = False
-        await self._refresh_schedule_guidance(session)
+        if not session.recovery_mode_active:
+            await self._refresh_schedule_guidance(session)
         if session.responding and not session.response_cancel_requested:
             session.audio_suppressed = True
             if session.current_response_id:
@@ -828,8 +833,13 @@ class VoiceGateway:
             item.constraint_prompt for item in matches if item.constraint_prompt
         )
         if constraint:
+            instruction_base = (
+                session.client.instructions
+                if session.recovery_mode_active
+                else session.instructions
+            )
             await session.client.update_instructions(
-                session.instructions
+                instruction_base
                 + "\n\n当前轮必须遵守的业务约束：\n"
                 + constraint
             )
@@ -841,6 +851,12 @@ class VoiceGateway:
             source_event_id=None,
             patient_info=session.patient_info,
         )
+        if session.recovery_mode_active:
+            session.recovery_source_message_no = message_id
+            self._schedule_recovery_progress(
+                session,
+                source_message_no=message_id,
+            )
         session.input_audio.clear()
         session.input_committed = False
         session.input_message_id = None
@@ -876,7 +892,10 @@ class VoiceGateway:
             message_id=message_id,
             turn_no=turn_no,
             response_id=response_id,
-            is_recovery=session.next_response_is_recovery,
+            is_recovery=(
+                session.recovery_mode_active
+                or session.next_response_is_recovery
+            ),
         )
         session.next_response_is_recovery = False
         session.current_generation = generation
@@ -1122,7 +1141,7 @@ class VoiceGateway:
                 redis=session.redis,
             )
         if generation.is_recovery:
-            await self._restore_base_instructions(session)
+            pass
         elif (
             closing_candidate
             and not session.closed
@@ -1153,8 +1172,6 @@ class VoiceGateway:
             ):
                 return
             self._remove_generation(session, generation)
-            if generation.is_recovery:
-                await self._restore_base_instructions(session)
         session.response_requested = False
         session.response_cancel_requested = False
         await self._broadcast_json(session, {"type": "interrupted"})
@@ -1253,8 +1270,12 @@ class VoiceGateway:
             recovery_instructions = self._build_premature_close_recovery_instructions(
                 session,
                 decision.next_question,
+                initial_repair=True,
             )
             await session.client.update_instructions(recovery_instructions)
+            session.recovery_mode_active = True
+            session.recovery_current_question_id = decision.next_question.question_id
+            session.recovery_source_message_no = None
             session.recovery_instruction_active = True
             session.next_response_is_recovery = True
             session.response_requested = True
@@ -1284,10 +1305,125 @@ class VoiceGateway:
             if session.recovery_task is current_task:
                 session.recovery_task = None
 
+    def _schedule_recovery_progress(
+        self,
+        session: VoiceSession,
+        *,
+        source_message_no: str,
+    ) -> None:
+        """恢复模式下等待本轮 Extraction 完成，再决定下一条 null 问题。"""
+        if session.recovery_task is not None and not session.recovery_task.done():
+            session.recovery_task.cancel()
+        session.recovery_task = asyncio.create_task(
+            self._advance_recovery_after_answer(
+                session,
+                source_message_no=source_message_no,
+            )
+        )
+
+    async def _advance_recovery_after_answer(
+        self,
+        session: VoiceSession,
+        *,
+        source_message_no: str,
+    ) -> None:
+        """患者回答一个恢复问题后，仅从最新 remaining 中选择下一题。"""
+        current_task = asyncio.current_task()
+        try:
+            waited = 0.0
+            while not VoiceTurnGuard.extraction_processed(
+                session.redis,
+                session.session_no,
+                source_message_no,
+            ):
+                if (
+                    session.closed
+                    or not session.recovery_mode_active
+                    or session.recovery_source_message_no != source_message_no
+                ):
+                    return
+                if waited >= VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS:
+                    logger.warning(
+                        "恢复模式等待 Extraction 超时: session=%s source=%s",
+                        session.session_no,
+                        source_message_no,
+                    )
+                    return
+                await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
+                waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
+
+            decision = await asyncio.to_thread(
+                VoiceTurnGuard.build_recovery_decision,
+                session.session_no,
+                session.task_list,
+            )
+            if decision.progress.completed or decision.next_question is None:
+                await self._restore_base_instructions(session)
+                return
+
+            waited = 0.0
+            while (
+                session.responding
+                or session.active_response_ids
+                or session.response_requested
+                or session.speech_active
+            ):
+                if (
+                    session.closed
+                    or not session.recovery_mode_active
+                    or session.recovery_source_message_no != source_message_no
+                ):
+                    return
+                if waited >= VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS:
+                    logger.warning(
+                        "恢复模式等待当前语音响应结束超时: session=%s source=%s",
+                        session.session_no,
+                        source_message_no,
+                    )
+                    return
+                await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
+                waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
+
+            recovery_instructions = self._build_premature_close_recovery_instructions(
+                session,
+                decision.next_question,
+                initial_repair=False,
+            )
+            await session.client.update_instructions(recovery_instructions)
+            session.recovery_current_question_id = decision.next_question.question_id
+            session.recovery_source_message_no = None
+            session.recovery_instruction_active = True
+            session.next_response_is_recovery = True
+            session.response_requested = True
+            try:
+                await session.client.create_response()
+            except Exception:
+                session.response_requested = False
+                session.next_response_is_recovery = False
+                raise
+            logger.info(
+                "恢复模式继续补问下一条未完成问题: session=%s question_id=%s remaining=%s",
+                session.session_no,
+                decision.next_question.question_id,
+                list(decision.progress.remaining_question_ids),
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception(
+                "恢复模式推进失败，保留当前恢复提示等待下一轮: session=%s",
+                session.session_no,
+            )
+        finally:
+            if session.recovery_task is current_task:
+                session.recovery_task = None
+
     @staticmethod
     def _build_premature_close_recovery_instructions(
         session: VoiceSession,
         question: QuestionTask,
+        *,
+        initial_repair: bool,
     ) -> str:
         """构建提前结束恢复专用提示词。
 
@@ -1303,31 +1439,38 @@ class VoiceGateway:
             f"性别：{patient_gender}；"
             f"年龄：{patient_age if patient_age is not None else '未知'}。"
         )
+        transition_rule = (
+            "先用一句自然、简短的话纠正刚才过早结束，然后立即询问下面这一项。"
+            if initial_repair
+            else "直接自然过渡到下面这一项，不要再次解释刚才的结束，也不要重复道歉。"
+        )
         return (
             "你是一名专业的AI护理助手。当前处于【提前结束恢复模式】。\n\n"
             f"【患者上下文】\n{patient_context}\n\n"
             "【恢复规则】\n"
-            "1. 你刚才过早使用了结束评估的话术，但系统确认评估尚未完成。\n"
-            "2. 继续沿用当前会话历史，不要重新自我介绍，不要重复已经确认过的问题。\n"
-            "3. 当前只允许询问下面这一项；除这一项外，禁止主动询问任何其他量表问题、"
-            "生活习惯、症状、宣教内容或延伸问题。\n"
-            "4. 不得根据过去看到过的 Task-todo 自行选择其他问题。\n"
-            "5. 先用一句自然、简短的话纠正刚才的结束，例如“抱歉，刚才我说早了，"
-            "还有一项需要和您确认。”然后立即询问下面这一项。\n"
-            "6. 一次只问一个问题，不得朗读内部题号、数据库状态、null、remaining 等内部信息。\n"
+            "1. 继续沿用当前会话历史，不要重新自我介绍。\n"
+            "2. 当前只允许处理下面这一项。除这一项外，不得提出任何其他问题。\n"
+            "3. 不得重复已经确认过的问题，也不得自行从此前的任务信息中选择其他问题。\n"
+            f"4. {transition_rule}\n"
+            "5. 患者回答当前问题后，只做非常简短的确认；在系统更新当前问题之前，"
+            "不得重复本题，也不得提出新的问题。\n"
+            "6. 一次只问一个问题，不得朗读内部题号、数据库状态或进度字段。\n"
             "7. 不得再次宣布评估完成或结束。\n\n"
             "【当前唯一允许询问的问题】\n"
             f"{question.patient_text}\n"
         )
 
     async def _restore_base_instructions(self, session: VoiceSession) -> None:
-        """恢复长期基础提示词，避免一次性恢复约束污染后续患者轮次。"""
-        if not session.recovery_instruction_active:
+        """退出恢复模式并恢复长期基础提示词。"""
+        if not session.recovery_instruction_active and not session.recovery_mode_active:
             return
         try:
             await session.client.update_instructions(session.instructions)
         finally:
             session.recovery_instruction_active = False
+            session.recovery_mode_active = False
+            session.recovery_current_question_id = None
+            session.recovery_source_message_no = None
             session.next_response_is_recovery = False
 
     async def _handle_tool_call(
