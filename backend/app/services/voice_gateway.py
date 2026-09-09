@@ -222,12 +222,72 @@ class VoiceGateway:
                     "当前语音模型不是 Qwen Realtime 协议，无法建立语音会话",
                     http_status=503,
                 )
-            plan = ScheduleTaskStore(get_redis()).get_plan(session_no)
+            redis = get_redis()
+            plan = ScheduleTaskStore(redis).get_plan(session_no)
             task_list = plan.tasks if plan is not None else []
-            instructions = build_system_prompt(
+            base_instructions = build_system_prompt(
                 patient_info=patient_info,
                 task_list=task_list,
             )
+
+            initial_recovery_mode = False
+            initial_recovery_question_id: int | None = None
+            connect_instructions = base_instructions
+            try:
+                initial_decision = await asyncio.to_thread(
+                    VoiceTurnGuard.build_recovery_decision,
+                    session_no,
+                    task_list,
+                )
+            except Exception:
+                logger.exception(
+                    "建立语音会话前读取结构化进度失败，拒绝根据未知状态裁剪题表: "
+                    "session=%s",
+                    session_no,
+                )
+                raise
+
+            if initial_decision.progress.completed:
+                connect_instructions = self._build_completed_wait_instructions()
+                logger.info(
+                    "重新进入已完成语音评估，禁止继续提问: session=%s progress=%s/%s",
+                    session_no,
+                    initial_decision.progress.current,
+                    initial_decision.progress.total,
+                )
+            elif initial_decision.progress.current > 0:
+                initial_recovery_mode = True
+                if initial_decision.next_question is not None:
+                    initial_recovery_question_id = (
+                        initial_decision.next_question.question_id
+                    )
+                    connect_instructions = self._build_recovery_question_instructions(
+                        patient_info,
+                        initial_decision.next_question,
+                        mode_label="会话恢复模式",
+                        transition_rule=(
+                            "这是重新进入已有评估会话。不要重新开场或回顾已完成问题，"
+                            "直接自然继续确认下面这一项。"
+                        ),
+                    )
+                    logger.info(
+                        "重新进入未完成语音评估，仅暴露首个 remaining 问题: "
+                        "session=%s progress=%s/%s question_id=%s remaining=%s",
+                        session_no,
+                        initial_decision.progress.current,
+                        initial_decision.progress.total,
+                        initial_recovery_question_id,
+                        list(initial_decision.progress.remaining_question_ids),
+                    )
+                else:
+                    connect_instructions = self._build_recovery_mapping_error_instructions()
+                    logger.error(
+                        "重新进入语音评估时 remaining 无法映射到 Task-todo，"
+                        "禁止回退完整题表: session=%s remaining=%s",
+                        session_no,
+                        list(initial_decision.progress.remaining_question_ids),
+                    )
+
             client = QwenRealtimeClient(
                 api_key=voice_config.resolved_api_key(),
                 model=voice_config.model,
@@ -238,7 +298,7 @@ class VoiceGateway:
             voice_extra = voice_config.model_extra or {}
             turn_detection = str(voice_extra.get("turn_detection") or "server_vad")
             await client.connect(
-                instructions=instructions,
+                instructions=connect_instructions,
                 tools=DIALOG_TOOLS,
                 turn_detection=turn_detection,
                 vad_threshold=float(voice_extra.get("vad_threshold", 0.1)),
@@ -253,13 +313,16 @@ class VoiceGateway:
                 patient_id=patient_id,
                 patient_info=patient_info,
                 scale_codes=scale_codes,
-                instructions=instructions,
+                instructions=base_instructions,
                 client=client,
-                redis=get_redis(),
+                redis=redis,
                 audio_store=DialogAudioStore(),
                 publisher=DialogEventPublisher(session_no),
                 task_list=task_list,
                 turn_detection=turn_detection,
+                recovery_mode_active=initial_recovery_mode,
+                recovery_current_question_id=initial_recovery_question_id,
+                recovery_instruction_active=initial_recovery_mode,
                 require_transcript_confirmation=False,
             )
             self._sessions[session_no] = gateway_session
@@ -1286,10 +1349,14 @@ class VoiceGateway:
             ):
                 return
 
-            recovery_instructions = self._build_premature_close_recovery_instructions(
-                session,
+            recovery_instructions = self._build_recovery_question_instructions(
+                session.patient_info,
                 decision.next_question,
-                initial_repair=True,
+                mode_label="提前结束恢复模式",
+                transition_rule=(
+                    "先用一句自然、简短的话纠正刚才过早结束，"
+                    "然后立即询问下面这一项。"
+                ),
             )
             await session.client.update_instructions(recovery_instructions)
             session.recovery_mode_active = True
@@ -1413,10 +1480,14 @@ class VoiceGateway:
                 await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
                 waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
 
-            recovery_instructions = self._build_premature_close_recovery_instructions(
-                session,
+            recovery_instructions = self._build_recovery_question_instructions(
+                session.patient_info,
                 decision.next_question,
-                initial_repair=False,
+                mode_label="持续恢复模式",
+                transition_rule=(
+                    "直接自然过渡到下面这一项，不要解释系统状态，"
+                    "也不要重复道歉。"
+                ),
             )
             await session.client.update_instructions(recovery_instructions)
             session.recovery_current_question_id = decision.next_question.question_id
@@ -1448,54 +1519,66 @@ class VoiceGateway:
                 session.recovery_task = None
 
     @staticmethod
-    def _build_premature_close_recovery_instructions(
-        session: VoiceSession,
+    def _build_recovery_question_instructions(
+        patient_info: dict[str, Any],
         question: QuestionTask,
         *,
-        initial_repair: bool,
+        mode_label: str,
+        transition_rule: str,
     ) -> str:
-        """构建提前结束恢复专用提示词。
+        """构建只暴露一个 remaining/null 问题的恢复提示词。
 
-        作用：恢复轮只暴露当前一个仍未形成有效结构化答案的问题；不复用通用
-        build_system_prompt，避免其中完整 Task-todo 或示例话术诱导模型询问其他内容。
-        同一个 Realtime 会话的既有 conversation history 仍由供应商保留。
+        提前结束恢复与重新进入旧会话共用此入口，避免任何恢复路径重新把完整
+        Task-todo 暴露给 Qwen。
         """
-        patient_name = str(session.patient_info.get("name") or "患者")
-        patient_age = session.patient_info.get("age")
-        patient_gender = str(session.patient_info.get("gender") or "未知")
+        patient_name = str(patient_info.get("name") or "患者")
+        patient_age = patient_info.get("age")
+        patient_gender = str(patient_info.get("gender") or "未知")
         patient_context = (
             f"患者姓名：{patient_name}；"
             f"性别：{patient_gender}；"
             f"年龄：{patient_age if patient_age is not None else '未知'}。"
         )
-        transition_rule = (
-            "先用一句自然、简短的话纠正刚才过早结束，然后立即询问下面这一项。"
-            if initial_repair
-            else "直接自然过渡到下面这一项，不要再次解释刚才的结束，也不要重复道歉。"
-        )
         return (
-            "你是一名专业的AI护理助手。当前处于【提前结束恢复模式】。\n\n"
+            f"你是一名专业的AI护理助手。当前处于【{mode_label}】。\n\n"
             f"【患者上下文】\n{patient_context}\n\n"
             "【恢复规则】\n"
-            "1. 继续沿用当前会话历史，不要重新自我介绍。\n"
+            "1. 不要重新自我介绍，不要重新开始整套评估。\n"
             "2. 当前只允许处理下面这一项。除这一项外，不得提出任何其他问题。\n"
-            "3. 不得重复已经确认过的问题，也不得自行从此前的任务信息中选择其他问题。\n"
-            f"4. {transition_rule}\n"
-            "5. 患者回答当前问题后，只做非常简短的确认；在系统更新当前问题之前，"
+            "3. 已经有结构化答案的问题全部视为完成，不得重复询问、核对或换一种说法再问。\n"
+            "4. 不得根据过去看到过的完整 Task-todo、历史问题或常识自行选择其他问题。\n"
+            f"5. {transition_rule}\n"
+            "6. 患者回答当前问题后，只做非常简短的确认；在系统更新当前问题之前，"
             "不得重复本题，也不得提出新的问题。\n"
-            "6. 一次只问一个问题，不得朗读内部题号、数据库状态或进度字段。\n"
-            "7. 不得再次宣布评估完成或结束。\n\n"
+            "7. 一次只问一个问题，不得朗读内部题号、数据库状态、null、remaining 或进度字段。\n"
+            "8. 主动健康教育已关闭，不得主动扩展宣教、风险教育或 teach-back。\n"
+            "9. 不得自行宣布评估完成或结束，等待系统完成状态。\n\n"
             "【当前唯一允许询问的问题】\n"
             f"{question.patient_text}\n"
         )
 
-    async def _finish_recovery_mode(self, session: VoiceSession) -> None:
-        """全部 remaining 清空后停止提问，等待既有完成屏障结束会话。"""
-        terminal_instructions = (
+    @staticmethod
+    def _build_recovery_mapping_error_instructions() -> str:
+        """remaining 与 Task-todo 映射异常时宁可停问，也不能回退完整题表。"""
+        return (
+            "你是一名专业的AI护理助手。当前评估存在未完成结构化项目，"
+            "但系统暂时无法安全确定下一道允许询问的问题。"
+            "在系统更新指令前，不得询问任何新的量表问题，不得重复历史问题，"
+            "不得自行展开健康教育或宣布评估完成。"
+        )
+
+    @staticmethod
+    def _build_completed_wait_instructions() -> str:
+        """重新进入已结构化完成的会话时禁止继续问卷。"""
+        return (
             "你是一名专业的AI护理助手。结构化评估已经确认完成。"
-            "从现在开始不得再询问任何量表问题，也不要自行开启新的评估话题；"
+            "不得再询问任何量表问题，不得重复核对历史问题，也不要开启新的评估话题；"
             "如患者继续说话，只做简短礼貌回应并等待系统结束会话。"
         )
+
+    async def _finish_recovery_mode(self, session: VoiceSession) -> None:
+        """全部 remaining 清空后停止提问，等待既有完成屏障结束会话。"""
+        terminal_instructions = self._build_completed_wait_instructions()
         try:
             await session.client.update_instructions(terminal_instructions)
         finally:
