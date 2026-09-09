@@ -275,11 +275,14 @@ from medagent.configs.agent_config import get_agent_config
 - Qwen Realtime 患者可见回复完成后允许执行事后 `VoiceTurnGuard`：只对明确宣告评估完成/结束的
   完整回复进入核验。Guard 必须先等待当前患者消息被 Extraction Agent 写入
   `processed_message_ids`，再读取结构化 `remaining_question_ids`，避免 `response.done` 早于
-  抽取落库造成误判。若仍未完成，只可按当前 Schedule Task-todo 顺序选择一条 remaining 题，
-  临时用“全局护理约束 + 患者信息 + 当前一题”更新 Realtime instructions 后自动
-  `response.create`；不得重新暴露整张后续问题表。患者重新开口优先取消恢复，恢复响应结束或
-  取消后必须恢复长期基础 instructions。该机制是输出后的纠错兜底，不得改成阻塞实时音频的
-  输出前审核；真正会话完成仍以 VoiceCompletionCoordinator 的结构化完成屏障为准。
+  抽取落库造成误判。若仍未完成，进入持续恢复模式：只可按当前 Schedule Task-todo 顺序从
+  `remaining_question_ids` 选择一条未完成题，Realtime instructions 仅暴露患者上下文与当前唯一
+  允许询问的问题，不得重新暴露完整 Task-todo、已完成题或其他示例问题。患者回答当前恢复题后，
+  必须再次等待该消息的 Extraction 完成和当前自动语音回复 `response.done`，再从最新 remaining
+  中选择下一题；恢复模式持续到 remaining 清空。患者重新开口可取消旧的恢复推进任务，但不得因此
+  退回完整题表。remaining 已清空时只进入“停止提问、等待完成屏障”状态；真正会话完成仍以
+  VoiceCompletionCoordinator 的结构化完成屏障为准。该机制是输出后的纠错兜底，不得改成阻塞
+  实时音频的输出前审核。
 
 ## 患者端身份边界
 
