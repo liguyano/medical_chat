@@ -10,21 +10,13 @@ from medagent.agents.service_agent.dialog_agent.tools import (
     execute_tool as execute_sdk_tool,
 )
 
-from app.models import base as model_base
-from app.services.system_config_service import get_education_tool_result
-
 
 async def execute_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
-    """执行应用层 Dialog 工具。"""
-    if tool_name != "get_education_material":
-        return await execute_sdk_tool(tool_name, arguments)
-    if model_base.SessionLocal is None:
-        raise RuntimeError("数据库未初始化")
-    category = str(arguments.get("category") or "")
-    level = int(arguments.get("level") or 2)
-    with model_base.SessionLocal() as db:
-        return get_education_tool_result(
-            db,
-            category=category,
-            level=level,
-        )
+    """执行应用层 Dialog 工具。健康宣教入口已停用。"""
+    if tool_name == "get_education_material":
+        return {
+            "success": False,
+            "disabled": True,
+            "message": "健康宣教工具已停用",
+        }
+    return await execute_sdk_tool(tool_name, arguments)
