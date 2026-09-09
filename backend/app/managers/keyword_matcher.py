@@ -37,7 +37,13 @@ class MatchResult:
         Return:
             - action_payload.prompt，缺省为空串
         """
-        return str(self.action_payload.get("prompt", ""))
+        prompt = str(self.action_payload.get("prompt", ""))
+        if self.action_type == "trigger_education":
+            return ""
+        lowered = prompt.lower()
+        if "宣教" in prompt or "get_education_material" in lowered or "teach-back" in lowered:
+            return ""
+        return prompt
 
 
 @dataclass
@@ -102,6 +108,9 @@ class KeywordMatcher:
 
             compiled: list[_CompiledRule] = []
             for row in rows:
+                if row.action_type == "trigger_education":
+                    logger.info("跳过已停用的主动宣教规则: %s", row.rule_code)
+                    continue
                 condition = row.trigger_condition or {}
                 keywords = [str(k) for k in condition.get("keywords", [])]
                 patterns: list[re.Pattern] = []
