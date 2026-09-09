@@ -34,8 +34,8 @@ def test_system_prompt_requires_completed_question_evidence():
     """系统提示必须约束模型仅按证据标记完成题目。"""
     assert "completed_questions" in DEVIATION_CHECK_SYSTEM_PROMPT
     assert "不允许猜测" in DEVIATION_CHECK_SYSTEM_PROMPT
-    assert "teach-back" in DEVIATION_CHECK_SYSTEM_PROMPT
-    assert "用自己的话复述" in DEVIATION_CHECK_SYSTEM_PROMPT
+    assert "主动健康宣教属于偏离" in DEVIATION_CHECK_SYSTEM_PROMPT
+    assert "get_education_material" not in DEVIATION_CHECK_SYSTEM_PROMPT
 
 
 def test_remaining_tasks_include_required_optional_and_options():
@@ -86,9 +86,10 @@ def test_user_prompt_contains_context_and_few_shots():
     assert "正常追问场景" in prompt
 
 
-def test_few_shot_examples_cover_four_scenarios():
-    """Few-shot 应覆盖既定四类场景。"""
+def test_few_shot_examples_exclude_education_scenario():
+    """主动宣教关闭后，Few-shot 不得再把宣教示例标记为正常。"""
     text = get_few_shot_examples_text()
-    assert text.count("### 示例") == 4
-    for scenario in ("正常追问场景", "偏离场景", "共情场景", "宣教场景"):
+    assert text.count("### 示例") == 3
+    for scenario in ("正常追问场景", "偏离场景", "共情场景"):
         assert scenario in text
+    assert "宣教场景" not in text
