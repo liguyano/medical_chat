@@ -9,6 +9,7 @@ from medagent.agents.service_agent.dialog_agent.tools import (
     DIALOG_TOOLS,
     execute_tool,
 )
+from app.services.dialog_tool_executor import execute_tool as execute_app_tool
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 
 
@@ -53,8 +54,10 @@ def test_system_prompt_contains_cicare_patient_and_tasks():
     assert "不得把诊断快照当作患者自述" in prompt
     assert "建议礼貌称呼：叔叔" in prompt
     assert "禁止每轮重复完整姓名" in prompt
-    assert "teach-back" in prompt
-    assert "用自己的话说说" in prompt
+    assert "主动健康教育已关闭" in prompt
+    assert "健康教育卡片" in prompt
+    assert "复述健康教育重点" in prompt
+    assert "get_education_material" not in prompt
 
 
 def test_system_prompt_uses_safe_gender_and_age_salutation():
@@ -95,8 +98,8 @@ def test_constraint_update_prompt_handles_empty_and_multiple_items():
 
 
 def test_dialog_tool_schemas_follow_openai_function_contract():
-    """四个工具 Schema 必须具备名称、对象参数和必填字段。"""
-    assert len(DIALOG_TOOLS) == 4
+    """模型侧只暴露知情同意与护士协助，不再暴露宣教工具。"""
+    assert len(DIALOG_TOOLS) == 2
     names = set()
     for tool in DIALOG_TOOLS:
         assert tool["type"] == "function"
@@ -105,10 +108,25 @@ def test_dialog_tool_schemas_follow_openai_function_contract():
         assert function["parameters"]["type"] == "object"
         assert function["parameters"]["required"]
     assert names == {
-        "get_education_material",
         "trigger_consent_form",
         "request_nurse_assistance",
-        "play_audio",
+    }
+    assert "get_education_material" not in names
+    assert "play_audio" not in names
+
+
+@pytest.mark.asyncio
+async def test_application_dialog_executor_blocks_education_tool():
+    """即使旧会话尝试调用宣教工具，应用层也必须明确拒绝。"""
+    result = await execute_app_tool(
+        "get_education_material",
+        {"category": "tobacco", "level": 2},
+    )
+
+    assert result == {
+        "success": False,
+        "disabled": True,
+        "message": "健康宣教工具已停用",
     }
 
 
