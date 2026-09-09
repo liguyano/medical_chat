@@ -104,3 +104,62 @@ def test_recovery_decision_does_not_recover_completed_assessment(monkeypatch):
 
     assert not decision.should_recover
     assert decision.next_question is None
+
+
+def test_recovery_decision_falls_back_to_database_when_schedule_plan_is_stale(
+    monkeypatch,
+):
+    """Redis plan 的 question_id 过期时，应按 remaining 从数据库恢复真实 null 题。"""
+    progress = AssessmentProgress(
+        current=20,
+        total=22,
+        completed=False,
+        answered_question_ids=frozenset(range(1, 21)),
+        remaining_question_ids=(121, 122),
+    )
+    database_question = SimpleNamespace(
+        question_id=121,
+        patient_text="夜间路灯和楼道照明是否良好？",
+    )
+
+    class FakeDb:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        guard_module.model_base,
+        "SessionLocal",
+        lambda: FakeDb(),
+    )
+    monkeypatch.setattr(
+        guard_module,
+        "refresh_assessment_progress",
+        lambda _db, _session_no: progress,
+    )
+    load_from_db = SimpleNamespace()
+    monkeypatch.setattr(
+        VoiceTurnGuard,
+        "_load_question_task_from_db",
+        staticmethod(
+            lambda _db, question_id: (
+                database_question if question_id == 121 else None
+            )
+        ),
+    )
+
+    stale_schedule_tasks = [
+        SimpleNamespace(question_id=21, patient_text="旧版本问题A"),
+        SimpleNamespace(question_id=22, patient_text="旧版本问题B"),
+    ]
+
+    decision = VoiceTurnGuard.build_recovery_decision(
+        "SESS",
+        stale_schedule_tasks,
+    )
+
+    assert decision.should_recover
+    assert decision.next_question.question_id == 121
+    assert decision.next_question.patient_text == "夜间路灯和楼道照明是否良好？"
