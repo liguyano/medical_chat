@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -886,3 +887,39 @@ async def test_recovery_response_restores_base_instructions_without_recursive_gu
     session.client.update_instructions.assert_awaited_once_with("基础提示词")
     assert session.recovery_instruction_active is False
     assert session.recovery_task is None
+
+
+@pytest.mark.asyncio
+async def test_patient_speech_cancels_pending_close_recovery_and_restores_prompt(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """患者在自动恢复前重新开口时，以患者输入优先并撤销一次性恢复指令。"""
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.recovery_instruction_active = True
+    session.next_response_is_recovery = True
+    pending_task = asyncio.create_task(asyncio.sleep(60))
+    session.recovery_task = pending_task
+    monkeypatch.setattr(
+        gateway,
+        "_next_patient_message",
+        lambda _session_no: (2, "MSG-PATIENT-VOICE-2"),
+    )
+    monkeypatch.setattr(
+        voice_gateway_module.ScheduleTaskStore,
+        "get_guidance",
+        lambda _self, _session_no: None,
+    )
+
+    await gateway._handle_event(
+        session,
+        {"type": "input_audio_buffer.speech_started"},
+    )
+    await asyncio.sleep(0)
+
+    assert pending_task.cancelled()
+    assert session.recovery_task is None
+    assert session.next_response_is_recovery is False
+    assert session.recovery_instruction_active is False
+    session.client.update_instructions.assert_awaited_once_with("基础提示词")
