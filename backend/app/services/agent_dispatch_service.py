@@ -128,7 +128,19 @@ def dispatch_opening_workers(
     db: Session,
     session: InteractionSession,
 ) -> None:
-    """按 Schedule prepare → Dialog 预热 → AI 首问顺序派发后台准备任务。"""
+    """按 Schedule prepare → Dialog 预热 → AI 首问顺序派发后台准备任务。
+
+    Realtime 语音已经接管会话时不得再补发文本首问。
+    """
+    from app.utils.redis_client import get_redis
+
+    if is_voice_session_active(get_redis(), session.session_no):
+        logger.info(
+            "Qwen Realtime 正在接管会话，跳过文本首问补偿: session=%s",
+            session.session_no,
+        )
+        return
+
     from celery import chain
 
     from app.celery_app.tasks import (
