@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Iterable, TypeVar
-import uuid
 
 from sqlalchemy import select
 
@@ -89,7 +88,9 @@ def build_manual_review_progress(
     固定人工审核题从一开始计入 current，但永远不进入 AI remaining；
     是否已经由护士写入真实答案只影响 manual_review_pending_question_ids。
     """
-    ordered = list(dict.fromkeys((int(qid), str(code)) for qid, code in required_questions))
+    ordered = list(
+        dict.fromkeys((int(qid), str(code)) for qid, code in required_questions)
+    )
     answered = {int(question_id) for question_id in answered_question_ids}
     manual_ids = tuple(
         question_id
@@ -161,8 +162,12 @@ def ensure_planned_manual_review_notification(
 ) -> PlannedManualReviewNotification:
     """AI 采集完成后固定且幂等地通知责任护士。
 
-    同一任务使用数据库唯一 source_invocation_id 去重，任何 Celery 重试、
-    WebSocket 重连或重复完成事件都不会产生第二条护士提醒。
+    数据库只建立一条业务事件；重复调用会复用同一 request_id 并再次发布同一
+    event_id，使“数据库已提交但流发布中断”的场景可以安全补发。前端按
+    request_id/event_id 幂等消费。
+
+    固定人工审核与患者主动呼叫医护是两个业务概念，因此这里不会设置
+    InteractionSession.handoff_required/handoff_reason。
     """
     if model_base.SessionLocal is None:
         raise RuntimeError("数据库未初始化")
@@ -201,63 +206,57 @@ def ensure_planned_manual_review_notification(
                 InteractionEvent.deleted == 0,
             )
         )
+
         if existing is not None:
             payload = existing.event_payload or {}
-            return PlannedManualReviewNotification(
-                item_count=len(items),
-                items=items,
-                notified=True,
-                request_id=str(payload.get("request_id") or "") or None,
-            )
-
-        patient = db.get(Patient, task.patient_id)
-        encounter = db.get(PatientEncounter, task.encounter_id)
-        request_id = f"MANUAL-REVIEW-{task.id}"
-        item_payload = [
-            {
-                "question_id": item.question_id,
-                "question_code": item.question_code,
-                "question_text": item.question_text,
-            }
-            for item in items
-        ]
-        description = "；".join(item.question_text for item in items)
-        event = HandoffRequestedEvent(
-            event_id=f"MANUAL-REVIEW-EVENT-{task.id}",
-            session_id=session.session_no,
-            task_id=task.id,
-            message_id=None,
-            request_id=request_id,
-            reason=f"AI问答已完成，剩余{len(items)}项固定条目需要护士人工审核",
-            requested_action="planned_manual_review",
-            action_label=f"固定条目人工审核（{len(items)}项）",
-            urgency="routine",
-            priority="medium",
-            title="固定条目待人工审核",
-            description=description,
-            patient_name=patient.patient_name if patient else "",
-            bed_no=encounter.bed_no if encounter else None,
-            ward_name=encounter.ward_name if encounter else None,
-            status="requested",
-            request_source="system",
-            review_items=item_payload,
-        )
-        db.add(
-            InteractionEvent(
-                interaction_session_id=session.id,
+            event = HandoffRequestedEvent.model_validate(payload)
+            request_id = event.request_id
+        else:
+            patient = db.get(Patient, task.patient_id)
+            encounter = db.get(PatientEncounter, task.encounter_id)
+            request_id = f"MANUAL-REVIEW-{task.id}"
+            item_payload = [
+                {
+                    "question_id": item.question_id,
+                    "question_code": item.question_code,
+                    "question_text": item.question_text,
+                }
+                for item in items
+            ]
+            description = "；".join(item.question_text for item in items)
+            event = HandoffRequestedEvent(
+                event_id=f"MANUAL-REVIEW-EVENT-{task.id}",
+                session_id=session.session_no,
+                task_id=task.id,
                 message_id=None,
-                event_type=event.event_type.value,
-                event_payload=event.model_dump(mode="json"),
-                handled_status="pending",
-                source_invocation_id=source_id,
-                creator="system:planned_manual_review",
-                updator="system:planned_manual_review",
+                request_id=request_id,
+                reason=f"AI问答已完成，剩余{len(items)}项固定条目需要护士人工审核",
+                requested_action="planned_manual_review",
+                action_label=f"固定条目人工审核（{len(items)}项）",
+                urgency="routine",
+                priority="medium",
+                title="固定条目待人工审核",
+                description=description,
+                patient_name=patient.patient_name if patient else "",
+                bed_no=encounter.bed_no if encounter else None,
+                ward_name=encounter.ward_name if encounter else None,
+                status="requested",
+                request_source="system",
+                review_items=item_payload,
             )
-        )
-        session.handoff_required = True
-        session.handoff_reason = event.reason
-        session.updator = "system:planned_manual_review"
-        db.commit()
+            db.add(
+                InteractionEvent(
+                    interaction_session_id=session.id,
+                    message_id=None,
+                    event_type=event.event_type.value,
+                    event_payload=event.model_dump(mode="json"),
+                    handled_status="pending",
+                    source_invocation_id=source_id,
+                    creator="system:planned_manual_review",
+                    updator="system:planned_manual_review",
+                )
+            )
+            db.commit()
 
         publisher = DialogEventPublisher(session.session_no)
         if task.assigned_nurse_id is not None:
