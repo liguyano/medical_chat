@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ExtractedFieldDto(BaseModel):
@@ -32,7 +32,7 @@ class ExtractedFieldDto(BaseModel):
         default=None, description="选中选项的量表真实值"
     )
     display_value: str | None = Field(
-        default=None, description="面向患者和医护展示的真实答案值"
+        default=None, description="面向患者和医护展示的真实答案值/工作流状态"
     )
     source_message_ids: list[str] | None = Field(
         default=None, description="来源消息ID列表"
@@ -48,6 +48,13 @@ class ExtractedFieldDto(BaseModel):
         "manual_review_pending",
         "manual_review_completed",
     ] = Field(default="pending", description="字段采集/固定人工审核状态")
+
+    @model_validator(mode="after")
+    def populate_manual_review_display(self) -> "ExtractedFieldDto":
+        """兼容尚未读取 collection_status 的旧前端，仍明确显示人工审核状态。"""
+        if self.collection_status == "manual_review_pending" and not self.display_value:
+            self.display_value = "待护士人工审核"
+        return self
 
 
 class ExtractedFieldsResponse(BaseModel):
