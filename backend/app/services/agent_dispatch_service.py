@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, date, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +19,38 @@ from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
 
 logger = logging.getLogger(__name__)
+
+VOICE_SESSION_ACTIVE_KEY_PREFIX = "voice_session:active:"
+VOICE_SESSION_ACTIVE_TTL_SECONDS = 300
+
+
+def voice_session_active_key(session_no: str) -> str:
+    """构造当前由 Qwen Realtime 接管的语音会话标记。"""
+    return f"{VOICE_SESSION_ACTIVE_KEY_PREFIX}{session_no}"
+
+
+def mark_voice_session_active(redis: Any, session_no: str) -> bool:
+    """标记语音会话由 Realtime 接管；短 TTL 避免进程异常后永久残留。"""
+    return bool(
+        redis.set(
+            voice_session_active_key(session_no),
+            {"active": True},
+            ex=VOICE_SESSION_ACTIVE_TTL_SECONDS,
+        )
+    )
+
+
+def clear_voice_session_active(redis: Any, session_no: str) -> None:
+    """显式关闭语音模式时清理 Realtime 接管标记。"""
+    redis.delete(voice_session_active_key(session_no))
+
+
+def is_voice_session_active(redis: Any, session_no: str) -> bool:
+    """判断当前会话是否仍由 Qwen Realtime 接管。"""
+    value = redis.get(voice_session_active_key(session_no))
+    if isinstance(value, dict):
+        return bool(value.get("active"))
+    return bool(value)
 
 
 def _calculate_age(birthday: date | None) -> int | None:
