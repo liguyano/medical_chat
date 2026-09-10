@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 
-from app.celery_app.tasks import dialog_agent_preheat
+from app.celery_app.tasks import dialog_agent_preheat, reconcile_pending_dialog_turns
 
 
 def question():
@@ -166,3 +166,133 @@ def test_dialog_preheat_retries_unhandled_failure(monkeypatch):
 
     assert retry.call_args.kwargs["countdown"] == 5
     assert retry.call_args.kwargs["max_retries"] == 3
+
+
+class _FakeScalarRows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
+
+
+class _FakeReconcileDb:
+    def __init__(self, *, session, latest_ai_turn, latest_patient):
+        self.session = session
+        self.latest_ai_turn = latest_ai_turn
+        self.latest_patient = latest_patient
+        self.scalar_calls = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def scalars(self, _statement):
+        return _FakeScalarRows([self.session])
+
+    def scalar(self, _statement):
+        self.scalar_calls += 1
+        if self.scalar_calls == 1:
+            return self.latest_ai_turn
+        if self.scalar_calls == 2:
+            return self.latest_patient
+        raise AssertionError("unexpected scalar call")
+
+
+def _patch_reconcile_dependencies(
+    monkeypatch,
+    *,
+    latest_patient,
+    voice_active=False,
+):
+    import app.celery_app.runtime as runtime_module
+    import app.models.base as base_module
+    import app.services.agent_dispatch_service as dispatch_module
+    import app.utils.redis_client as redis_module
+
+    session = SimpleNamespace(
+        id=1,
+        session_no="SESS-VOICE",
+        session_status="active",
+        deleted=0,
+    )
+    db = _FakeReconcileDb(
+        session=session,
+        latest_ai_turn=1,
+        latest_patient=latest_patient,
+    )
+    redis = SimpleNamespace(
+        get=Mock(return_value={"active": True} if voice_active else None),
+    )
+    dispatch_answer = Mock()
+    dispatch_opening = Mock()
+
+    monkeypatch.setattr(runtime_module, "ensure_worker_runtime", lambda: None)
+    monkeypatch.setattr(base_module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(redis_module, "get_redis", lambda: redis)
+    monkeypatch.setattr(dispatch_module, "dispatch_answer_workers", dispatch_answer)
+    monkeypatch.setattr(dispatch_module, "dispatch_opening_workers", dispatch_opening)
+    return dispatch_answer, dispatch_opening, redis
+
+
+def test_reconcile_skips_voice_patient_message(monkeypatch):
+    """语音患者消息必须始终由 Qwen Realtime 回复，补偿任务不得启动文本 Dialog。"""
+    latest_patient = SimpleNamespace(
+        turn_no=2,
+        message_no="MSG-PATIENT-VOICE-2",
+        message_type="语音",
+    )
+    dispatch_answer, dispatch_opening, _redis = _patch_reconcile_dependencies(
+        monkeypatch,
+        latest_patient=latest_patient,
+        voice_active=False,
+    )
+
+    result = reconcile_pending_dialog_turns.run()
+
+    assert result["dispatched"] == 0
+    dispatch_answer.assert_not_called()
+    dispatch_opening.assert_not_called()
+
+
+def test_reconcile_skips_text_turn_while_voice_session_is_active(monkeypatch):
+    """Qwen Realtime 活跃期间即使最后一条是文本，也不能并发启动文本 Dialog。"""
+    latest_patient = SimpleNamespace(
+        turn_no=2,
+        message_no="MSG-PATIENT-TEXT-2",
+        message_type="文本",
+    )
+    dispatch_answer, dispatch_opening, redis = _patch_reconcile_dependencies(
+        monkeypatch,
+        latest_patient=latest_patient,
+        voice_active=True,
+    )
+
+    result = reconcile_pending_dialog_turns.run()
+
+    assert result["dispatched"] == 0
+    assert redis.get.called
+    dispatch_answer.assert_not_called()
+    dispatch_opening.assert_not_called()
+
+
+def test_reconcile_keeps_text_compensation_when_voice_is_inactive(monkeypatch):
+    """普通文字会话仍需保留原有补偿能力。"""
+    latest_patient = SimpleNamespace(
+        turn_no=2,
+        message_no="MSG-PATIENT-TEXT-2",
+        message_type="文本",
+    )
+    dispatch_answer, dispatch_opening, _redis = _patch_reconcile_dependencies(
+        monkeypatch,
+        latest_patient=latest_patient,
+        voice_active=False,
+    )
+
+    result = reconcile_pending_dialog_turns.run()
+
+    assert result["dispatched"] == 1
+    dispatch_answer.assert_called_once()
+    dispatch_opening.assert_not_called()
