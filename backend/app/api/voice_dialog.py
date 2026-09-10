@@ -93,6 +93,14 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
         )
         if patient_id != session_patient_id:
             raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权访问该语音会话")
+
+        # 在建立 Qwen Realtime 上游连接之前先写接管标记，消除连接建立窗口内
+        # 被 30 秒 reconcile 误判成“缺文本回复”的竞态。
+        voice_redis = get_redis()
+        if not mark_voice_session_active(voice_redis, session_no):
+            logger.warning("语音会话接管标记写入失败: session=%s", session_no)
+        last_voice_lease_refresh = monotonic()
+
         session = await voice_gateway.get_or_create(
             session_no=session_no,
             task_id=task_id,
@@ -101,10 +109,6 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
             scale_codes=scale_codes,
         )
         await voice_gateway.attach(session, websocket)
-        voice_redis = get_redis()
-        if not mark_voice_session_active(voice_redis, session_no):
-            logger.warning("语音会话接管标记写入失败: session=%s", session_no)
-        last_voice_lease_refresh = monotonic()
 
         while True:
             message = await websocket.receive()
