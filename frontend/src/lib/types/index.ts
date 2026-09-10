@@ -352,6 +352,12 @@ export interface InteractionSession {
   messages: InteractionMessage[];
 }
 
+export type StructuredAnswerCollectionStatus =
+  | 'ai_recorded'
+  | 'pending'
+  | 'manual_review_pending'
+  | 'manual_review_completed';
+
 // 结构化答案
 export interface StructuredAnswer {
   questionId: string;
@@ -372,6 +378,7 @@ export interface StructuredAnswer {
   invalid?: boolean;
   invalidReason?: string;
   rawAnswer?: Record<string, unknown>;
+  collectionStatus?: StructuredAnswerCollectionStatus;
 }
 
 // 评估提交
@@ -488,7 +495,12 @@ export interface NurseAssistanceRequest {
   urgency: 'routine' | 'urgent';
   status: 'requested' | 'resolved';
   occurredAt: string;
-  requestSource: 'patient' | 'agent';
+  requestSource: 'patient' | 'agent' | 'system';
+  reviewItems?: Array<{
+    questionId?: string;
+    questionCode?: string;
+    questionText?: string;
+  }>;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolResult?: Record<string, unknown>;
