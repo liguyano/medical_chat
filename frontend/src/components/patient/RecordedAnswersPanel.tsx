@@ -2,9 +2,16 @@ import React from 'react';
 import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
 import type { StructuredAnswer } from '@/lib/types';
 
+function isManualReviewPending(answer: StructuredAnswer): boolean {
+  return (
+    answer.collectionStatus === 'manual_review_pending' ||
+    answer.displayValue === '待护士人工审核'
+  );
+}
+
 function isVisibleProcessedItem(answer: StructuredAnswer): boolean {
   if (
-    answer.collectionStatus === 'manual_review_pending' ||
+    isManualReviewPending(answer) ||
     answer.collectionStatus === 'manual_review_completed'
   ) {
     return true;
@@ -21,7 +28,7 @@ function isVisibleProcessedItem(answer: StructuredAnswer): boolean {
 }
 
 function answerStatusText(answer: StructuredAnswer): string {
-  if (answer.collectionStatus === 'manual_review_pending') {
+  if (isManualReviewPending(answer)) {
     return '待护士人工审核';
   }
   if (answer.collectionStatus === 'manual_review_completed') {
@@ -69,7 +76,7 @@ export function RecordedAnswersPanel({
                   <p className="text-xs leading-relaxed text-foreground-muted">
                     {answer.questionText}
                   </p>
-                  {answer.collectionStatus === 'manual_review_pending' && (
+                  {isManualReviewPending(answer) && (
                     <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                       人工审核
                     </span>
