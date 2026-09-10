@@ -73,7 +73,7 @@ CICARE_TEMPLATE = """
    - 称呼要自然、有礼貌、有情感，优先使用“叔叔、阿姨、爷爷、奶奶、哥哥、姐姐、弟弟、妹妹”等合适昵称
 
 6. **Exit（礼貌离开）**
-   - 只有系统确认全部必填评估进度完成后，才可宣布评估完成
+   - 只有系统确认全部 AI 可采集的必填评估进度完成后，才可宣布患者问答阶段完成
    - 礼貌感谢患者配合，并说明护士复核、后续护理安排或下一步流程
    - 未收到完成信号时不得自行结束，不得因为轮数或 Task-todo 问完就宣告完成
 """
@@ -109,8 +109,8 @@ TOOL_USAGE_GUIDE = """
    - 输血：form_type='blood_transfusion'
    - 不得因为吸烟、饮酒等生活习惯主动触发知情同意流程
 
-3. **request_nurse_assistance**：体温、血压、体重、身高等必须由现场人员完成时，
-   立即调用呼叫工具，不得假装已经测量，也不得让纯对话阻塞等待测量结果
+3. **request_nurse_assistance**：仅用于患者当下主动提出需要现场护理操作或即时护士协助的场景。
+   固定人工审核条目由后端系统自动通知护士，绝对不得由 AI 自己决定或调用此工具重复触发。
 
 4. **原生调用要求**：确实需要工具时必须输出原生 function call，禁止只回复
    “我将调用工具”“正在调用工具”或把工具名称、JSON 参数直接展示给患者。
@@ -127,14 +127,7 @@ def build_system_prompt(
 ) -> str:
     """构建 Dialog Agent 的 system_prompt
     作用：内嵌 CICARE 六步 + 沟通风格 + 评估任务 + 工具使用 + 动态约束。
-    Args:
-        - patient_info: 患者基本信息（姓名、性别、年龄、住院号等）
-        - task_list: 量表问题任务列表
-        - constraints: 动态约束列表（来自 Schedule Agent / Keyword Intercept）
-    Return:
-        - system_prompt 字符串
     """
-    # 1. 患者信息
     patient_name = patient_info.get("name", "患者")
     patient_gender = patient_info.get("gender", "未知")
     patient_age = patient_info.get("age", "未知")
@@ -157,7 +150,6 @@ def build_system_prompt(
   注意：不得把诊断快照当作患者自述向患者宣告，不得据此自行诊断或调整治疗。
 """
 
-    # 2. 评估任务列表
     task_lines = []
     for idx, task in enumerate(task_list, 1):
         task_lines.append(
@@ -172,7 +164,24 @@ def build_system_prompt(
 *重要*：Task-todo 是护理事实清单，不是必须逐字朗读的问题。不得重复询问已经明确回答的事实。
 """
 
-    # 3. 动态约束（来自 Schedule Agent / Keyword Intercept）
+    manual_review_count = int(patient_info.get("manual_review_count") or 0)
+    raw_manual_items = patient_info.get("manual_review_items") or []
+    manual_item_names = [
+        str(item.get("question_text") or "").strip()
+        for item in raw_manual_items
+        if isinstance(item, dict) and str(item.get("question_text") or "").strip()
+    ]
+    manual_review_section = ""
+    if manual_review_count > 0:
+        item_lines = "\n".join(f"- {name}" for name in manual_item_names)
+        manual_review_section = f"""
+【系统固定人工审核】
+- 本任务另有 {manual_review_count} 项由后端固定指定为护士人工审核。这些项目已从 Task-todo 中移除，绝对不得向患者询问、核对或换一种方式追问。
+{item_lines}
+- 护士审核通知由后端系统固定触发，不由你判断，也不得为这些项目调用 request_nurse_assistance。
+- 当患者需要回答的最后一项完成、进入 Exit 时，必须明确告诉患者：需要询问的问题已经全部问完；还有 {manual_review_count} 项需要护士人工审核；系统已经通知护士处理；患者无需继续回答这些人工审核项目。
+"""
+
     constraint_section = ""
     if constraints:
         constraint_lines = [f"- {c}" for c in constraints]
@@ -181,15 +190,21 @@ def build_system_prompt(
 {''.join(chr(10) + line for line in constraint_lines)}
 """
 
-    # 当前使用内置模板，应用层后续可在构建前注入已审核话术。
+    if manual_review_count > 0:
+        closing_example = (
+            f'“感谢您的配合，需要向您询问的问题已经全部问完了。'
+            f'还有{manual_review_count}项需要护士人工审核，系统已经通知护士处理，您暂时不需要再回答其他问题。”'
+        )
+    else:
+        closing_example = "“感谢您的配合，评估已完成。护士稍后会来核实信息，祝您早日康复！”"
+
     script_section = f"""
 【话术模板】（示例）
 - 开场："您好，{opening_address}。我是AI护理助手小智，很高兴为您服务。接下来我会协助您完成入院评估，了解您的健康状况，大约需要10-15分钟，可以开始吗？"
 - 追问过敏："您提到对药物过敏，能告诉我具体是哪种药物吗？比如青霉素、头孢类等。"
-- 结束："感谢您的配合，评估已完成。护士稍后会来核实信息，祝您早日康复！"
+- 结束：{closing_example}
 """
 
-    # 5. 组装 system_prompt
     system_prompt = f"""
 你是一名专业的AI护理助手，负责协助患者完成入院量表评估。
 
@@ -203,12 +218,14 @@ def build_system_prompt(
 
 {task_section}
 
+{manual_review_section}
+
 {script_section}
 
 {constraint_section}
 
 请严格遵守 CICARE 六步规范。每轮像真实护理交流一样先回应、再自然过渡；
-只有进度服务发出完成信号后才执行 Exit。
+只有进度服务发出完成信号后才执行 Exit。固定人工审核的触发权永远属于后端系统，不属于 AI。
 """.strip()
 
     logger.debug(f"[Prompt] 构建 system_prompt 完成，长度={len(system_prompt)} 字符")
@@ -218,10 +235,6 @@ def build_system_prompt(
 def build_constraint_update_prompt(constraints: list[str]) -> str:
     """构建约束更新 prompt（用于 session.update）
     作用：将约束列表转为追加指令，动态注入到对话中。
-    Args:
-        - constraints: 约束列表
-    Return:
-        - 约束更新 prompt
     """
     if not constraints:
         return ""
