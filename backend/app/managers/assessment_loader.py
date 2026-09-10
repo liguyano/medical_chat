@@ -18,6 +18,7 @@ from app.models import (
     AssessmentSection,
 )
 from app.models import base as model_base
+from app.services.manual_review_service import filter_ai_question_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class AssessmentQuestionLoader:
         scale_codes: list[str],
     ) -> list[QuestionTask]:
         """按调用方指定顺序加载多个量表的问题
-        作用：仅加载当前生效的已发布版本，排除派生计算题。
+        作用：仅加载当前生效的已发布版本，排除派生计算题和固定人工审核题。
         """
         if not scale_codes:
             return []
@@ -67,7 +68,7 @@ class AssessmentQuestionLoader:
                     logger.warning("量表没有当前生效的已发布版本: %s", scale_code)
                     continue
                 tasks.extend(self._load_version_questions(db, scale_code, version.id))
-        return tasks
+        return filter_ai_question_tasks(tasks)
 
     @staticmethod
     def _get_active_version(
@@ -150,21 +151,23 @@ class AssessmentQuestionLoader:
                     )
                 )
 
-        return [
-            QuestionTask(
-                question_id=question.id,
-                question_code=question.question_code,
-                question_name=question.question_name,
-                patient_text=question.patient_text,
-                question_type=_require_standard_question_type(question.question_type),
-                required=question.required,
-                sort_no=question.sort_no,
-                section_name=section_name,
-                scale_code=scale_code,
-                options=option_map[question.id],
-            )
-            for question, section_name in rows
-        ]
+        return filter_ai_question_tasks(
+            [
+                QuestionTask(
+                    question_id=question.id,
+                    question_code=question.question_code,
+                    question_name=question.question_name,
+                    patient_text=question.patient_text,
+                    question_type=_require_standard_question_type(question.question_type),
+                    required=question.required,
+                    sort_no=question.sort_no,
+                    section_name=section_name,
+                    scale_code=scale_code,
+                    options=option_map[question.id],
+                )
+                for question, section_name in rows
+            ]
+        )
 
 
 def _require_standard_question_type(question_type: str) -> str:
