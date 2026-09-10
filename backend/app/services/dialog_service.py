@@ -14,12 +14,6 @@ from sqlalchemy.orm import Session
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.managers.keyword_matcher import MatchResult, get_keyword_matcher
-from app.models.assessment_execution import (
-    AssessmentAnswer,
-    AssessmentInstance,
-    AssessmentSubmission,
-)
-from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask
 from app.schemas.dialog import (
@@ -29,9 +23,7 @@ from app.schemas.dialog import (
     SendMessageResponse,
 )
 from app.schemas.events import ConstraintEvent, PatientAnswerEvent
-from app.services.assessment_progress_service import (
-    valid_assessment_answer_condition,
-)
+from app.services.assessment_progress_service import refresh_assessment_progress
 from app.workers.event_publisher import DialogEventPublisher
 
 logger = logging.getLogger(__name__)
@@ -246,50 +238,16 @@ async def get_history(
             .limit(limit)
         ).all()
     )
-    version_ids = list(
-        db.scalars(
-            select(AssessmentInstance.scale_version_id).where(
-                AssessmentInstance.task_id == task.id,
-                AssessmentInstance.deleted == 0,
-            )
-        ).all()
-    )
-    total_questions = 0
-    if version_ids:
-        total_questions = int(
-            db.scalar(
-                select(func.count(AssessmentQuestion.id)).where(
-                    AssessmentQuestion.scale_version_id.in_(version_ids),
-                    AssessmentQuestion.required.is_(True),
-                    AssessmentQuestion.derived.is_(False),
-                    AssessmentQuestion.deleted == 0,
-                )
-            )
-            or 0
-        )
-    answered_questions = int(
-        db.scalar(
-            select(func.count(func.distinct(AssessmentAnswer.question_id)))
-            .join(
-                AssessmentSubmission,
-                AssessmentSubmission.id == AssessmentAnswer.submission_id,
-            )
-            .where(
-                AssessmentSubmission.interaction_session_id == session.id,
-                AssessmentSubmission.deleted == 0,
-                AssessmentAnswer.deleted == 0,
-                valid_assessment_answer_condition(),
-            )
-        )
-        or 0
-    )
+    # 与 VoiceTurnGuard/Extraction 共用同一权威进度：固定人工审核题从一开始
+    # 计入 current，但不会进入 remaining_question_ids。
+    progress = refresh_assessment_progress(db, session_no)
     return DialogHistoryResponse(
         session_id=session.session_no,
         task_id=task.id,
         task_no=task.task_no,
         session_status=session.session_status,
-        answered_question_count=answered_questions,
-        total_question_count=total_questions,
+        answered_question_count=progress.current,
+        total_question_count=progress.total,
         ai_summary=session.ai_summary,
         total=total,
         messages=[
