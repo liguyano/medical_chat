@@ -212,6 +212,24 @@ def test_text_dispatch_rejects_turn_while_realtime_voice_active(monkeypatch):
     dialog_delay.assert_not_called()
 
 
+def test_opening_dispatch_rejects_realtime_voice_active(monkeypatch):
+    """Realtime 已接管但尚无 AI 历史时，补偿器也不能再创建文本首问。"""
+    import app.services.agent_dispatch_service as service
+    import app.utils.redis_client as redis_module
+
+    redis = SimpleNamespace(get=Mock(return_value={"active": True}))
+    monkeypatch.setattr(redis_module, "get_redis", lambda: redis)
+    build_payload = Mock(side_effect=AssertionError("不应构造文本首问"))
+    monkeypatch.setattr(service, "build_session_agent_payload", build_payload)
+
+    service.dispatch_opening_workers(
+        object(),
+        SimpleNamespace(session_no="SESS-VOICE"),
+    )
+
+    build_payload.assert_not_called()
+
+
 def test_voice_session_active_marker_lifecycle():
     """接管标记使用短 TTL，并支持显式清理。"""
     import app.services.agent_dispatch_service as service
