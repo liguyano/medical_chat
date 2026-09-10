@@ -18,7 +18,13 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install -e ".[dev]"
-      - run: >
+      - name: Compile changed backend modules
+        run: >
+          python -m compileall -q
+          app/api/voice_dialog.py
+          app/services/agent_dispatch_service.py
+      - name: Run targeted tests
+        run: >
           python -m pytest -q
           tests/unit-test/test_dialog_celery.py
           tests/unit-test/test_agent_dispatch_service.py
