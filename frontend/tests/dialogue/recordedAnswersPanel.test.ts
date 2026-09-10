@@ -15,6 +15,7 @@ const answers: StructuredAnswer[] = [
     sourceMessageIds: ['MSG-12'],
     extractionConfidence: 0.93,
     corrected: false,
+    collectionStatus: 'ai_recorded',
   },
   {
     questionId: '13',
@@ -24,16 +25,34 @@ const answers: StructuredAnswer[] = [
     sourceMessageIds: ['MSG-13'],
     extractionConfidence: 0.88,
     corrected: false,
+    collectionStatus: 'ai_recorded',
+  },
+  {
+    questionId: '14',
+    questionCode: 'outdoor_night_lighting',
+    questionText: '夜间路灯和楼道照明良好',
+    sourceMessageIds: [],
+    extractionConfidence: 0,
+    corrected: false,
+    collectionStatus: 'manual_review_pending',
   },
 ];
 
 describe('患者桌面已记录信息侧栏', () => {
-  it('展示AI已经实际写入的题目和值，不展示候选题或冷却状态', () => {
+  it('展示AI已经实际写入的题目和值，并明确展示固定人工审核项', () => {
     const html = renderToStaticMarkup(
       createElement(RecordedAnswersPanel, { answers })
     );
 
-    for (const text of ['已记录信息', '排泄情况', '有改变', '视力情况', '看远处有点模糊']) {
+    for (const text of [
+      '已记录信息',
+      '排泄情况',
+      '有改变',
+      '视力情况',
+      '看远处有点模糊',
+      '夜间路灯和楼道照明良好',
+      '待护士人工审核',
+    ]) {
       expect(html).toContain(text);
     }
     expect(html).not.toContain('候选');
