@@ -17,6 +17,10 @@ from app.models.assessment_execution import AssessmentInstance
 from app.models.assessment_template import AssessmentScale
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
+from app.services.manual_review_service import (
+    ensure_planned_manual_review_notification,
+    load_manual_review_items,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +107,7 @@ def build_session_agent_payload(
     if not scale_codes:
         raise AppError(ErrorCode.ERR_DIALOG_002, "会话未配置已发布量表")
 
+    manual_review_items = load_manual_review_items(db, task.id)
     patient_info = {
         "patient_id": patient.id,
         "encounter_id": encounter.id,
@@ -113,6 +118,16 @@ def build_session_agent_payload(
         "bed_no": encounter.bed_no or "",
         # 当前住院临床诊断仅作为 Agent 的内部评估上下文，不向患者宣告诊断结论。
         "diagnosis_snapshot": encounter.diagnosis_snapshot or {},
+        # 固定人工审核由后端决定，供 Dialog/Qwen 只做状态播报；Agent 不得修改此列表。
+        "manual_review_count": len(manual_review_items),
+        "manual_review_items": [
+            {
+                "question_id": item.question_id,
+                "question_code": item.question_code,
+                "question_text": item.question_text,
+            }
+            for item in manual_review_items
+        ],
     }
     task_config = {
         "task_id": task.id,
@@ -120,6 +135,7 @@ def build_session_agent_payload(
         "scale_codes": scale_codes,
         "engine_type": "text",
         "check_interval": 1,
+        "manual_review_count": len(manual_review_items),
     }
     return patient_info, task_config
 
@@ -130,9 +146,19 @@ def dispatch_opening_workers(
 ) -> None:
     """按 Schedule prepare → Dialog 预热 → AI 首问顺序派发后台准备任务。
 
-    Realtime 语音已经接管会话时不得再补发文本首问。
+    固定人工审核在评估开始时由后端幂等通知责任护士；Realtime 语音已经接管
+    会话时不得再补发文本首问。
     """
     from app.utils.redis_client import get_redis
+
+    # 不由 AI 判断。任务只要包含固定人工审核题，评估启动时就固定创建一次护士提醒。
+    try:
+        ensure_planned_manual_review_notification(session.session_no)
+    except Exception:
+        logger.exception(
+            "固定人工审核护士通知初始化失败，不阻塞首问准备: session=%s",
+            session.session_no,
+        )
 
     if is_voice_session_active(get_redis(), session.session_no):
         logger.info(
@@ -235,12 +261,12 @@ def dispatch_answer_workers(
             http_status=503,
         ) from exc
 
-    for agent_name, task in (
+    for agent_name, task_worker in (
         ("schedule", schedule_agent_worker),
         ("extraction", extraction_agent_worker),
     ):
         try:
-            task.delay(session.session_no, turn_config)
+            task_worker.delay(session.session_no, turn_config)
         except Exception:
             logger.exception(
                 "后台 %s 任务派发失败，不阻塞患者对话: session=%s message=%s",
@@ -275,13 +301,14 @@ def dispatch_voice_answer_workers(
         "source_event_id": source_event_id,
         "check_interval": 1,
         "interaction_mode": "voice",
+        "manual_review_count": int(patient_info.get("manual_review_count") or 0),
     }
-    for agent_name, task in (
+    for agent_name, task_worker in (
         ("schedule", schedule_agent_worker),
         ("extraction", extraction_agent_worker),
     ):
         try:
-            task.delay(session_no, turn_config)
+            task_worker.delay(session_no, turn_config)
         except Exception:
             logger.exception(
                 "语音模式后台 %s 任务派发失败，不阻塞语音响应: session=%s message=%s",
