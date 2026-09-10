@@ -80,5 +80,49 @@ describe('固定人工审核实时事件', () => {
     expect(useChatStore.getState().events['88']?.[0]?.title).toBe(
       '固定条目待人工审核'
     );
+    expect(useChatStore.getState().events['88']?.[0]?.metadata?.requestSource).toBe(
+      'system'
+    );
+  });
+
+  it('实时抽取保留固定人工审核 collection_status', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+
+    const { useChatStore } = await import('@/lib/stores/useChatStore');
+    const { applyRealtimeEvent } = await import(
+      '@/lib/transports/applyRealtimeEvent'
+    );
+    useChatStore.setState({ structuredAnswers: {} });
+
+    applyRealtimeEvent({
+      event_id: 'extract-manual-1',
+      event_type: 'extraction_updated',
+      task_id: '88',
+      session_id: 'SESS-88',
+      occurred_at: '2026-09-10T08:11:00Z',
+      payload: {
+        fields: [
+          {
+            question_id: 21,
+            question_code: 'outdoor_night_lighting',
+            question_text: '夜间路灯和楼道照明良好',
+            answer_type: 'boolean',
+            display_value: '待护士人工审核',
+            source_message_ids: [],
+            confidence: 0,
+            corrected: false,
+            collection_status: 'manual_review_pending',
+          },
+        ],
+      },
+    });
+
+    const answer = useChatStore.getState().structuredAnswers['88'][0];
+    expect(answer.collectionStatus).toBe('manual_review_pending');
   });
 });
