@@ -42,6 +42,12 @@ class ExtractedFieldDto(BaseModel):
     invalid: bool = Field(default=False, description="模型结果是否校验失败")
     invalid_reason: str | None = Field(default=None, description="校验失败原因")
     raw_answer: dict | None = Field(default=None, description="供人工核对的原始结果")
+    collection_status: Literal[
+        "ai_recorded",
+        "pending",
+        "manual_review_pending",
+        "manual_review_completed",
+    ] = Field(default="pending", description="字段采集/固定人工审核状态")
 
 
 class ExtractedFieldsResponse(BaseModel):
