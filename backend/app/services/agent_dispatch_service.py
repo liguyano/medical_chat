@@ -15,7 +15,7 @@ from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.models.assessment_execution import AssessmentInstance
 from app.models.assessment_template import AssessmentScale
-from app.models.interaction import InteractionSession
+from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,17 @@ def is_voice_session_active(redis: Any, session_no: str) -> bool:
     if isinstance(value, dict):
         return bool(value.get("active"))
     return bool(value)
+
+
+def _is_voice_source_message(db: Session, source_message_id: str) -> bool:
+    """持久化语音消息永远不能由文本 Dialog Agent 补答。"""
+    message_type = db.scalar(
+        select(InteractionMessage.message_type).where(
+            InteractionMessage.message_no == source_message_id,
+            InteractionMessage.deleted == 0,
+        )
+    )
+    return str(message_type or "") == "语音"
 
 
 def _calculate_age(birthday: date | None) -> int | None:
@@ -158,9 +169,29 @@ def dispatch_answer_workers(
     source_message_id: str,
     source_event_id: str | None,
 ) -> None:
-    """独立派发 Dialog、Schedule observe 与 Extraction。
-    Dialog 只读取后台最后一次成功结果，不等待另外两个 Agent。
+    """独立派发文本 Dialog、Schedule observe 与 Extraction。
+
+    语音来源消息或仍由 Qwen Realtime 接管的会话必须直接跳过，避免补偿任务、
+    重试路径或其他误调用与实时语音并发生成第二条 AI 回复。
     """
+    from app.utils.redis_client import get_redis
+
+    if _is_voice_source_message(db, source_message_id):
+        logger.info(
+            "跳过语音来源的文本 Dialog 派发: session=%s message=%s",
+            session.session_no,
+            source_message_id,
+        )
+        return
+
+    if is_voice_session_active(get_redis(), session.session_no):
+        logger.info(
+            "Qwen Realtime 正在接管会话，跳过文本 Dialog 派发: session=%s message=%s",
+            session.session_no,
+            source_message_id,
+        )
+        return
+
     from app.celery_app.tasks import (
         dialog_agent_worker,
         extraction_agent_worker,
