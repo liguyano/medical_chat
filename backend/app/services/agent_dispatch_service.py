@@ -17,10 +17,7 @@ from app.models.assessment_execution import AssessmentInstance
 from app.models.assessment_template import AssessmentScale
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.models.patient_task import CareTask, Patient, PatientEncounter
-from app.services.manual_review_service import (
-    ensure_planned_manual_review_notification,
-    load_manual_review_items,
-)
+from app.services.manual_review_service import load_manual_review_items
 
 logger = logging.getLogger(__name__)
 
@@ -146,19 +143,10 @@ def dispatch_opening_workers(
 ) -> None:
     """按 Schedule prepare → Dialog 预热 → AI 首问顺序派发后台准备任务。
 
-    固定人工审核在评估开始时由后端幂等通知责任护士；Realtime 语音已经接管
-    会话时不得再补发文本首问。
+    固定人工审核题此时只进入患者进度和内部上下文，不提前通知护士；
+    Realtime 语音已经接管会话时不得再补发文本首问。
     """
     from app.utils.redis_client import get_redis
-
-    # 不由 AI 判断。任务只要包含固定人工审核题，评估启动时就固定创建一次护士提醒。
-    try:
-        ensure_planned_manual_review_notification(session.session_no)
-    except Exception:
-        logger.exception(
-            "固定人工审核护士通知初始化失败，不阻塞首问准备: session=%s",
-            session.session_no,
-        )
 
     if is_voice_session_active(get_redis(), session.session_no):
         logger.info(
