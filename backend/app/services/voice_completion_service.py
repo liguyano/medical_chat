@@ -1,9 +1,8 @@
 """实时语音评估完成协调服务。
 
 作用：协调 Extraction Agent 的结构化评估完成和 Qwen Realtime 最后一轮
-response.done 两个异步事实。两个事实可能由不同进程、不同时间先后产生，
-因此使用 Redis 保存短期状态，并通过分布式锁保证数据库收尾和
-SessionEndEvent 发布幂等。
+response.done 两个异步事实。固定人工审核题存在时，还要求系统已经通知护士，
+且最终可见语音明确告知患者该人工审核安排，随后才允许结束业务会话。
 """
 
 from __future__ import annotations
@@ -17,6 +16,10 @@ from app.models import base as model_base
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.schemas.events import SessionEndEvent
 from app.services.assessment_progress_service import complete_assessment_session
+from app.services.manual_review_service import (
+    ensure_planned_manual_review_notification,
+    load_manual_review_items,
+)
 from app.utils.redis_client import RedisClient, get_redis
 from app.workers.event_publisher import DialogEventPublisher
 
@@ -61,6 +64,62 @@ def _latest_patient_turn(session_no: str) -> int:
             )
         )
     return int(turn_no or 0)
+
+
+def _manual_review_item_count(session_no: str) -> int:
+    """读取当前会话固定人工审核题数量；无数据库运行态视为无固定审核。"""
+    if model_base.SessionLocal is None:
+        return 0
+    with model_base.SessionLocal() as db:
+        session = db.scalar(
+            select(InteractionSession).where(
+                InteractionSession.session_no == session_no,
+                InteractionSession.deleted == 0,
+            )
+        )
+        if session is None:
+            return 0
+        return len(load_manual_review_items(db, session.task_id))
+
+
+def _is_manual_review_completion_response(
+    session_no: str,
+    response_turn: int,
+) -> bool:
+    """验证某轮可见 AI 语音是否真的完成了固定人工审核结束播报。
+
+    这是后端输出校验，不由模型决定是否需要人工审核。只有同时明确提到护士、
+    人工审核/核实以及“已通知”语义的已持久化 AI 文本才满足完成屏障。
+    """
+    if model_base.SessionLocal is None:
+        return False
+    with model_base.SessionLocal() as db:
+        text = db.scalar(
+            select(InteractionMessage.content_text)
+            .join(
+                InteractionSession,
+                InteractionSession.id == InteractionMessage.interaction_session_id,
+            )
+            .where(
+                InteractionSession.session_no == session_no,
+                InteractionSession.deleted == 0,
+                InteractionMessage.deleted == 0,
+                InteractionMessage.turn_no == response_turn,
+                InteractionMessage.role_type.in_(["AI", "assistant"]),
+            )
+            .order_by(InteractionMessage.id.desc())
+            .limit(1)
+        )
+    content = str(text or "").strip()
+    if not content:
+        return False
+    has_manual_review = "人工审核" in content or "人工核实" in content
+    has_nurse = "护士" in content
+    has_notified = any(
+        marker in content
+        for marker in ("已经通知", "已通知", "已经告知", "已告知")
+    )
+    return has_manual_review and has_nurse and has_notified
 
 
 def finalize_voice_assessment_session(
@@ -128,13 +187,24 @@ class VoiceCompletionCoordinator:
         session_id: str,
         task_id: int | str | None,
     ) -> bool:
-        """登记 Extraction 完成，并在响应已结束时尝试收尾。"""
+        """登记 Extraction 完成；固定人工审核在此时由系统通知护士。"""
         patient_turn = _latest_patient_turn(session_id)
+        manual_review_count = _manual_review_item_count(session_id)
+        manual_review_notified = manual_review_count == 0
+        if manual_review_count > 0:
+            notification = ensure_planned_manual_review_notification(session_id)
+            manual_review_count = notification.item_count
+            manual_review_notified = bool(notification.notified)
+            if not manual_review_notified:
+                raise RuntimeError("固定人工审核护士通知未成功创建")
+
         self.redis.set(
             _assessment_pending_key(session_id),
             {
                 "task_id": task_id,
                 "minimum_response_turn": patient_turn + 1 if patient_turn else 0,
+                "manual_review_count": manual_review_count,
+                "manual_review_notified": manual_review_notified,
             },
             ex=ASSESSMENT_PENDING_TTL,
         )
@@ -171,7 +241,7 @@ class VoiceCompletionCoordinator:
         return self._try_finalize(session_id)
 
     def _try_finalize(self, session_id: str) -> bool:
-        """在两个前置事实满足后以幂等方式完成会话。"""
+        """满足结构化完成、最终播报和固定人工审核通知后幂等收尾。"""
         token = uuid.uuid4().hex
         if not self.redis.acquire_lock(
             _lock_key(session_id),
@@ -190,6 +260,16 @@ class VoiceCompletionCoordinator:
             response_turn = int(response.get("response_turn") or 0)
             if response_turn < minimum_turn:
                 return False
+
+            manual_review_count = int(pending.get("manual_review_count") or 0)
+            if manual_review_count > 0:
+                if not bool(pending.get("manual_review_notified")):
+                    return False
+                if not _is_manual_review_completion_response(
+                    session_id,
+                    response_turn,
+                ):
+                    return False
 
             finalized = finalize_voice_assessment_session(
                 session_id=session_id,
