@@ -510,6 +510,11 @@ export interface ExtractedFieldDto {
   invalid?: boolean;
   invalid_reason?: string;
   raw_answer?: Record<string, unknown>;
+  collection_status?:
+    | 'ai_recorded'
+    | 'pending'
+    | 'manual_review_pending'
+    | 'manual_review_completed';
 }
 
 export interface ExtractedFieldsResponse {

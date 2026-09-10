@@ -218,6 +218,7 @@ class VoiceCompletionCoordinator:
         response_turn: int,
         response_id: str | None = None,
         generation_id: str | None = None,
+        is_manual_review_completion: bool = False,
     ) -> bool:
         """登记一轮可见 AI 回复完成，并在评估已完成时尝试收尾。"""
         key = _response_completed_key(session_id)
@@ -235,6 +236,9 @@ class VoiceCompletionCoordinator:
                     "response_turn": response_turn,
                     "response_id": response_id,
                     "generation_id": generation_id,
+                    "is_manual_review_completion": bool(
+                        is_manual_review_completion
+                    ),
                 },
                 ex=RESPONSE_COMPLETED_TTL,
             )
@@ -264,6 +268,8 @@ class VoiceCompletionCoordinator:
             manual_review_count = int(pending.get("manual_review_count") or 0)
             if manual_review_count > 0:
                 if not bool(pending.get("manual_review_notified")):
+                    return False
+                if not bool(response.get("is_manual_review_completion")):
                     return False
                 if not _is_manual_review_completion_response(
                     session_id,
@@ -310,6 +316,7 @@ def mark_voice_response_completed(
     response_turn: int,
     response_id: str | None = None,
     generation_id: str | None = None,
+    is_manual_review_completion: bool = False,
     redis: RedisClient | Any | None = None,
 ) -> bool:
     """登记 Qwen Realtime 可见回复完成。"""
@@ -319,4 +326,5 @@ def mark_voice_response_completed(
         response_turn=response_turn,
         response_id=response_id,
         generation_id=generation_id,
+        is_manual_review_completion=is_manual_review_completion,
     )

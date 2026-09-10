@@ -41,6 +41,9 @@ from app.schemas.events import (
 from app.services.agent_dispatch_service import dispatch_voice_answer_workers
 from app.services.dialog_audio_store import DialogAudioStore
 from app.services.dialog_tool_executor import execute_tool
+from app.services.manual_review_service import (
+    ensure_planned_manual_review_notification,
+)
 from app.services.qwen_realtime_client import QwenRealtimeClient
 from app.services.tool_interaction_service import publish_tool_result
 from app.services.voice_turn_guard import VoiceTurnGuard
@@ -79,6 +82,7 @@ class VoiceGeneration:
     started_event_id: str | None = None
     completed: bool = False
     is_recovery: bool = False
+    is_manual_review_completion: bool = False
 
 
 @dataclass
@@ -122,11 +126,13 @@ class VoiceSession:
     receive_task: Any | None = None
     close_task: Any | None = None
     recovery_task: Any | None = None
+    manual_review_completion_task: Any | None = None
     recovery_mode_active: bool = False
     recovery_current_question_id: int | None = None
     recovery_source_message_no: str | None = None
     recovery_answer_response_pending: bool = False
     next_response_is_recovery: bool = False
+    next_response_is_manual_review_completion: bool = False
     recovery_instruction_active: bool = False
     closed: bool = False
     # 默认识别完成即提交；仅在显式启用时保留转写确认草稿协议，兼容历史客户端/测试。
@@ -329,6 +335,13 @@ class VoiceGateway:
             gateway_session.receive_task = asyncio.create_task(
                 self._consume_upstream(gateway_session)
             )
+            if (
+                initial_decision.progress.completed
+                and int(patient_info.get("manual_review_count") or 0) > 0
+            ):
+                gateway_session.manual_review_completion_task = asyncio.create_task(
+                    self._start_manual_review_completion_response(gateway_session)
+                )
             return gateway_session
 
     async def attach(self, session: VoiceSession, websocket: WebSocket) -> None:
@@ -538,6 +551,9 @@ class VoiceGateway:
         if session.recovery_task is not None:
             session.recovery_task.cancel()
             session.recovery_task = None
+        if session.manual_review_completion_task is not None:
+            session.manual_review_completion_task.cancel()
+            session.manual_review_completion_task = None
         await session.client.close()
         for websocket in list(session.connected_clients):
             await self._send_json(websocket, {"type": "closed"})
@@ -972,8 +988,12 @@ class VoiceGateway:
                 session.recovery_mode_active
                 or session.next_response_is_recovery
             ),
+            is_manual_review_completion=(
+                session.next_response_is_manual_review_completion
+            ),
         )
         session.next_response_is_recovery = False
+        session.next_response_is_manual_review_completion = False
         session.current_generation = generation
         if response_id:
             session.generations[response_id] = generation
@@ -1143,6 +1163,7 @@ class VoiceGateway:
         generation.completed = True
         closing_candidate = (
             not generation.is_recovery
+            and not generation.is_manual_review_completion
             and VoiceTurnGuard.has_closing_intent(generation.text)
         )
         await self._flush_audio_segment(session, generation)
@@ -1218,8 +1239,17 @@ class VoiceGateway:
                 response_turn=generation.turn_no,
                 response_id=generation.response_id,
                 generation_id=generation.generation_id,
+                is_manual_review_completion=(
+                    generation.is_manual_review_completion
+                ),
                 redis=session.redis,
             )
+            if (
+                not generation.is_recovery
+                and not generation.is_manual_review_completion
+                and int(session.patient_info.get("manual_review_count") or 0) > 0
+            ):
+                self._schedule_manual_review_completion_after_extraction(session)
         if generation.is_recovery:
             pass
         elif (
@@ -1258,6 +1288,12 @@ class VoiceGateway:
         session.response_cancel_requested = False
         await self._broadcast_json(session, {"type": "interrupted"})
         await self._broadcast_state(session, "listening")
+        if (
+            generation is not None
+            and generation.is_manual_review_completion
+            and not session.closed
+        ):
+            self._schedule_manual_review_completion_after_extraction(session)
         await self._maybe_create_response(session)
 
     @staticmethod
@@ -1279,6 +1315,137 @@ class VoiceGateway:
                 next(iter(session.generations), None)
             )
         session.responding = bool(session.active_response_ids)
+
+    def _schedule_manual_review_completion_after_extraction(
+        self,
+        session: VoiceSession,
+    ) -> None:
+        """每轮普通回复后等待 Extraction，完成时补一条专门人工审核结束播报。"""
+        existing = session.manual_review_completion_task
+        if existing is not None and not existing.done():
+            existing.cancel()
+        session.manual_review_completion_task = asyncio.create_task(
+            self._announce_manual_review_after_extraction(session)
+        )
+
+    async def _announce_manual_review_after_extraction(
+        self,
+        session: VoiceSession,
+    ) -> None:
+        """等待当前患者答案入库；仅在 AI 可采集题全部完成后触发结束播报。"""
+        current_task = asyncio.current_task()
+        try:
+            source_message_no = await asyncio.to_thread(
+                VoiceTurnGuard.latest_patient_message_no,
+                session.session_no,
+            )
+            if not source_message_no:
+                return
+            waited = 0.0
+            while not VoiceTurnGuard.extraction_processed(
+                session.redis,
+                session.session_no,
+                source_message_no,
+            ):
+                if session.closed:
+                    return
+                if waited >= VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS:
+                    logger.warning(
+                        "人工审核结束播报等待 Extraction 超时: session=%s source=%s",
+                        session.session_no,
+                        source_message_no,
+                    )
+                    return
+                await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
+                waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
+
+            decision = await asyncio.to_thread(
+                VoiceTurnGuard.build_recovery_decision,
+                session.session_no,
+                session.task_list,
+            )
+            if not decision.progress.completed:
+                return
+            await self._start_manual_review_completion_response(session)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception(
+                "人工审核结束播报触发失败，保留语音会话等待重试: session=%s",
+                session.session_no,
+            )
+        finally:
+            if session.manual_review_completion_task is current_task:
+                session.manual_review_completion_task = None
+
+    async def _start_manual_review_completion_response(
+        self,
+        session: VoiceSession,
+    ) -> None:
+        """通知责任护士后，创建唯一有资格跨越最终完成屏障的 Qwen 响应。"""
+        configured_count = int(session.patient_info.get("manual_review_count") or 0)
+        if configured_count <= 0 or session.closed:
+            return
+        notification = await asyncio.to_thread(
+            ensure_planned_manual_review_notification,
+            session.session_no,
+        )
+        if notification.item_count <= 0 or not notification.notified:
+            logger.error(
+                "固定人工审核通知未就绪，拒绝创建结束播报: session=%s",
+                session.session_no,
+            )
+            return
+
+        waited = 0.0
+        while (
+            session.speech_active
+            or session.responding
+            or session.active_response_ids
+            or session.response_requested
+            or session.pending_tool_responses > 0
+        ):
+            if session.closed:
+                return
+            if waited >= VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS:
+                logger.warning(
+                    "人工审核结束播报等待当前语音响应结束超时: session=%s",
+                    session.session_no,
+                )
+                return
+            await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
+            waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
+
+        await session.client.update_instructions(
+            self._build_manual_review_completion_instructions(
+                notification.item_count
+            )
+        )
+        session.next_response_is_manual_review_completion = True
+        session.response_requested = True
+        try:
+            await session.client.create_response()
+        except Exception:
+            session.response_requested = False
+            session.next_response_is_manual_review_completion = False
+            raise
+        logger.info(
+            "已创建固定人工审核专门结束播报: session=%s count=%s request=%s",
+            session.session_no,
+            notification.item_count,
+            notification.request_id,
+        )
+
+    @staticmethod
+    def _build_manual_review_completion_instructions(item_count: int) -> str:
+        """专门结束播报只允许告知人工审核安排，不得生成新问题。"""
+        return (
+            "你是一名专业的AI护理助手。结构化AI问答已经完成。\n"
+            "现在只允许向患者播报下面这一句话，不得增加任何问题、宣教、解释或其他内容：\n"
+            f"本次AI问答已经完成，剩余{item_count}项固定内容需要护士人工审核；"
+            "我已通知责任护士，请您稍候。\n"
+            "播报完立即停止输出，等待系统结束会话。"
+        )
 
     def _schedule_premature_close_recovery(
         self,
@@ -1577,10 +1744,14 @@ class VoiceGateway:
         )
 
     async def _finish_recovery_mode(self, session: VoiceSession) -> None:
-        """全部 remaining 清空后停止提问，等待既有完成屏障结束会话。"""
-        terminal_instructions = self._build_completed_wait_instructions()
+        """全部 remaining 清空后停止提问；有固定审核时追加专门结束播报。"""
         try:
-            await session.client.update_instructions(terminal_instructions)
+            if int(session.patient_info.get("manual_review_count") or 0) > 0:
+                await self._start_manual_review_completion_response(session)
+            else:
+                await session.client.update_instructions(
+                    self._build_completed_wait_instructions()
+                )
         finally:
             session.recovery_instruction_active = False
             session.recovery_mode_active = False

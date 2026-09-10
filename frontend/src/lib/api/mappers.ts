@@ -513,6 +513,7 @@ export function mapExtractedField(
     invalid: field.invalid ?? false,
     invalidReason: field.invalid_reason,
     rawAnswer: field.raw_answer,
+    collectionStatus: field.collection_status,
   };
 }
 
