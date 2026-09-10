@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from time import monotonic
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -24,7 +25,11 @@ from app.models.base import get_db
 from app.models.interaction import InteractionSession
 from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
-from app.services.agent_dispatch_service import build_session_agent_payload
+from app.services.agent_dispatch_service import (
+    build_session_agent_payload,
+    clear_voice_session_active,
+    mark_voice_session_active,
+)
 from app.services.dialog_audio_store import DialogAudioStore
 from app.services.voice_gateway import voice_gateway
 from app.utils.redis_client import get_redis
@@ -33,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["voice-dialog"])
 DbSession = Annotated[Session, Depends(get_db)]
+VOICE_SESSION_LEASE_REFRESH_SECONDS = 30.0
 
 
 def _load_session(session_no: str) -> tuple[int, int, int, dict, list[str]]:
@@ -77,6 +83,9 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
     """患者端实时语音 WebSocket。"""
     await websocket.accept()
     session = None
+    voice_redis = None
+    clear_voice_lease = False
+    last_voice_lease_refresh = 0.0
     try:
         patient_id, _ = _authenticate_patient_websocket(websocket)
         task_id, session_patient_id, _encounter_id, patient_info, scale_codes = _load_session(
@@ -92,11 +101,22 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
             scale_codes=scale_codes,
         )
         await voice_gateway.attach(session, websocket)
+        voice_redis = get_redis()
+        if not mark_voice_session_active(voice_redis, session_no):
+            logger.warning("语音会话接管标记写入失败: session=%s", session_no)
+        last_voice_lease_refresh = monotonic()
 
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
                 break
+
+            now = monotonic()
+            if now - last_voice_lease_refresh >= VOICE_SESSION_LEASE_REFRESH_SECONDS:
+                if not mark_voice_session_active(voice_redis, session_no):
+                    logger.warning("语音会话接管标记续期失败: session=%s", session_no)
+                last_voice_lease_refresh = now
+
             if message.get("bytes") is not None:
                 await voice_gateway.append_audio(session, bytes(message["bytes"]))
                 continue
@@ -148,6 +168,7 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
                         {"type": "error", "code": "TRANSCRIPT_STATE_INVALID", "message": str(exc)}
                     )
             elif message_type == "close":
+                clear_voice_lease = True
                 await voice_gateway.close(session_no)
                 break
             else:
@@ -155,8 +176,10 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
                     {"type": "error", "code": "INVALID_MESSAGE", "message": "不支持的控制消息"}
                 )
     except WebSocketDisconnect:
+        # 临时断线保留短 TTL 接管标记，与 VoiceGateway 的重连宽限期配合。
         pass
     except AppError as exc:
+        clear_voice_lease = True
         logger.warning("语音 WebSocket 业务拒绝: session=%s code=%s", session_no, exc.code)
         try:
             await websocket.send_json(
@@ -166,6 +189,7 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
             logger.debug("语音 WebSocket 已无法发送拒绝消息: session=%s", session_no)
         await websocket.close(code=4403)
     except Exception:
+        clear_voice_lease = True
         logger.exception("语音 WebSocket 处理失败: session=%s", session_no)
         try:
             await websocket.send_json(
@@ -181,6 +205,8 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
     finally:
         if session is not None:
             await voice_gateway.detach(session, websocket)
+        if clear_voice_lease and voice_redis is not None:
+            clear_voice_session_active(voice_redis, session_no)
 
 
 @router.get("/api/dialog/{session_no}/audio/{generation_id}/{filename}")
