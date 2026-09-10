@@ -23,6 +23,7 @@ from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask
 from app.models.assessment_execution import AssessmentInstance
 from app.services.assessment_progress_service import refresh_assessment_progress
+from app.services.manual_review_service import is_fixed_manual_review_question
 from app.schemas.extraction import ExtractedFieldDto, ExtractedFieldsResponse
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,8 @@ def get_extracted_fields(
 
     submission_ids = [s.id for s in submissions]
 
-    # 3) 查询当前任务的全部量表字段，未识别字段也要返回给医护人工填写。
+    # 3) 查询当前任务的全部量表字段。固定人工审核题也必须返回给患者/护士端显示，
+    # 但它们不会进入 AI QuestionTask。
     target_questions = list(
         db.scalars(
             select(AssessmentQuestion)
@@ -196,6 +198,7 @@ def get_extracted_fields(
             if answer.source_message_ids
             else None
         )
+        is_manual_review = is_fixed_manual_review_question(question.question_code)
 
         fields.append(
             ExtractedFieldDto(
@@ -214,7 +217,10 @@ def get_extracted_fields(
                 display_value=display_value,
                 source_message_ids=source_ids,
                 confidence=answer.extraction_confidence,
-                corrected=False,  # 第一期无护士修正功能，默认 False
+                corrected=is_manual_review or answer.value_source == "nurse_corrected",
+                collection_status=(
+                    "manual_review_completed" if is_manual_review else "ai_recorded"
+                ),
             )
         )
 
@@ -230,6 +236,7 @@ def get_extracted_fields(
             question = db.get(AssessmentQuestion, int(question_id))
             if question is None:
                 continue
+            is_manual_review = is_fixed_manual_review_question(question.question_code)
             fields.append(
                 ExtractedFieldDto(
                     field_id=f"invalid-{submission.id}-{question.id}",
@@ -241,9 +248,12 @@ def get_extracted_fields(
                     source_message_ids=None,
                     confidence=0,
                     corrected=False,
-                    invalid=True,
-                    invalid_reason=invalid.get("error"),
-                    raw_answer=invalid.get("raw_answer"),
+                    invalid=not is_manual_review,
+                    invalid_reason=(None if is_manual_review else invalid.get("error")),
+                    raw_answer=(None if is_manual_review else invalid.get("raw_answer")),
+                    collection_status=(
+                        "manual_review_pending" if is_manual_review else "pending"
+                    ),
                 )
             )
 
@@ -251,6 +261,7 @@ def get_extracted_fields(
     for question in target_questions:
         if question.id in recorded_ids:
             continue
+        is_manual_review = is_fixed_manual_review_question(question.question_code)
         fields.append(
             ExtractedFieldDto(
                 field_id=f"pending-{question.id}",
@@ -261,6 +272,9 @@ def get_extracted_fields(
                 options=option_definitions.get(question.id, []),
                 confidence=None,
                 corrected=False,
+                collection_status=(
+                    "manual_review_pending" if is_manual_review else "pending"
+                ),
             )
         )
 
