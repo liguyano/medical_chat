@@ -35,8 +35,8 @@ class FakeRedis:
         return True
 
 
-def test_fixed_manual_review_requires_notification_and_qualifying_final_response(monkeypatch):
-    """普通 response.done 不能结束含固定人工审核题的语音评估。"""
+def test_fixed_manual_review_requires_notification_and_dedicated_final_response(monkeypatch):
+    """普通 response.done 即使文案合格，也不能冒充专门人工审核结束播报。"""
     redis = FakeRedis()
     finalize = Mock(return_value=True)
     notify = Mock(
@@ -53,7 +53,7 @@ def test_fixed_manual_review_requires_notification_and_qualifying_final_response
     monkeypatch.setattr(
         completion_module,
         "_is_manual_review_completion_response",
-        lambda _session_id, response_turn: response_turn == 6,
+        lambda _session_id, response_turn: response_turn >= 6,
         raising=False,
     )
     monkeypatch.setattr(
@@ -67,7 +67,6 @@ def test_fixed_manual_review_requires_notification_and_qualifying_final_response
     notify.assert_called_once_with("SESS-MANUAL")
     finalize.assert_not_called()
 
-    # 第 5 轮是普通回答，即使满足最小轮次也不能越过固定人工审核播报屏障。
     assert (
         coordinator.mark_response_completed(
             session_id="SESS-MANUAL",
@@ -79,13 +78,27 @@ def test_fixed_manual_review_requires_notification_and_qualifying_final_response
     )
     finalize.assert_not_called()
 
-    # 只有包含“固定人工审核已通知护士”的专门结束播报完成后才允许收尾。
+    # 文案虽然可被识别为人工审核播报，但不是网关专门创建的结束响应，仍不得收尾。
     assert (
         coordinator.mark_response_completed(
             session_id="SESS-MANUAL",
             task_id=7,
             response_turn=6,
             response_id="resp-6",
+            is_manual_review_completion=False,
+        )
+        is False
+    )
+    finalize.assert_not_called()
+
+    # 只有网关专门标记的人工审核结束播报 response.done 才允许真正完成。
+    assert (
+        coordinator.mark_response_completed(
+            session_id="SESS-MANUAL",
+            task_id=7,
+            response_turn=7,
+            response_id="resp-7",
+            is_manual_review_completion=True,
         )
         is True
     )
