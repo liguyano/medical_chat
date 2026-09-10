@@ -1,5 +1,5 @@
 """AI 评估进度服务
-作用：以必填、非派生结构化答案为唯一事实来源计算进度和完成条件。
+作用：以必填、非派生结构化答案和固定人工审核策略计算患者 AI 采集进度。
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from app.models.assessment_execution import (
 from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask
+from app.services.manual_review_service import build_manual_review_progress
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,9 @@ class AssessmentProgress:
     completed: bool
     answered_question_ids: frozenset[int]
     remaining_question_ids: tuple[int, ...]
+    manual_review_question_ids: tuple[int, ...] = ()
+    manual_review_pending_question_ids: tuple[int, ...] = ()
+    ai_required_question_ids: tuple[int, ...] = ()
 
 
 MIN_VALID_EXTRACTION_CONFIDENCE = Decimal("0.6")
@@ -75,7 +79,11 @@ def refresh_assessment_progress(
     db: Session,
     session_no: str,
 ) -> AssessmentProgress:
-    """刷新提交与实例进度，但不直接结束患者会话。"""
+    """刷新患者 AI 采集进度，但不直接结束患者会话。
+
+    固定人工审核题从一开始计入 current/total，但不进入 AI remaining；
+    是否已经由护士填写通过 manual_review_pending_question_ids 单独表达。
+    """
     session = db.scalar(
         select(InteractionSession).where(
             InteractionSession.session_no == session_no,
@@ -95,12 +103,15 @@ def refresh_assessment_progress(
             .order_by(AssessmentInstance.id)
         ).all()
     )
-    required_ids: list[int] = []
+    required_questions: list[tuple[int, str]] = []
     answered_ids: set[int] = set()
     for instance in instances:
-        instance_required = list(
-            db.scalars(
-                select(AssessmentQuestion.id)
+        instance_required_rows = list(
+            db.execute(
+                select(
+                    AssessmentQuestion.id,
+                    AssessmentQuestion.question_code,
+                )
                 .where(
                     AssessmentQuestion.scale_version_id == instance.scale_version_id,
                     AssessmentQuestion.required.is_(True),
@@ -110,7 +121,11 @@ def refresh_assessment_progress(
                 .order_by(AssessmentQuestion.sort_no, AssessmentQuestion.id)
             ).all()
         )
-        required_ids.extend(instance_required)
+        instance_required = [int(row.id) for row in instance_required_rows]
+        instance_required_pairs = [
+            (int(row.id), str(row.question_code)) for row in instance_required_rows
+        ]
+        required_questions.extend(instance_required_pairs)
         submission = db.scalar(
             select(AssessmentSubmission)
             .where(
@@ -121,7 +136,7 @@ def refresh_assessment_progress(
             .order_by(AssessmentSubmission.id.desc())
         )
         instance_answered: set[int] = set()
-        if submission is not None:
+        if submission is not None and instance_required:
             instance_answered = set(
                 db.scalars(
                     select(AssessmentAnswer.question_id).where(
@@ -132,12 +147,19 @@ def refresh_assessment_progress(
                     )
                 ).all()
             )
-            submission.total_question_count = len(instance_required)
-            submission.answered_question_count = len(instance_answered)
+
+        instance_progress = build_manual_review_progress(
+            required_questions=instance_required_pairs,
+            answered_question_ids=instance_answered,
+        )
+        instance_ai_answered = set(instance_progress.ai_required_question_ids).intersection(
+            instance_answered
+        )
+        if submission is not None:
+            submission.total_question_count = len(instance_progress.ai_required_question_ids)
+            submission.answered_question_count = len(instance_ai_answered)
             submission.submission_status = (
-                "completed"
-                if len(instance_answered) == len(instance_required)
-                else "in_progress"
+                "completed" if instance_progress.completed else "in_progress"
             )
             submission.submitted_at = (
                 datetime.now(UTC)
@@ -147,33 +169,34 @@ def refresh_assessment_progress(
             submission.updator = "assessment_progress"
         answered_ids.update(instance_answered)
         instance.instance_status = (
-            "ai_completed"
-            if len(instance_answered) == len(instance_required)
-            else "collecting"
+            "ai_completed" if instance_progress.completed else "collecting"
         )
         if instance.instance_status == "ai_completed":
             instance.assessed_at = datetime.now(UTC)
+        else:
+            instance.assessed_at = None
         instance.updator = "assessment_progress"
 
-    ordered_required = list(dict.fromkeys(required_ids))
-    remaining = tuple(
-        question_id
-        for question_id in ordered_required
-        if question_id not in answered_ids
+    snapshot = build_manual_review_progress(
+        required_questions=required_questions,
+        answered_question_ids=answered_ids,
     )
     progress = AssessmentProgress(
-        current=len(answered_ids),
-        total=len(ordered_required),
-        completed=bool(ordered_required) and not remaining,
+        current=snapshot.current,
+        total=snapshot.total,
+        completed=snapshot.completed,
         answered_question_ids=frozenset(answered_ids),
-        remaining_question_ids=remaining,
+        remaining_question_ids=snapshot.remaining_question_ids,
+        manual_review_question_ids=snapshot.manual_review_question_ids,
+        manual_review_pending_question_ids=snapshot.manual_review_pending_question_ids,
+        ai_required_question_ids=snapshot.ai_required_question_ids,
     )
     db.commit()
     return progress
 
 
 def complete_assessment_session(db: Session, session_no: str) -> AssessmentProgress:
-    """在进度完整后完成会话、任务和评估实例。"""
+    """在患者 AI 可采集问题全部完成后结束对话并进入护士复核。"""
     progress = refresh_assessment_progress(db, session_no)
     if not progress.completed:
         return progress
