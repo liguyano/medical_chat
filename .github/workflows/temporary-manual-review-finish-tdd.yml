@@ -25,6 +25,7 @@ jobs:
           tests/unit-test/test_manual_review_policy.py
           tests/unit-test/test_voice_completion_service.py
           tests/unit-test/test_voice_manual_review_completion.py
+          tests/unit-test/test_voice_manual_review_gateway.py
       - name: Assert expected phase
         env:
           OUTCOME: ${{ steps.tests.outcome }}
