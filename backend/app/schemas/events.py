@@ -177,7 +177,7 @@ class ProgressUpdatedEvent(BaseEvent):
 
 class DialogMessageEvent(BaseEvent):
     """AI问诊问题事件
-    作用：Dialog Agent产出下一个问诊问题时发布（供患者端SSE消费）
+    作用：Dialog Agent产出下一个问诊问题事件（供患者端SSE消费）
     """
 
     event_type: EventType = EventType.DIALOG_MESSAGE
@@ -297,7 +297,7 @@ class ConsentStatusUpdatedEvent(BaseEvent):
 
 
 class HandoffRequestedEvent(BaseEvent):
-    """呼叫医护事件
+    """呼叫医护/系统固定人工审核事件
     作用：同时推送患者端、单会话监控端和责任护士全局提醒流。
     """
 
@@ -314,7 +314,8 @@ class HandoffRequestedEvent(BaseEvent):
     bed_no: str | None = None
     ward_name: str | None = None
     status: str = "requested"
-    request_source: Literal["patient", "agent"] = "agent"
+    request_source: Literal["patient", "agent", "system"] = "agent"
+    review_items: list[dict[str, Any]] = Field(default_factory=list)
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_result: dict[str, Any] | None = None
