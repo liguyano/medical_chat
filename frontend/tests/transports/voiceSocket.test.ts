@@ -215,6 +215,84 @@ describe('VoiceSocketClient', () => {
     expect(states.at(-1)).toBe('text_fallback');
   });
 
+  it('上游语音断线会清理旧连接并自动重连一次', async () => {
+    const firstStream = new FakeMediaStream();
+    const secondStream = new FakeMediaStream();
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(secondStream);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const states: string[] = [];
+    const errors: string[] = [];
+    const { VoiceSocketClient } = await import(
+      '@/lib/transports/voiceSocket'
+    );
+    const client = new VoiceSocketClient({
+      taskId: '111',
+      sessionId: 'SESS-111',
+      onStateChange: (state) => states.push(state),
+      onError: (message) => errors.push(message),
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0]?.onmessage?.({
+      data: JSON.stringify({
+        type: 'error',
+        code: 'VOICE_UPSTREAM_DISCONNECTED',
+        message: '语音连接已中断，正在重新连接',
+        recoverable: true,
+      }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(firstStream.track.stop).toHaveBeenCalledOnce();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(errors).toEqual([]);
+    expect(states.at(-1)).toBe('listening');
+    await client.close();
+  });
+
+  it('自动重连后再次断线会停止重试并保留文字输入', async () => {
+    const getUserMedia = vi.fn().mockResolvedValue(new FakeMediaStream());
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const states: string[] = [];
+    const errors: string[] = [];
+    const { VoiceSocketClient } = await import(
+      '@/lib/transports/voiceSocket'
+    );
+    const client = new VoiceSocketClient({
+      taskId: '111',
+      sessionId: 'SESS-111',
+      onStateChange: (state) => states.push(state),
+      onError: (message) => errors.push(message),
+    });
+
+    await client.start();
+    const disconnectMessage = {
+      data: JSON.stringify({
+        type: 'error',
+        code: 'VOICE_UPSTREAM_DISCONNECTED',
+        message: '语音连接已中断，正在重新连接',
+        recoverable: true,
+      }),
+    };
+    FakeWebSocket.instances[0]?.onmessage?.(disconnectMessage);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    FakeWebSocket.instances[1]?.onmessage?.(disconnectMessage);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(errors).toContain('语音连接恢复失败，已切换为文字输入');
+    expect(states.at(-1)).toBe('text_fallback');
+  });
+
   it('无活动响应竞态不会关闭麦克风或切换文字降级', async () => {
     const stream = new FakeMediaStream();
     vi.stubGlobal('navigator', {

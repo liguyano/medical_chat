@@ -61,6 +61,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `active`。`streamingTaskId` 等瞬时传输状态不得跨页面恢复为正在生成。
 - 患者实时语音仅通过 `src/lib/transports/voiceSocket.ts` 连接后端 WebSocket；浏览器音频必须量化为 16kHz 单声道 PCM16，不得直接发送 Float32 底层字节。
 - 语音或网络失败时保留文字输入，并在 UI 显示 Mock/API、SSE 和语音连接状态。
+- 后端以 `VOICE_UPSTREAM_DISCONNECTED` 或 WebSocket 1012 表示 Qwen 上游可恢复断线；
+  `VoiceSocketClient` 只自动重连一次，重连成功后继续语音，连续失败则停止麦克风并保留文字输入，
+  主动关闭和任务完成关闭不得触发自动重连。
 - API 模式语音页面使用 Qwen Realtime 的后端网关；患者/AI 音频完成索引通过
   `applyRealtimeEvent.ts` 绑定到 `InteractionMessage.audioUrl`，统一由 `ChatBubble`
   的受保护 WAV 播放控件回放，医护监控页与患者页共享该事件适配逻辑。

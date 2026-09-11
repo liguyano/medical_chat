@@ -4,9 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
 
 import app.services.voice_gateway as voice_gateway_module
 from app.schemas.events import (
+    AgentErrorEvent,
     DialogMessageEvent,
     PatientAnswerEvent,
     PatientAudioEvent,
@@ -110,6 +112,88 @@ async def test_server_vad_stream_only_appends_audio_until_upstream_detects_turn(
     ]
     session.client.commit_audio.assert_not_awaited()
     session.client.create_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upstream_disconnect_evicts_stale_session_and_requests_browser_reconnect(
+    tmp_path: Path,
+):
+    """上游断线后旧会话必须失效，下一条浏览器连接才能创建新 Qwen 会话。"""
+
+    class DisconnectingClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close = AsyncMock()
+
+        async def events(self):
+            yield {
+                "type": "error",
+                "error": {
+                    "code": "VOICE_UPSTREAM_DISCONNECTED",
+                    "message": "上游语音模型连接中断",
+                    "recoverable": True,
+                },
+            }
+
+    class ClosingWebSocket(FakeWebSocket):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_codes: list[int] = []
+
+        async def close(self, code: int = 1000) -> None:
+            self.close_codes.append(code)
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.client = DisconnectingClient()
+    websocket = ClosingWebSocket()
+    session.connected_clients.add(websocket)
+    gateway._sessions[session.session_no] = session
+
+    await gateway._consume_upstream(session)
+
+    assert session.closed is True
+    assert session.session_no not in gateway._sessions
+    session.client.close.assert_awaited_once()
+    assert any(
+        isinstance(event, AgentErrorEvent)
+        and event.error_code == "VOICE_UPSTREAM_DISCONNECTED"
+        and event.retrying is True
+        for event in session.publisher.events
+    )
+    assert websocket.messages[-1] == {
+        "type": "error",
+        "code": "VOICE_UPSTREAM_DISCONNECTED",
+        "message": "语音连接已中断，正在重新连接",
+        "recoverable": True,
+    }
+    assert websocket.close_codes == [1012]
+
+
+@pytest.mark.asyncio
+async def test_audio_send_race_invalidates_session_instead_of_raising_closed_error(
+    tmp_path: Path,
+):
+    """读协程尚未发现断线时，发送音频撞上关闭连接也必须走同一失效流程。"""
+
+    class CloseOnSendClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close = AsyncMock()
+
+        async def append_audio(self, _data: bytes) -> None:
+            raise ConnectionClosedError(None, None)
+
+    gateway = VoiceGateway()
+    session = make_session(tmp_path)
+    session.client = CloseOnSendClient()
+    gateway._sessions[session.session_no] = session
+
+    await gateway.append_audio(session, b"\x01\x00" * 1600)
+
+    assert session.closed is True
+    assert session.session_no not in gateway._sessions
+    session.client.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

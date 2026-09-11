@@ -96,6 +96,8 @@ export class VoiceSocketClient {
   private responsePending = false;
   private responseWaiters = new Set<() => void>();
   private messageChain: Promise<void> = Promise.resolve();
+  private upstreamReconnectAttempted = false;
+  private upstreamReconnectPromise?: Promise<void>;
 
   constructor(private readonly options: VoiceSocketOptions) {}
 
@@ -166,8 +168,12 @@ export class VoiceSocketClient {
           this.setState('text_fallback');
         });
     };
-    this.socket.onclose = () => {
+    this.socket.onclose = (event) => {
       if (this.intentionalClose || this.state === 'closed') return;
+      if (event.code === 1012) {
+        void this.reconnectAfterUpstreamDisconnect();
+        return;
+      }
       void this.cleanupAfterUnexpectedClose();
     };
     this.socket.onerror = () => {
@@ -253,6 +259,11 @@ export class VoiceSocketClient {
       // 上游取消/重复触发响应的竞态不应关闭麦克风或降级文字输入。
       this.completePendingResponse();
       this.setState('listening');
+    } else if (
+      message.type === 'error' &&
+      message.code === 'VOICE_UPSTREAM_DISCONNECTED'
+    ) {
+      await this.reconnectAfterUpstreamDisconnect();
     } else if (message.type === 'error') {
       this.completePendingResponse();
       this.options.onError?.(message.message);
@@ -261,6 +272,43 @@ export class VoiceSocketClient {
       this.completePendingResponse();
       await this.finishLocalClose({ waitForPlayback: true, notifyServer: false });
     }
+  }
+
+  private reconnectAfterUpstreamDisconnect(): Promise<void> {
+    if (this.upstreamReconnectPromise) return this.upstreamReconnectPromise;
+    if (this.upstreamReconnectAttempted) {
+      this.options.onError?.('语音连接恢复失败，已切换为文字输入');
+      return this.cleanupAfterUnexpectedClose();
+    }
+    this.upstreamReconnectAttempted = true;
+    this.upstreamReconnectPromise = (async () => {
+      this.completePendingResponse();
+      await this.capture.stop();
+      this.player.interrupt();
+      const staleSocket = this.socket;
+      this.socket = undefined;
+      if (staleSocket) {
+        staleSocket.onclose = null;
+        staleSocket.onerror = null;
+        staleSocket.close();
+      }
+      await this.player.close();
+      this.state = 'closed';
+      this.intentionalClose = false;
+      await this.start();
+    })()
+      .catch((error) => {
+        this.options.onError?.(
+          error instanceof Error
+            ? error.message
+            : '语音连接恢复失败，已切换为文字输入'
+        );
+        this.setState('text_fallback');
+      })
+      .finally(() => {
+        this.upstreamReconnectPromise = undefined;
+      });
+    return this.upstreamReconnectPromise;
   }
 
   private async cleanupAfterUnexpectedClose(): Promise<void> {

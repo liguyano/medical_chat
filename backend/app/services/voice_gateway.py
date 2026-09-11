@@ -20,6 +20,7 @@ from medagent.agents.service_agent.dialog_agent.prompt import build_system_promp
 from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 from sqlalchemy import func, select
+from websockets.exceptions import ConnectionClosed
 
 from app.configs.app_config import get_app_config
 from app.errors.codes import ErrorCode
@@ -436,7 +437,10 @@ class VoiceGateway:
             if len(session.input_audio) + len(data) > MAX_AUDIO_BUFFER_BYTES:
                 raise ValueError("单轮语音长度超过系统限制")
             session.input_audio.extend(data)
-        await session.client.append_audio(data)
+        try:
+            await session.client.append_audio(data)
+        except ConnectionClosed:
+            await self._invalidate_upstream_session(session)
 
     async def commit(self, session: VoiceSession) -> None:
         """提交患者一轮语音。"""
@@ -562,6 +566,13 @@ class VoiceGateway:
         """消费 Qwen 上游事件。"""
         try:
             async for event in session.client.events():
+                error = event.get("error") or {}
+                if (
+                    event.get("type") == "error"
+                    and error.get("code") == "VOICE_UPSTREAM_DISCONNECTED"
+                ):
+                    await self._invalidate_upstream_session(session)
+                    return
                 await self._handle_event(session, event)
         except asyncio.CancelledError:
             return
@@ -585,6 +596,47 @@ class VoiceGateway:
                     "message": "实时语音模型连接异常，已保留文字输入",
                 },
             )
+
+    async def _invalidate_upstream_session(self, session: VoiceSession) -> None:
+        """原子淘汰已断开的上游会话，并要求患者端重新建立连接。"""
+        async with self._lock:
+            if self._sessions.get(session.session_no) is session:
+                self._sessions.pop(session.session_no, None)
+        if session.closed:
+            return
+        session.closed = True
+        if session.recovery_task is not None:
+            session.recovery_task.cancel()
+            session.recovery_task = None
+        if session.manual_review_completion_task is not None:
+            session.manual_review_completion_task.cancel()
+            session.manual_review_completion_task = None
+        session.publisher.publish(
+            AgentErrorEvent(
+                session_id=session.session_no,
+                task_id=session.task_id,
+                agent_name="qwen_realtime",
+                error_code="VOICE_UPSTREAM_DISCONNECTED",
+                message="上游语音模型连接中断，患者端正在重新连接",
+                retrying=True,
+            )
+        )
+        payload = {
+            "type": "error",
+            "code": "VOICE_UPSTREAM_DISCONNECTED",
+            "message": "语音连接已中断，正在重新连接",
+            "recoverable": True,
+        }
+        for websocket in list(session.connected_clients):
+            await self._send_json(websocket, payload)
+            try:
+                await websocket.close(code=1012)
+            except (RuntimeError, WebSocketDisconnect):
+                logger.debug(
+                    "患者语音连接已关闭，无需重复发送重连关闭帧: session=%s",
+                    session.session_no,
+                )
+        await session.client.close()
 
     async def _handle_event(self, session: VoiceSession, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "")

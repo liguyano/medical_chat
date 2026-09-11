@@ -280,6 +280,9 @@ from medagent.configs.agent_config import get_agent_config
   Task-todo 作为 Qwen instructions 下发，只可按当前 Schedule 原顺序从 remaining 中选择一条，
   进入持续恢复模式。若 remaining 无法映射到 Schedule，宁可停止提问也不得回退完整题表；
   若结构化进度已完成，重新进入后禁止继续询问任何历史量表问题。
+- Qwen Realtime 上游出现 keepalive/连接关闭时，Voice Gateway 必须原子淘汰旧
+  `VoiceSession` 并以 WebSocket 1012 通知患者端重连；禁止继续向失效上游发送音频。
+  新连接仍须通过结构化 `remaining_question_ids` 恢复，不能复用旧会话内存状态。
 - 持续恢复模式的 Realtime instructions 仅暴露患者上下文与“当前唯一允许询问的问题”。
   已经形成有效结构化答案的问题不得重复询问、核对或换一种说法再问。患者回答当前恢复题后，
   必须等待该患者消息被 Extraction Agent 写入 `processed_message_ids`，并等待当前自动语音

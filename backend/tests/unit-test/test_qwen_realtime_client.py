@@ -3,6 +3,7 @@ import base64
 import json
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
 
 from app.services.qwen_realtime_client import QwenRealtimeClient
 
@@ -172,3 +173,43 @@ async def test_qwen_client_appends_audio_and_parses_events():
     assert events[2]["type"] == "response.done"
     assert websocket.sent[-1]["type"] == "input_audio_buffer.append"
     assert base64.b64decode(websocket.sent[-1]["audio"]) == b"input"
+
+
+@pytest.mark.asyncio
+async def test_qwen_client_marks_keepalive_disconnect_as_recoverable_upstream_error():
+    """保活断线必须携带稳定错误码，供网关淘汰旧会话并触发重连。"""
+
+    class DisconnectedWebSocket(FakeWebSocket):
+        async def recv(self):
+            raise ConnectionClosedError(None, None)
+
+    websocket = DisconnectedWebSocket()
+
+    async def connector(*_args, **_kwargs):
+        return websocket
+
+    client = QwenRealtimeClient(
+        api_key="key",
+        model="qwen-audio-3.0-realtime-flash",
+        websocket_url="wss://example/realtime",
+        connector=connector,
+        timeout=0.1,
+    )
+    await client.connect(
+        instructions="继续评估",
+        tools=[],
+        turn_detection="server_vad",
+    )
+
+    events = [event async for event in client.events()]
+
+    assert events == [
+        {
+            "type": "error",
+            "error": {
+                "code": "VOICE_UPSTREAM_DISCONNECTED",
+                "message": "上游语音模型连接中断",
+                "recoverable": True,
+            },
+        }
+    ]

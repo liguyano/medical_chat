@@ -190,10 +190,14 @@ class QwenRealtimeClient:
             except TimeoutError:
                 yield {"type": "error", "error": {"message": "上游语音模型响应超时"}}
                 return
-            except ConnectionClosed as exc:
+            except ConnectionClosed:
                 yield {
                     "type": "error",
-                    "error": {"message": f"上游语音模型连接中断: {exc.code}"},
+                    "error": {
+                        "code": "VOICE_UPSTREAM_DISCONNECTED",
+                        "message": "上游语音模型连接中断",
+                        "recoverable": True,
+                    },
                 }
                 return
             if isinstance(raw, bytes):
