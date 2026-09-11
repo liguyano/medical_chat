@@ -45,7 +45,7 @@ def test_system_prompt_contains_cicare_patient_and_tasks():
     assert "选填" in prompt
     assert "{patient_name}" not in prompt
     assert "TODO" not in prompt
-    assert "只有系统确认全部必填评估进度完成后" in prompt
+    assert "只有系统确认全部 AI 可采集的必填评估进度完成后" in prompt
     assert "先接住患者当前内容" in prompt
     assert "禁止照抄" in prompt
     assert "开水房" in prompt
@@ -98,8 +98,8 @@ def test_constraint_update_prompt_handles_empty_and_multiple_items():
 
 
 def test_dialog_tool_schemas_follow_openai_function_contract():
-    """模型侧只暴露知情同意与护士协助，不再暴露宣教工具。"""
-    assert len(DIALOG_TOOLS) == 2
+    """模型侧只暴露知情同意，不得拥有宣教或呼叫护士权限。"""
+    assert len(DIALOG_TOOLS) == 1
     names = set()
     for tool in DIALOG_TOOLS:
         assert tool["type"] == "function"
@@ -107,11 +107,9 @@ def test_dialog_tool_schemas_follow_openai_function_contract():
         names.add(function["name"])
         assert function["parameters"]["type"] == "object"
         assert function["parameters"]["required"]
-    assert names == {
-        "trigger_consent_form",
-        "request_nurse_assistance",
-    }
+    assert names == {"trigger_consent_form"}
     assert "get_education_material" not in names
+    assert "request_nurse_assistance" not in names
     assert "play_audio" not in names
 
 

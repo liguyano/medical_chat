@@ -250,6 +250,9 @@ from medagent.configs.agent_config import get_agent_config
   新对话不得主动产生 `education_triggered`；该事件类型、宣教表和患者端历史卡片仅用于
   兼容已经存在的历史记录。知情同意与呼叫护士仍分别通过 `consent_triggered`、
   `handoff_requested` 持久化；通用 `tool_call` 仅用于内部审计。
+- Dialog/Qwen 模型工具 schema 同样不得暴露 `request_nurse_assistance`，模型无权根据
+  量表回答自行创建护士协助请求。患者主动呼叫必须走患者端 handoff API，固定人工审核通知
+  必须走后端 `manual_review_service`；SDK 执行注册表仅为历史兼容保留该工具实现。
 - 旧宣教材料的原文、通俗文本、播报文本及 `education_status_updated` 历史事件继续可读，
   但不得据此重新触发患者宣教、自动播报或 teach-back。知情同意条款仍在对话内确认和签名，
   签名图片保存到 `backend/storage/consent-signatures`，禁止把 data URL 直接写入
