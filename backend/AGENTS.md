@@ -6,6 +6,7 @@
 - 第一阶段 `qwen3.5` 结构化链路使用 `extra_body.enable_thinking=false`，避免推理 token 截断 JSON。
 - Dialog 首问和后续问句均由真实语言模型生成；模型失败时发布 `agent_error` SSE 并触发 Celery 重试，禁止静默回退量表原文。
 - TextChatEngine 必须跳过供应商发送的 `choices=[]` 用量 chunk。
+- Qwen Realtime 空闲接收超时必须继续监听；上游 WebSocket 断开后，收发协程必须串行重建连接，发送中的音频帧只重试一次。
 - Schedule 与 Extraction 的结构化模型入口必须强制关闭思考模式，避免推理 Token
   耗尽后没有最终 JSON；不得仅依赖部署配置中的 `enable_thinking` 值。
 

@@ -3,6 +3,7 @@ import base64
 import json
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
 
 from app.services.qwen_realtime_client import QwenRealtimeClient
 
@@ -32,6 +33,30 @@ class FakeWebSocket:
 
     async def close(self):
         return None
+
+
+class IdleThenEventWebSocket(FakeWebSocket):
+    def __init__(self):
+        super().__init__()
+        self.received = [TimeoutError(), json.dumps({"type": "response.done"})]
+
+    async def recv(self):
+        item = self.received.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class ClosedOnFirstSendWebSocket(FakeWebSocket):
+    def __init__(self):
+        super().__init__()
+        self.fail_next_send = False
+
+    async def send(self, payload: str):
+        if self.fail_next_send:
+            self.fail_next_send = False
+            raise ConnectionClosedError(None, None, None)
+        await super().send(payload)
 
 
 @pytest.mark.asyncio
@@ -162,7 +187,8 @@ async def test_qwen_client_appends_audio_and_parses_events():
     )
     await client.append_audio(b"input")
 
-    events = [event async for event in client.events()]
+    event_stream = client.events()
+    events = [await anext(event_stream) for _ in range(3)]
     assert events[0]["type"] == "response.audio.delta"
     assert events[0]["delta"]
     assert events[1] == {
@@ -172,3 +198,52 @@ async def test_qwen_client_appends_audio_and_parses_events():
     assert events[2]["type"] == "response.done"
     assert websocket.sent[-1]["type"] == "input_audio_buffer.append"
     assert base64.b64decode(websocket.sent[-1]["audio"]) == b"input"
+
+
+@pytest.mark.asyncio
+async def test_qwen_client_keeps_receiving_after_idle_timeout():
+    websocket = IdleThenEventWebSocket()
+
+    async def connector(*_args, **_kwargs):
+        return websocket
+
+    client = QwenRealtimeClient(
+        api_key="key",
+        model="qwen-audio-3.0-realtime-flash",
+        websocket_url="wss://example/realtime",
+        connector=connector,
+        timeout=0.1,
+    )
+    await client.connect(instructions="问候患者", tools=[], turn_detection="server_vad")
+
+    event = await anext(client.events())
+
+    assert event["type"] == "response.done"
+
+
+@pytest.mark.asyncio
+async def test_qwen_client_reconnects_and_retries_send_after_connection_closed():
+    first = ClosedOnFirstSendWebSocket()
+    second = FakeWebSocket()
+    connections = [first, second]
+
+    async def connector(*_args, **_kwargs):
+        return connections.pop(0)
+
+    client = QwenRealtimeClient(
+        api_key="key",
+        model="qwen-audio-3.0-realtime-flash",
+        websocket_url="wss://example/realtime",
+        connector=connector,
+        timeout=0.1,
+    )
+    await client.connect(instructions="问候患者", tools=[], turn_detection="server_vad")
+    first.fail_next_send = True
+
+    await client.append_audio(b"input")
+
+    assert [event["type"] for event in second.sent] == [
+        "session.update",
+        "input_audio_buffer.append",
+    ]
+    assert base64.b64decode(second.sent[-1]["audio"]) == b"input"

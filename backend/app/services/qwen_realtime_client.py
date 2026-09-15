@@ -53,6 +53,8 @@ class QwenRealtimeClient:
         self.websocket: Any | None = None
         self.instructions = ""
         self.tools: list[dict[str, Any]] = []
+        self._connect_options: dict[str, Any] | None = None
+        self._reconnect_lock = asyncio.Lock()
 
     async def connect(
         self,
@@ -67,6 +69,14 @@ class QwenRealtimeClient:
         """建立上游连接并发送会话配置。"""
         self.instructions = instructions
         self.tools = list(tools)
+        self._connect_options = {
+            "instructions": instructions,
+            "tools": list(tools),
+            "turn_detection": turn_detection,
+            "vad_threshold": vad_threshold,
+            "silence_duration_ms": silence_duration_ms,
+            "max_history_turns": max_history_turns,
+        }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "x-dashscope-dataInspection": "disable",
@@ -116,15 +126,39 @@ class QwenRealtimeClient:
         await self.send({"type": "session.update", "session": session})
 
     async def send(self, payload: dict[str, Any]) -> None:
-        """发送 JSON 事件。"""
-        if self.websocket is None:
+        """发送 JSON 事件；连接刚失效时重建上游并重试一次。"""
+        websocket = self.websocket
+        if websocket is None:
             raise RuntimeError("Qwen 实时连接尚未建立")
         event = dict(payload)
         event.setdefault(
             "event_id",
             f"event_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
         )
-        await self.websocket.send(json.dumps(event, ensure_ascii=False))
+        encoded = json.dumps(event, ensure_ascii=False)
+        try:
+            await websocket.send(encoded)
+        except ConnectionClosed:
+            await self._reconnect(websocket)
+            if self.websocket is None:
+                raise RuntimeError("Qwen 实时连接重建失败")
+            await self.websocket.send(encoded)
+
+    async def _reconnect(self, failed_websocket: Any) -> None:
+        """串行重建已失效连接，避免收发协程同时重复连接。"""
+        async with self._reconnect_lock:
+            if self.websocket is not failed_websocket and self.websocket is not None:
+                return
+            options = self._connect_options
+            if options is None:
+                raise RuntimeError("Qwen 实时连接缺少重连参数")
+            self.websocket = None
+            try:
+                await failed_websocket.close()
+            except Exception:
+                logger.warning("关闭失效 Qwen 实时连接失败，继续重连", exc_info=True)
+            await self.connect(**options)
+            logger.info("Qwen 实时语音连接已自动重建")
 
     async def append_audio(self, audio: bytes) -> None:
         """追加 16kHz PCM16 音频。"""
@@ -182,20 +216,20 @@ class QwenRealtimeClient:
         if self.websocket is None:
             raise RuntimeError("Qwen 实时连接尚未建立")
         while True:
+            websocket = self.websocket
+            if websocket is None:
+                raise RuntimeError("Qwen 实时连接尚未建立")
             try:
                 raw = await asyncio.wait_for(
-                    self.websocket.recv(),
+                    websocket.recv(),
                     timeout=self.timeout,
                 )
             except TimeoutError:
-                yield {"type": "error", "error": {"message": "上游语音模型响应超时"}}
-                return
-            except ConnectionClosed as exc:
-                yield {
-                    "type": "error",
-                    "error": {"message": f"上游语音模型连接中断: {exc.code}"},
-                }
-                return
+                # 空闲期没有业务事件是正常状态；WebSocket 自身 ping/pong 负责探活。
+                continue
+            except ConnectionClosed:
+                await self._reconnect(websocket)
+                continue
             if isinstance(raw, bytes):
                 # Qwen 文档约定 JSON 事件；兼容供应商直接返回音频二进制帧。
                 yield {"type": "response.audio.delta.binary", "audio": raw}
