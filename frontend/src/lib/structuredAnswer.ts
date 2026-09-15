@@ -1,10 +1,22 @@
 import type { InteractionMessage, StructuredAnswer } from '@/lib/types';
 
+export function hasStructuredAnswerValue(answer: StructuredAnswer): boolean {
+  return Boolean(answer.displayValue?.trim() || answer.answerText?.trim() ||
+    answer.selectedOptions?.length || answer.selectedOptionLabels?.length || answer.selectedOptionValues?.length ||
+    (answer.answerNumber !== undefined && answer.answerNumber !== null) ||
+    (answer.answerBoolean !== undefined && answer.answerBoolean !== null));
+}
+
+export function isPendingManualAnswer(answer: StructuredAnswer): boolean {
+  return answer.manualRequired === true && !hasStructuredAnswerValue(answer);
+}
+
 /**
  * 返回结构化答案的用户可见值。
  * option code 只用于审计和后端关联，禁止直接展示给患者或医护。
  */
 export function getStructuredAnswerDisplayValue(answer: StructuredAnswer): string {
+  if (isPendingManualAnswer(answer)) return '等待人工';
   if (answer.invalid) return '待人工确认';
   if (answer.displayValue?.trim()) return answer.displayValue.trim();
   if (answer.selectedOptionLabels?.length) {

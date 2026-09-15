@@ -162,6 +162,14 @@ class AssessmentQuestionConfigDto(BaseModel):
     validation_rule: dict[str, Any] | None = None
     sort_no: int
 
+    @field_validator("validation_rule")
+    @classmethod
+    def validate_manual_flag(cls, value: dict[str, Any] | None):
+        """人工采集标记必须是布尔值，避免字符串 false 被误当作启用。"""
+        if value is not None and "manual_required" in value and type(value["manual_required"]) is not bool:
+            raise ValueError("manual_required 必须为布尔值")
+        return value
+
 
 class AssessmentOptionConfigDto(BaseModel):
     """量表选项配置。"""

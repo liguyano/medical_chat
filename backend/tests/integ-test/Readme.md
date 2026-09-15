@@ -53,3 +53,7 @@ Dialog Agent 集成测试验证：
 Redis 初始化、查询真实 PostgreSQL，并返回
 `{"status": "failed", "reason": "no_questions_loaded"}`；
 烟测配置、Redis 结果键和 worker 进程必须在验证后清理。
+# 人工题回归（2026-09-15）
+
+数据库与迁移就绪后，在 backend 执行 `uv run --extra dev pytest tests/integ-test/test_manual_questions.py -q`。
+使用公共 `postgres_session_factory` 的外层事务回滚，不保留演示数据。覆盖题库标记保存、AI/旧缓存跳题、人工题只读、患者进度、全人工任务、人工计分缺失与护士最终复核。后台派发替身不调用模型或呼叫护士。

@@ -5,8 +5,8 @@
 import logging
 from datetime import UTC, datetime
 
-from medagent.agents.service_agent.schedule_agent import QuestionOption, QuestionTask
 from medagent.agents.service_agent.extraction_agent.types import STANDARD_ANSWER_TYPES
+from medagent.agents.service_agent.schedule_agent import QuestionOption, QuestionTask
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -18,6 +18,7 @@ from app.models import (
     AssessmentSection,
 )
 from app.models import base as model_base
+from app.services.manual_question_service import automatic_question_condition
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ class AssessmentQuestionLoader:
             .where(
                 AssessmentQuestion.scale_version_id == version_id,
                 AssessmentQuestion.derived.is_(False),
+                automatic_question_condition(),
                 AssessmentQuestion.deleted == 0,
             )
             .order_by(

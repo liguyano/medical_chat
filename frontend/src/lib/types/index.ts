@@ -228,6 +228,7 @@ export interface QuestionValidationRule {
 
 // 量表题目
 export interface AssessmentQuestion {
+  manualRequired?: boolean;
   id: string;
   questionCode: string;
   sectionId?: string;
@@ -354,6 +355,7 @@ export interface InteractionSession {
 
 // 结构化答案
 export interface StructuredAnswer {
+  manualRequired?: boolean;
   questionId: string;
   questionCode: string;
   questionText: string;

@@ -26,7 +26,7 @@ interface TaskStore {
   updateTaskStatus: (taskId: string, status: CareTask['taskStatus']) => void;
   updateTaskProgress: (taskId: string, current: number, total: number) => void;
   saveFormAnswer: (taskId: string, questionId: string, value: PrototypeAnswerValue) => void;
-  submitForm: (taskId: string, total: number) => void;
+  submitForm: (taskId: string, total: number, answers?: Record<string, PrototypeAnswerValue>) => void;
   saveReview: (review: AssessmentReview) => void;
   saveQualityReview: (review: QualityReview) => void;
   clearQualityReview: (taskId: string) => void;
@@ -125,11 +125,11 @@ export const useTaskStore = create<TaskStore>()(
           },
         })),
 
-      submitForm: (taskId, total) =>
+      submitForm: (taskId, total, answers) =>
         set((state) => ({
           submittedAnswers: {
             ...state.submittedAnswers,
-            [taskId]: { ...(state.formDrafts[taskId] ?? {}) },
+            [taskId]: { ...(answers ?? state.formDrafts[taskId] ?? {}) },
           },
           tasks: state.tasks.map((task) =>
             task.id === taskId

@@ -1,5 +1,5 @@
 import React from 'react';
-import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
+import { getStructuredAnswerDisplayValue, hasStructuredAnswerValue, isPendingManualAnswer } from '@/lib/structuredAnswer';
 import type { StructuredAnswer } from '@/lib/types';
 
 export function RecordedAnswersPanel({
@@ -15,11 +15,12 @@ export function RecordedAnswersPanel({
       <div className="shrink-0 border-b border-border p-5">
         <h2 className="text-xl font-bold">已记录信息</h2>
         <p className="mt-2 text-sm text-foreground-muted">
-          这里只显示 AI 已经实际写入评估记录的内容。
+          展示实际评估记录，人工题单独标明等待状态。
         </p>
         <p className="mt-3 text-sm">
-          当前已记录 <strong className="text-xl text-primary">{answers.length}</strong> 项
+          当前已记录 <strong className="text-xl text-primary">{answers.filter(hasStructuredAnswerValue).length}</strong> 项
         </p>
+        <p className="mt-2 text-sm text-foreground-muted">等待人工 {answers.filter(isPendingManualAnswer).length} 项</p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">

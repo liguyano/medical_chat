@@ -41,6 +41,7 @@ from app.schemas.events import (
 from app.services.agent_dispatch_service import dispatch_voice_answer_workers
 from app.services.dialog_audio_store import DialogAudioStore
 from app.services.dialog_tool_executor import execute_tool
+from app.services.manual_question_service import filter_manual_tasks
 from app.services.qwen_realtime_client import QwenRealtimeClient
 from app.services.tool_interaction_service import publish_tool_result
 from app.services.voice_turn_guard import VoiceTurnGuard
@@ -224,7 +225,9 @@ class VoiceGateway:
                 )
             redis = get_redis()
             plan = ScheduleTaskStore(redis).get_plan(session_no)
-            task_list = plan.tasks if plan is not None else []
+            task_list = await asyncio.to_thread(
+                filter_manual_tasks, plan.tasks if plan is not None else []
+            )
             base_instructions = build_system_prompt(
                 patient_info=patient_info,
                 task_list=task_list,

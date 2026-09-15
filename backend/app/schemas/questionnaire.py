@@ -39,6 +39,7 @@ class QuestionnaireQuestionDto(BaseModel):
     required: bool
     scored: bool
     derived: bool
+    manual_required: bool = False
     unit: str | None = None
     value_precision: int | None = None
     allow_other: bool = False

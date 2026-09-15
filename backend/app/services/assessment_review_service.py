@@ -22,6 +22,7 @@ from app.models.assessment_execution import (
 from app.models.assessment_template import AssessmentQuestion
 from app.models.patient_task import CareTask
 from app.schemas.assessment_review import AssessmentReviewRequest
+from app.services.manual_question_service import automatic_question_condition
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,21 @@ def submit_assessment_review(
     )
     if not instances:
         raise AppError(ErrorCode.ERR_COMMON_001, "当前任务没有可复核的评估实例")
+
+    if request.status == "confirmed":
+        # “等待人工”是状态，不能经最终确认接口变成正式的评估答案。
+        final_answers = request.final_answers or request.nurse_answers
+        manual_questions = db.scalars(select(AssessmentQuestion).where(
+            AssessmentQuestion.scale_version_id.in_([item.scale_version_id for item in instances]),
+            AssessmentQuestion.required.is_(True),
+            AssessmentQuestion.derived.is_(False),
+            AssessmentQuestion.deleted == 0,
+            ~automatic_question_condition(),
+        )).all()
+        for question in manual_questions:
+            value = final_answers.get(str(question.id), final_answers.get(question.question_code, ""))
+            if not value.strip() or value.strip() == "等待人工":
+                raise AppError(ErrorCode.ERR_COMMON_001, f"题目“{question.question_name}”等待人工填写后才能最终确认")
 
     nurse_submissions: list[AssessmentSubmission] = []
     final_submissions: list[AssessmentSubmission] = []

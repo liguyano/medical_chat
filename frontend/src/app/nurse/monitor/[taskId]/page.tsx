@@ -31,6 +31,8 @@ import {
 } from '@/lib/dialogue/monitorTimeline';
 import {
   getStructuredAnswerDisplayValue,
+  hasStructuredAnswerValue,
+  isPendingManualAnswer,
   getStructuredAnswerEvidenceMessages,
 } from '@/lib/structuredAnswer';
 import type { MessageFeedback, StructuredAnswer } from '@/lib/types';
@@ -600,7 +602,7 @@ export default function NurseMonitorDetailPage() {
           )}
 
           <Card padding="sm">
-            <h2 className="font-semibold mb-3">结构化答案</h2>
+            <h2 className="font-semibold mb-3">结构化答案 {answers.filter(hasStructuredAnswerValue).length} 项 · 等待人工 {answers.filter(isPendingManualAnswer).length} 项</h2>
             <div className="scrollbar-soft space-y-2 max-h-72 overflow-y-auto">
               {answers.map((answer) => {
                 const evidenceMessages = getStructuredAnswerEvidenceMessages(
@@ -612,11 +614,11 @@ export default function NurseMonitorDetailPage() {
                   <div className="flex justify-between gap-2">
                     <p className="text-xs text-foreground-muted">{answer.questionText}</p>
                     <Badge variant={answer.extractionConfidence < 0.8 ? 'warning' : 'success'} size="sm">
-                      {Math.round(answer.extractionConfidence * 100)}%
+                      {isPendingManualAnswer(answer) ? '等待人工' : `${Math.round(answer.extractionConfidence * 100)}%`}
                     </Badge>
                   </div>
                   <p className={cn('text-sm font-medium mt-1', answer.invalid && 'text-red-700')}>
-                    {answer.invalid
+                    {answer.invalid && !isPendingManualAnswer(answer)
                       ? `模型未识别：${answer.invalidReason ?? '请人工填写'}`
                       : getStructuredAnswerDisplayValue(answer)}
                   </p>

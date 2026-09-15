@@ -8,6 +8,7 @@ import { Button } from '@/components/shared/Button';
 import { Badge } from '@/components/shared/Badge';
 import { Progress } from '@/components/shared/Progress';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
+import { hasStructuredAnswerValue, isPendingManualAnswer } from '@/lib/structuredAnswer';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { getTaskById } from '@/lib/mock/data';
 import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
@@ -438,7 +439,7 @@ export default function TaskDetailPage() {
                         <div className="mt-3 flex flex-wrap gap-2">
                         {task.collectionMode === 'ai_dialogue' ? (
                           <>
-                            <Badge variant="info" size="sm">{structuredAnswers.length}项结构化答案</Badge>
+                            <Badge variant="info" size="sm">{structuredAnswers.filter(hasStructuredAnswerValue).length}项结构化答案 · 等待人工 {structuredAnswers.filter(isPendingManualAnswer).length}项</Badge>
                             <Badge variant={interactionEvents.some((event) => event.priority === 'high') ? 'danger' : 'warning'} size="sm">
                               {interactionEvents.length}项风险/宣教事件
                             </Badge>

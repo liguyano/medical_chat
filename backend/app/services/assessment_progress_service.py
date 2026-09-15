@@ -22,6 +22,7 @@ from app.models.assessment_execution import (
 from app.models.assessment_template import AssessmentQuestion
 from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask
+from app.services.manual_question_service import automatic_question_condition
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def refresh_assessment_progress(
     )
     required_ids: list[int] = []
     answered_ids: set[int] = set()
+    has_manual_required = False
     for instance in instances:
         instance_required = list(
             db.scalars(
@@ -105,12 +107,24 @@ def refresh_assessment_progress(
                     AssessmentQuestion.scale_version_id == instance.scale_version_id,
                     AssessmentQuestion.required.is_(True),
                     AssessmentQuestion.derived.is_(False),
+                    automatic_question_condition(),
                     AssessmentQuestion.deleted == 0,
                 )
                 .order_by(AssessmentQuestion.sort_no, AssessmentQuestion.id)
             ).all()
         )
         required_ids.extend(instance_required)
+        has_manual_required = has_manual_required or bool(
+            db.scalar(
+                select(AssessmentQuestion.id).where(
+                    AssessmentQuestion.scale_version_id == instance.scale_version_id,
+                    AssessmentQuestion.required.is_(True),
+                    AssessmentQuestion.derived.is_(False),
+                    ~automatic_question_condition(),
+                    AssessmentQuestion.deleted == 0,
+                ).limit(1)
+            )
+        )
         submission = db.scalar(
             select(AssessmentSubmission)
             .where(
@@ -164,7 +178,7 @@ def refresh_assessment_progress(
     progress = AssessmentProgress(
         current=len(answered_ids),
         total=len(ordered_required),
-        completed=bool(ordered_required) and not remaining,
+        completed=(bool(ordered_required) or has_manual_required) and not remaining,
         answered_question_ids=frozenset(answered_ids),
         remaining_question_ids=remaining,
     )

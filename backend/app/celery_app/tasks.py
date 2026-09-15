@@ -296,7 +296,9 @@ def dialog_agent_preheat(self, session_id: str, patient_info: dict, task_config:
                 return {"status": "failed", "reason": "unknown_engine_type"}
             redis = get_redis()
             plan = ScheduleTaskStore(redis).get_plan(session_id)
-            questions = plan.tasks if plan is not None else []
+            from app.services.manual_question_service import filter_manual_tasks
+
+            questions = filter_manual_tasks(plan.tasks if plan is not None else [])
             if plan is None:
                 raise RuntimeError(f"Schedule Task-todo 尚未就绪: {session_id}")
             if not questions:

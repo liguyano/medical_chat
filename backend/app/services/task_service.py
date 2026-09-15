@@ -35,6 +35,7 @@ from app.schemas.task import (
 from app.services.assessment_progress_service import (
     valid_assessment_answer_condition,
 )
+from app.services.manual_question_service import automatic_question_condition
 from app.services.task_preparation_service import (
     PREPARATION_STAGES,
     empty_preparation_detail,
@@ -252,6 +253,7 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
     else:
         initialize_traditional_preparation(task, now)
     session: InteractionSession | None = None
+    manual_only = False
     try:
         db.add(task)
         db.flush()
@@ -283,6 +285,32 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
                     started_at=now,
                 )
             )
+        # 全人工题无需调用模型或呼叫护士，直接进入等待医护复核的可见状态。
+        if session is not None:
+            version_ids = [version.id for _, version in selected_versions]
+            question_scope = (
+                AssessmentQuestion.scale_version_id.in_(version_ids),
+                AssessmentQuestion.required.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                AssessmentQuestion.deleted == 0,
+            )
+            manual_count = db.scalar(select(func.count(AssessmentQuestion.id)).where(
+                *question_scope, ~automatic_question_condition()
+            )) or 0
+            automatic_count = db.scalar(select(func.count(AssessmentQuestion.id)).where(
+                *question_scope, automatic_question_condition()
+            )) or 0
+            manual_only = manual_count > 0 and automatic_count == 0
+            if manual_only:
+                initialize_traditional_preparation(task, now)
+                task.task_status = "pending_review"
+                task.completed_at = now
+                session.session_status = "completed"
+                session.ended_at = now
+                for instance in db.scalars(select(AssessmentInstance).where(
+                    AssessmentInstance.task_id == task.id
+                )).all():
+                    instance.instance_status = "pending_nurse_review"
         db.commit()
         db.refresh(task)
         if session is not None:
@@ -292,7 +320,7 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         logger.exception("创建评估任务事务失败")
         raise
 
-    if session is not None:
+    if session is not None and not manual_only:
         from app.services.agent_dispatch_service import dispatch_opening_workers
 
         # AI 对话评估智能体任务派发。任务记录已提交，派发失败也要留下可重试状态。
@@ -421,6 +449,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
                     AssessmentQuestion.scale_version_id.in_(version_ids),
                     AssessmentQuestion.required.is_(True),
                     AssessmentQuestion.derived.is_(False),
+                    automatic_question_condition(),
                     AssessmentQuestion.deleted == 0,
                 )
             )
@@ -473,6 +502,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
                 AssessmentAnswer.deleted == 0,
                 AssessmentQuestion.required.is_(True),
                 AssessmentQuestion.derived.is_(False),
+                automatic_question_condition(),
                 valid_assessment_answer_condition(),
             )
         )
@@ -488,6 +518,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
                     AssessmentQuestion.scale_version_id == version.id,
                     AssessmentQuestion.required.is_(True),
                     AssessmentQuestion.derived.is_(False),
+                    automatic_question_condition(),
                     AssessmentQuestion.deleted == 0,
                 )
             )
@@ -512,6 +543,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
                     AssessmentAnswer.deleted == 0,
                     AssessmentQuestion.required.is_(True),
                     AssessmentQuestion.derived.is_(False),
+                    automatic_question_condition(),
                     valid_assessment_answer_condition(),
                 )
             )

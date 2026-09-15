@@ -4,10 +4,12 @@ import {
   mockScales,
   mockTasks,
 } from '@/lib/mock/data';
-import { getVisibleQuestions } from '@/lib/mock/assessment';
+import { getManualQuestionDraft } from '@/lib/manualQuestions';
+import { getVisibleQuestions, prototypeQuestions } from '@/lib/mock/assessment';
 import type {
   AssessmentScaleConfigDetail,
   AssessmentScaleConfigSummary,
+  AssessmentQuestion,
   AssessmentReport,
   CareTask,
   EducationMaterialConfig,
@@ -36,6 +38,7 @@ import type {
 } from '@/lib/repositories/types';
 
 const MOCK_DELAY_MS = 180;
+const MOCK_MANUAL_QUESTION_STORAGE_KEY = 'medical-chat.mock.manual-questions';
 
 const mockEducationMaterials: EducationMaterialConfig[] = [
   {
@@ -147,7 +150,22 @@ const mockScaleDetails: AssessmentScaleConfigDetail[] = mockScales.map(
         sort_no: 1,
       },
     ],
-    questions: [],
+    questions: getVisibleQuestions({}, [scale.id]).map((question, questionIndex) => ({
+      id: index * 100 + questionIndex + 1,
+      section_id: index * 100 + 1,
+      question_code: question.questionCode,
+      question_name: question.questionText,
+      original_text: question.questionText,
+      patient_text: question.questionText,
+      question_type: question.questionType,
+      value_type: question.questionType,
+      required: question.required,
+      scored: question.scored,
+      derived: question.derived,
+      allow_other: false,
+      validation_rule: question.validationRule ? { ...question.validationRule } : {},
+      sort_no: questionIndex + 1,
+    })),
     options: [],
     rules: [],
     actions: [],
@@ -156,6 +174,38 @@ const mockScaleDetails: AssessmentScaleConfigDetail[] = mockScales.map(
 
 const mockNursingPlans = new Map<string, NursingPlan>();
 const mockAssessmentReports = new Map<string, AssessmentReport[]>();
+
+function getPersistedManualQuestions(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(
+      window.sessionStorage.getItem(MOCK_MANUAL_QUESTION_STORAGE_KEY) ?? '{}'
+    ) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+function getConfiguredVisibleQuestions(
+  answers: Record<string, unknown>,
+  scaleIds?: string[]
+): AssessmentQuestion[] {
+  const manualByCode = new Map(
+    mockScaleDetails.flatMap((scale) =>
+      scale.questions.map((question) => [
+        question.question_code,
+        question.validation_rule?.manual_required === true,
+      ] as const)
+    )
+  );
+  Object.entries(getPersistedManualQuestions()).forEach(([code, manual]) =>
+    manualByCode.set(code, manual === true)
+  );
+  return getVisibleQuestions(answers, scaleIds).map((question) => ({
+    ...question,
+    manualRequired: manualByCode.get(question.questionCode) ?? false,
+  }));
+}
 
 function reportWithHistory(
   report: AssessmentReport,
@@ -722,7 +772,17 @@ export class MockCareRepository implements CareRepository {
       (item) => String(item.id) === scaleId
     );
     if (!detail) throw new Error('评估量表不存在');
-    return structuredClone(detail);
+    const result = structuredClone(detail);
+    const persisted = getPersistedManualQuestions();
+    result.questions.forEach((question) => {
+      if (Object.hasOwn(persisted, question.question_code)) {
+        question.validation_rule = {
+          ...question.validation_rule,
+          manual_required: persisted[question.question_code] === true,
+        };
+      }
+    });
+    return result;
   }
 
   async updateScaleConfig(
@@ -735,7 +795,27 @@ export class MockCareRepository implements CareRepository {
       (item) => String(item.id) === scaleId
     );
     if (index < 0) throw new Error('评估量表不存在');
+    getManualQuestionDraft(JSON.stringify(input));
     mockScaleDetails[index] = structuredClone(input);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(
+        MOCK_MANUAL_QUESTION_STORAGE_KEY,
+        JSON.stringify(
+          Object.fromEntries(
+            mockScaleDetails.flatMap((scale) =>
+              scale.questions.map((question) => [
+                question.question_code,
+                question.validation_rule?.manual_required === true,
+              ])
+            )
+          )
+        )
+      );
+    }
+    for (const configured of input.questions) {
+      const question = prototypeQuestions.find((item) => item.questionCode === configured.question_code);
+      if (question) question.manualRequired = configured.validation_rule?.manual_required === true;
+    }
     return structuredClone(mockScaleDetails[index]);
   }
 
@@ -1043,7 +1123,14 @@ export class MockCareRepository implements CareRepository {
     signal?: AbortSignal
   ): Promise<DialogueSnapshot> {
     await wait(signal);
-    return { session: buildEmptySession(task), answers: [], events: [] };
+    return {
+      session: buildEmptySession(task),
+      answers: getConfiguredVisibleQuestions({}, task.scaleIds).filter((question) => question.manualRequired).map((question) => ({
+        questionId: question.id, questionCode: question.questionCode, questionText: question.questionText,
+        manualRequired: true, sourceMessageIds: [], extractionConfidence: 0, corrected: false,
+      })),
+      events: [],
+    };
   }
 
   async updateManualField(
@@ -1084,7 +1171,7 @@ export class MockCareRepository implements CareRepository {
   ): Promise<QuestionnaireSnapshot> {
     await wait(signal);
     const task = mockTasks.find((item) => item.id === taskId);
-    const questions = getVisibleQuestions({}, task?.scaleIds);
+    const questions = getConfiguredVisibleQuestions({}, task?.scaleIds);
     return {
       taskId,
       taskNo: task?.taskNo ?? taskId,

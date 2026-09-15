@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from medagent.agents.service_agent.schedule_agent import QuestionOption, QuestionTask
 from sqlalchemy import select
@@ -22,6 +23,7 @@ from app.models.assessment_template import (
 )
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.services.assessment_progress_service import AssessmentProgress, refresh_assessment_progress
+from app.services.manual_question_service import automatic_question_condition
 
 # 明确表达“当前评估已经结束”的话术。单独的“谢谢/感谢配合”不算结束，降低误判。
 _CLOSING_PATTERNS = (
@@ -120,6 +122,7 @@ class VoiceTurnGuard:
                 AssessmentQuestion.id == question_id,
                 AssessmentQuestion.required.is_(True),
                 AssessmentQuestion.derived.is_(False),
+                automatic_question_condition(),
                 AssessmentQuestion.deleted == 0,
             )
         ).first()

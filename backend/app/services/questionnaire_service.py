@@ -41,6 +41,7 @@ from app.schemas.questionnaire import (
     QuestionnaireScoreDto,
 )
 from app.services.assessment_progress_service import valid_assessment_answer_condition
+from app.services.manual_question_service import automatic_question_condition, requires_manual
 
 _EMPTY_SUBMISSION_STATUSES = {"draft", "in_progress"}
 _FINAL_SUBMISSION_STATUSES = {"submitted", "completed", "confirmed"}
@@ -315,6 +316,7 @@ def _question_dto(
         required=question.required,
         scored=question.scored,
         derived=question.derived,
+        manual_required=requires_manual(question),
         unit=question.unit,
         value_precision=question.value_precision,
         allow_other=question.allow_other,
@@ -396,6 +398,19 @@ def _save_score(
     creator: str,
 ) -> QuestionnaireScoreDto:
     """按选项临床分值汇总提交结果并保存规则解释。"""
+    # 未完成的人工计分题不能当作 0 分，避免产生虚假的低风险结论。
+    manual_scored = db.scalar(select(AssessmentQuestion.id).where(
+        AssessmentQuestion.scale_version_id == version.id,
+        AssessmentQuestion.scored.is_(True),
+        AssessmentQuestion.deleted == 0,
+        ~automatic_question_condition(),
+    ).limit(1))
+    if manual_scored is not None:
+        submission.total_score = None
+        submission.risk_level = None
+        submission.result_summary = None
+        db.execute(delete(AssessmentScore).where(AssessmentScore.submission_id == submission.id))
+        return QuestionnaireScoreDto(scale_id=scale.id, scale_name=scale.scale_name)
     answers = db.scalars(
         select(AssessmentAnswer).where(
             AssessmentAnswer.id.in_(answer_ids),
@@ -772,7 +787,7 @@ def _save_answers(
     submissions_by_instance: dict[int, AssessmentSubmission] = {}
     for instance, _, version in instance_rows:
         total_questions = sum(
-            int(question.required and not question.derived)
+            int(question.required and not question.derived and not requires_manual(question))
             for _, _, row_version, question, _ in question_rows
             if row_version.id == version.id
         )
@@ -791,6 +806,8 @@ def _save_answers(
         if resolved is None:
             raise AppError(ErrorCode.ERR_COMMON_001, f"题目不存在: {raw_key}")
         instance, question = resolved
+        if requires_manual(question):
+            raise AppError(ErrorCode.ERR_COMMON_001, f"题目“{question.question_name}”等待人工，患者不能填写")
         if question.derived:
             raise AppError(
                 ErrorCode.ERR_COMMON_001,
@@ -815,7 +832,7 @@ def _save_answers(
         required_ids = [
             question.id
             for _, _, row_version, question, _ in question_rows
-            if row_version.id == version.id and question.required and not question.derived
+            if row_version.id == version.id and question.required and not question.derived and not requires_manual(question)
         ]
         answered_ids = set(
             db.scalars(

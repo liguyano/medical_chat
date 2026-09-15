@@ -19,6 +19,7 @@ from app.managers.dialog_history_manager import DialogHistoryManager
 from app.models import base as model_base
 from app.models.interaction import InteractionSession
 from app.schemas.events import ConstraintEvent
+from app.services.manual_question_service import filter_manual_tasks
 from app.utils.redis_client import RedisClient
 from app.workers.event_publisher import DialogEventPublisher
 from app.workers.schedule_task_store import ScheduleTaskStore
@@ -100,7 +101,9 @@ class ScheduleAgentRunner:
             }
 
         plan = task_store.get_plan(session_id)
-        planned_questions = plan.tasks if plan is not None and plan.tasks else questions
+        planned_questions = filter_manual_tasks(
+            plan.tasks if plan is not None and plan.tasks else questions
+        )
 
         lease = WorkerLease(
             self.redis,

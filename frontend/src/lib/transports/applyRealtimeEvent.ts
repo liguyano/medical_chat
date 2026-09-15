@@ -274,6 +274,7 @@ export function applyRealtimeEvent(event: SseEnvelope): void {
         const answer: StructuredAnswer = {
           questionId: String(raw.question_id ?? raw.field_id ?? ''),
           questionCode: String(raw.question_code ?? ''),
+          manualRequired: raw.manual_required === true,
           questionText: String(raw.question_text ?? raw.field_name ?? '评估字段'),
           answerType: raw.answer_type as StructuredAnswer['answerType'],
           options: Array.isArray(raw.options)

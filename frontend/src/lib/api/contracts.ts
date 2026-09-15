@@ -390,6 +390,7 @@ export interface QuestionnaireOptionDto {
 }
 
 export interface QuestionnaireQuestionDto {
+  manual_required?: boolean;
   id: ApiId;
   scale_id: ApiId;
   scale_name: string;
@@ -491,6 +492,7 @@ export interface DialogHistoryResponse {
 }
 
 export interface ExtractedFieldDto {
+  manual_required?: boolean;
   field_id?: ApiId;
   question_id: ApiId;
   question_code: string;

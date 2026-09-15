@@ -18,6 +18,8 @@ from app.models import (
     AssessmentSubmission,
 )
 from app.models import base as model_base
+from app.models.assessment_template import AssessmentQuestion
+from app.services.manual_question_service import automatic_question_condition
 
 logger = logging.getLogger(__name__)
 
@@ -426,6 +428,44 @@ class ExtractionResultWriter:
         """
         with self._new_session() as db:
             try:
+                from app.services.assessment_progress_service import (
+                    valid_assessment_answer_condition,
+                )
+
+                manual_scored_ids = set(
+                    db.scalars(
+                        select(AssessmentQuestion.id).where(
+                            AssessmentQuestion.scale_version_id == scale_version_id,
+                            AssessmentQuestion.scored.is_(True),
+                            AssessmentQuestion.derived.is_(False),
+                            ~automatic_question_condition(),
+                            AssessmentQuestion.deleted == 0,
+                        )
+                    ).all()
+                )
+                answered_manual_ids = set(
+                    db.scalars(
+                        select(AssessmentAnswer.question_id).where(
+                            AssessmentAnswer.submission_id == submission_id,
+                            AssessmentAnswer.question_id.in_(manual_scored_ids),
+                            AssessmentAnswer.deleted == 0,
+                            valid_assessment_answer_condition(),
+                        )
+                    ).all()
+                )
+                if manual_scored_ids - answered_manual_ids:
+                    db.query(AssessmentScore).filter(
+                        AssessmentScore.submission_id == submission_id
+                    ).delete()
+                    submission = db.get(AssessmentSubmission, submission_id)
+                    if submission is not None:
+                        submission.total_score = None
+                        submission.risk_level = None
+                        submission.result_summary = None
+                        submission.updator = creator
+                    db.commit()
+                    return []
+
                 answers = (
                     db.execute(
                         select(AssessmentAnswer).where(

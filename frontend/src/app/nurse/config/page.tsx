@@ -13,6 +13,7 @@ import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
 import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
+import { getManualQuestionDraft, setManualQuestionDraft } from '@/lib/manualQuestions';
 import { careRepository } from '@/lib/repositories';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import type {
@@ -86,6 +87,12 @@ export default function NurseConfigPage() {
   >([]);
   const [selectedScaleId, setSelectedScaleId] = useState('');
   const [scaleJson, setScaleJson] = useState('');
+  let manualQuestions: AssessmentScaleConfigDetail['questions'] = [];
+  let manualDraftError = '';
+  if (scaleJson) {
+    try { manualQuestions = getManualQuestionDraft(scaleJson).questions; }
+    catch (reason) { manualDraftError = reason instanceof Error ? reason.message : '请先修正 JSON'; }
+  }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -250,7 +257,7 @@ export default function NurseConfigPage() {
     setError('');
     setMessage('');
     try {
-      const parsed = JSON.parse(scaleJson) as AssessmentScaleConfigDetail;
+      const parsed = getManualQuestionDraft(scaleJson);
       if (String(parsed.id) !== selectedScaleId) {
         throw new Error('JSON 中的量表编号与当前选择不一致');
       }
@@ -811,6 +818,20 @@ export default function NurseConfigPage() {
                     </Badge>
                   )}
                 </div>
+                <fieldset className="mt-5 rounded-xl border border-border p-4">
+                  <legend className="px-2 font-medium">人工题设置</legend>
+                  <p className="mb-3 text-sm text-foreground-muted">勾选后患者与 AI 跳过此题，显示“等待人工”；不触发呼叫护士。保存配置后生效。</p>
+                  {manualDraftError ? <p role="alert" className="text-sm text-red-700">请先修正 JSON：{manualDraftError}</p> : manualQuestions.map((question) => (
+                    <label key={question.id} className="flex items-center gap-3 py-2 text-sm">
+                      <input type="checkbox" checked={question.validation_rule?.manual_required === true} disabled={question.derived || saving}
+                        onChange={(event) => {
+                          try { setScaleJson(setManualQuestionDraft(scaleJson, question.id, event.target.checked)); }
+                          catch (reason) { setError(errorMessage(reason)); }
+                        }} />
+                      <span>{question.patient_text || question.question_name} {question.derived ? '（系统计算题无需人工标记）' : ''}</span>
+                    </label>
+                  ))}
+                </fieldset>
                 <textarea
                   aria-label="量表完整 JSON 配置"
                   spellCheck={false}

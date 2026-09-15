@@ -17,6 +17,7 @@ interface QuestionCardProps {
   onChange: (value: AnswerValue) => void;
   error?: string;
   animate?: boolean;
+  manualDisplayValue?: string;
 }
 
 export default function QuestionCard({
@@ -25,6 +26,7 @@ export default function QuestionCard({
   onChange,
   error,
   animate = true,
+  manualDisplayValue,
 }: QuestionCardProps) {
   const inputValue =
     typeof value === 'string' || typeof value === 'number' ? value : '';
@@ -39,6 +41,9 @@ export default function QuestionCard({
   };
 
   const renderInput = () => {
+    if (question.manualRequired) {
+      return <p className="rounded-xl border border-border bg-surface-secondary px-4 py-3 text-sm">{manualDisplayValue || '等待人工'}</p>;
+    }
     if (question.derived) {
       return (
         <div className="rounded-xl border border-dashed border-border bg-surface-secondary px-4 py-3 text-sm text-foreground-muted">
@@ -240,7 +245,7 @@ export default function QuestionCard({
         <h3 className="min-w-0 flex-1 text-[17px] font-bold leading-7 text-foreground">
           {question.questionText}
         </h3>
-        {question.required && (
+        {question.required && !question.manualRequired && !question.derived && (
           <Badge variant="danger" size="sm">
             必填
           </Badge>

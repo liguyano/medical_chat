@@ -19,6 +19,7 @@ class ExtractedFieldDto(BaseModel):
     question_text: str = Field(..., description="问题文本")
     answer_type: str = Field(default="text", description="统一答案类型")
     options: list[dict] = Field(default_factory=list, description="可选答案项")
+    manual_required: bool = Field(default=False, description="题库指定人工采集，不代表已有答案")
     answer_text: str | None = Field(default=None, description="文本答案")
     answer_number: float | None = Field(default=None, description="数值答案")
     answer_boolean: bool | None = Field(default=None, description="布尔答案")

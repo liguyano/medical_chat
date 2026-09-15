@@ -16,14 +16,15 @@ from app.errors.handlers import AppError
 from app.models.assessment_execution import (
     AssessmentAnswer,
     AssessmentAnswerOption,
+    AssessmentInstance,
     AssessmentSubmission,
 )
 from app.models.assessment_template import AssessmentOption, AssessmentQuestion
 from app.models.interaction import InteractionSession
 from app.models.patient_task import CareTask
-from app.models.assessment_execution import AssessmentInstance
-from app.services.assessment_progress_service import refresh_assessment_progress
 from app.schemas.extraction import ExtractedFieldDto, ExtractedFieldsResponse
+from app.services.assessment_progress_service import refresh_assessment_progress
+from app.services.manual_question_service import requires_manual
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +204,7 @@ def get_extracted_fields(
                 question_id=answer.question_id,
                 question_code=question.question_code,
                 question_text=question.question_name,
+                manual_required=requires_manual(question),
                 answer_type=answer.answer_type,
                 options=option_definitions.get(answer.question_id, []),
                 answer_text=answer.answer_text,
@@ -236,6 +238,7 @@ def get_extracted_fields(
                     question_id=question.id,
                     question_code=question.question_code,
                     question_text=question.question_name,
+                    manual_required=requires_manual(question),
                     answer_type=question.question_type,
                     options=option_definitions.get(question.id, []),
                     source_message_ids=None,
@@ -254,6 +257,7 @@ def get_extracted_fields(
         fields.append(
             ExtractedFieldDto(
                 field_id=f"pending-{question.id}",
+                manual_required=requires_manual(question),
                 question_id=question.id,
                 question_code=question.question_code,
                 question_text=question.question_name,
@@ -372,7 +376,7 @@ def update_manual_field(
         else None
     )
     answer.source_message_ids = ["manual"]
-    answer.extraction_confidence = Decimal("1")
+    answer.extraction_confidence = Decimal(1)
     answer.value_source = "nurse_corrected"
     answer.updator = f"staff:{staff_id}"
     db.flush()

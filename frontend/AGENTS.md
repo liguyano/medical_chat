@@ -91,6 +91,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 传统问卷患者进度只统计必填且非派生题；派生题只读展示。医护复核页展示患者答案真实标签、
   计分和风险解释，不渲染 AI 证据或虚构的人机差异。API 与 Mock Repository 保持同一问卷
   接口，后端返回的选项编码仅用于请求和审计，用户界面优先展示标签/值。
+- 量表题目的 `validation_rule.manual_required === true` 表示该题必须由医护填写。患者问卷与
+  AI 对话均显示“等待人工”，不提供患者输入、不计入患者或 AI 进度；已有医护真实答案应显示
+  真实值。配置勾选与完整 JSON 必须双向同步，Mock 与 API 模式行为保持一致。
 - `/nurse/tasks/[id]/nursing-plan` 通过 `CareRepository` 查询和生成患者画像与护理计划，
   支持摘要编辑、计划项接受/修改/拒绝、护士备注和最终确认；API 与 Mock 模式保持同一
   闭环。真实模型生成接口单独使用 120 秒超时，避免普通请求超时提前中断结果展示。

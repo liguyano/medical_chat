@@ -8,6 +8,7 @@ import { Card } from '@/components/shared/Card';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { getStructuredAnswerDisplayValue, hasStructuredAnswerValue } from '@/lib/structuredAnswer';
 import { prototypeQuestions } from '@/lib/mock/assessment';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
@@ -72,9 +73,9 @@ export default function NurseReviewPage() {
     }
     if (task?.collectionMode === 'ai_dialogue') {
       return Object.fromEntries(
-        (aiAnswers ?? []).map((answer) => [
+        (aiAnswers ?? []).filter(hasStructuredAnswerValue).map((answer) => [
           answer.questionId,
-          answerText(answer.answerText ?? answer.answerNumber ?? answer.answerBoolean),
+          getStructuredAnswerDisplayValue(answer),
         ])
       );
     }
@@ -86,7 +87,7 @@ export default function NurseReviewPage() {
   const reviewQuestions = useMemo(() => {
     if (apiMode && task?.collectionMode === 'traditional_form' && questionnaire) {
       return questionnaire.questions.filter((question) =>
-        Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
+        question.manualRequired || Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
       );
     }
     if (task?.collectionMode === 'ai_dialogue') {
@@ -94,12 +95,13 @@ export default function NurseReviewPage() {
         id: answer.questionId,
         questionText: answer.questionText,
         sectionName: 'AI 对话量表',
+        manualRequired: answer.manualRequired,
       }));
     }
     return prototypeQuestions.filter((question) =>
-      Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
+      question.manualRequired || Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
     );
-  }, [apiMode, questionnaire, sourceAnswers, task?.collectionMode]);
+  }, [aiAnswers, apiMode, questionnaire, sourceAnswers, task?.collectionMode]);
   const [nurseAnswers, setNurseAnswers] = useState<Record<string, string>>(
     existingReview?.nurseAnswers ?? {}
   );
@@ -179,7 +181,7 @@ export default function NurseReviewPage() {
           </div>
           <div className="flex gap-2">
             <IntegrationStatus compact />
-            <Badge variant="info">{reviewQuestions.length}项答案</Badge>
+            <Badge variant="info">{Object.values(sourceAnswers).filter(Boolean).length}项答案 · 等待人工 {reviewQuestions.filter((question) => question.manualRequired && !sourceAnswers[question.id]).length}项</Badge>
             <Badge variant={differences.length ? 'warning' : 'success'}>{differences.length}项差异</Badge>
           </div>
         </div>
@@ -220,7 +222,7 @@ export default function NurseReviewPage() {
                   <h2 className="font-semibold mt-1">{question.questionText}</h2>
                 </div>
                 <Badge variant={different ? 'warning' : 'success'} size="sm">
-                  {different ? '存在修正' : '一致'}
+                  {question.manualRequired && !source && !nurse ? '等待人工' : different ? '存在修正' : '一致'}
                 </Badge>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -228,7 +230,7 @@ export default function NurseReviewPage() {
                   <p className="text-xs text-foreground-muted">
                     {task.collectionMode === 'ai_dialogue' ? 'AI结构化答案' : '患者提交答案'}
                   </p>
-                  <p className="font-medium mt-2">{source || '未采集'}</p>
+                  <p className="font-medium mt-2">{source || (question.manualRequired ? '等待人工' : '未采集')}</p>
                   {sourceMessages?.length && (
                     <Link
                       href={`/nurse/monitor/${taskId}`}

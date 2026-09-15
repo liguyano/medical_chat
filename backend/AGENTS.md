@@ -369,6 +369,17 @@ from medagent.configs.agent_config import get_agent_config
 
 ## 传统问卷评估边界
 
+- 题库 `validation_rule.manual_required=true` 为严格布尔人工采集标记，缺省 false；
+  统一判定由 `manual_question_service` 提供。标记本身不写答案，不调用呼叫护士接口，
+  不发布 `handoff_requested`。配置页可修改普通题标记，历史 JSON 数值/字符串不能当 true。
+- 人工题从 Schedule/Dialog/Extraction 的题单、旧 Redis 计划及患者/AI 必填进度排除；
+  问卷及抽取 DTO 的 `manual_required` 只表达题库状态，患者不能提交人工题答案。
+  无真实值时前端显示“等待人工”；不生成虚构回答、0 分或风险结论。
+- 新建全人工 AI 任务不启动首问模型流水线，直接可见并进入 `pending_review`，
+  会话为 completed，表示 AI 无需继续采集；医护最终确认仍需填写必填人工题真实值。
+- 本次从用户指定 `bf5ebbf` 开发，不包含后续人工审核通知/语音收尾功能，
+  不得为了显示人工题恢复原来的呼叫护士联动。
+
 - 传统问卷任务的 `collection_mode` 为 `traditional_form`，创建后直接对患者可见，
   不创建 `interaction_session`，也不进入 AI 首问准备流水线。
 - 问卷只读取任务 `assessment_instance` 绑定的量表版本和题目快照；患者提交使用

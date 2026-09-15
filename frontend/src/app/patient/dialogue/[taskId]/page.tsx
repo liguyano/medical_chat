@@ -18,7 +18,9 @@ import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
 import { createClientInvocationId } from '@/lib/clientInvocation';
-import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
+import { getMockPatientQuestionIndices } from '@/lib/manualQuestions';
+import { prototypeQuestions } from '@/lib/mock/assessment';
+import { getStructuredAnswerDisplayValue, hasStructuredAnswerValue, isPendingManualAnswer } from '@/lib/structuredAnswer';
 import {
   buildDialogueSnapshotKey,
   isDialogueSnapshotLoading,
@@ -58,7 +60,7 @@ interface ScriptResult {
   complete?: boolean;
 }
 
-const totalQuestions = 7;
+const fallbackTotalQuestions = 7;
 
 function buildScriptResult(answerIndex: number, content: string): ScriptResult {
   const normalized = content.trim();
@@ -215,6 +217,8 @@ export default function PatientDialoguePage() {
   const educationCards = useChatStore((state) => state.educationCards);
   const consentRequests = useChatStore((state) => state.consentRequests);
   const answers = structuredAnswers[taskId] ?? [];
+  const mockQuestionIndices = getMockPatientQuestionIndices(prototypeQuestions);
+  const totalQuestions = runtimeConfig.dataMode === 'mock' ? mockQuestionIndices.length : fallbackTotalQuestions;
   const historyTimeline = useMemo(
     () =>
       buildDialogueHistoryTimeline({
@@ -347,6 +351,12 @@ export default function PatientDialoguePage() {
         messages: [welcome],
       };
       setSession(taskId, nextSession);
+      const currentAnswers = useChatStore.getState().structuredAnswers[taskId] ?? [];
+      const manualFields = prototypeQuestions.filter((question) => question.manualRequired && !currentAnswers.some((answer) => answer.questionId === question.id)).map((question) => ({
+        questionId: question.id, questionCode: question.questionCode, questionText: question.questionText,
+        manualRequired: true, sourceMessageIds: [], extractionConfidence: 0, corrected: false,
+      }));
+      useChatStore.getState().setStructuredAnswers(taskId, [...currentAnswers, ...manualFields]);
       updateTask(taskId, {
         sessionId,
         ...(readOnly
@@ -391,7 +401,7 @@ export default function PatientDialoguePage() {
           ...(readOnly
             ? {}
             : {
-                taskStatus: 'in_progress' as const,
+                taskStatus: snapshot.session.sessionStatus === 'completed' ? 'pending_review' as const : 'in_progress' as const,
                 currentStage: snapshot.session.currentCicareStage,
                 progress: {
                   current: snapshot.session.answeredQuestionCount ?? 0,
@@ -419,6 +429,7 @@ export default function PatientDialoguePage() {
     readOnly,
     setSession,
     taskId,
+    totalQuestions,
     updateTask,
   ]);
 
@@ -567,7 +578,17 @@ export default function PatientDialoguePage() {
       return;
     }
 
-    const result = buildScriptResult(patientAnswerCount, content);
+    const scriptIndex = mockQuestionIndices[patientAnswerCount];
+    if (scriptIndex === undefined) return;
+    const result = buildScriptResult(scriptIndex, content);
+    const nextScriptIndex = mockQuestionIndices[patientAnswerCount + 1];
+    if (nextScriptIndex === undefined) {
+      result.complete = true;
+      result.stage = 'exit';
+      result.content = '感谢您的配合。本次评估已完成并提交护士复核。人工题保持等待人工。';
+    } else if (nextScriptIndex !== scriptIndex + 1) {
+      result.content = buildScriptResult(nextScriptIndex - 1, '').content;
+    }
     if (result.answer) {
       upsertAnswer(taskId, {
         ...result.answer,
@@ -594,7 +615,7 @@ export default function PatientDialoguePage() {
     if (!latestSession) return;
     const answered = Math.min(patientAnswerCount + 1, totalQuestions);
     const summary = result.complete
-      ? '患者已完成入院评估，系统记录了年龄、过敏史、活动能力、跌倒风险、吸烟情况以及主要不适，需护士复核。'
+      ? '患者已完成可回答的入院评估问题，已记录实际回答，人工题等待护士填写。'
       : latestSession.aiSummary;
     setSession(taskId, {
       ...latestSession,
@@ -1153,7 +1174,7 @@ export default function PatientDialoguePage() {
           {answers.length > 0 && (
             <details className="patient-card mt-3 p-4">
               <summary className="cursor-pointer font-bold">
-                查看已记录信息（{answers.length} 项）
+                查看已记录信息（{answers.filter(hasStructuredAnswerValue).length} 项），等待人工 {answers.filter(isPendingManualAnswer).length} 项
               </summary>
               <div className="mt-3 space-y-2">
                 {answers.map((answer) => (

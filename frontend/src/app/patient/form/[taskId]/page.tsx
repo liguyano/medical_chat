@@ -11,6 +11,7 @@ import { Button } from '@/components/shared/Button';
 import { Progress } from '@/components/shared/Progress';
 import { Badge } from '@/components/shared/Badge';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
+import { patientAnswerValues } from '@/lib/manualQuestions';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
@@ -43,10 +44,10 @@ export default function PatientFormPage() {
   >('idle');
   const [submitError, setSubmitError] = useState('');
   const [questionnaire, setQuestionnaire] = useState<QuestionnaireSnapshot | null>(null);
-  const [questionnaireLoading, setQuestionnaireLoading] = useState(apiMode);
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
 
   useEffect(() => {
-    if (!apiMode || !task) return;
+    if (!task) return;
     const controller = new AbortController();
     void careRepository
       .getQuestionnaire(taskId, controller.signal)
@@ -85,7 +86,7 @@ export default function PatientFormPage() {
     const timer = globalThis.setTimeout(() => {
       setDraftStatus('saving');
       void careRepository
-        .saveQuestionnaireDraft(taskId, answers, controller.signal)
+        .saveQuestionnaireDraft(taskId, patientAnswerValues(questionnaire?.questions ?? getVisibleQuestions(answers, task?.scaleIds), answers), controller.signal)
         .then(() => setDraftStatus('saved'))
         .catch(() => {
           if (!controller.signal.aborted) setDraftStatus('error');
@@ -95,19 +96,13 @@ export default function PatientFormPage() {
       globalThis.clearTimeout(timer);
       controller.abort();
     };
-  }, [answers, apiMode, questionnaire, taskId]);
+  }, [answers, apiMode, questionnaire, taskId, task?.scaleIds]);
 
   const visibleQuestions = useMemo(
     () => {
-      if (apiMode) {
-        return questionnaire?.questions ?? [];
-      }
-      return getVisibleQuestions(
-        answers,
-        task?.scaleIds ?? (task?.scaleId ? [task.scaleId] : undefined)
-      );
+      return questionnaire?.questions ?? [];
     },
-    [answers, apiMode, questionnaire, task]
+    [questionnaire]
   );
   const sections = useMemo(
     () =>
@@ -122,7 +117,7 @@ export default function PatientFormPage() {
   const safeSectionIndex = Math.min(currentSection, Math.max(sectionNames.length - 1, 0));
   const currentQuestions = sections[sectionNames[safeSectionIndex]] ?? [];
   const requiredQuestions = visibleQuestions.filter(
-    (question) => question.required && !question.derived
+    (question) => question.required && !question.derived && !question.manualRequired
   );
   const answeredCount = requiredQuestions.filter((question) => {
     const answer = answers[question.id];
@@ -130,6 +125,7 @@ export default function PatientFormPage() {
   }).length;
 
   const handleAnswer = (questionId: string, value: PrototypeAnswerValue) => {
+    if (visibleQuestions.find((question) => question.id === questionId)?.manualRequired) return;
     const previousValue = answers[questionId];
     const wasAnswered = Array.isArray(previousValue)
       ? previousValue.length > 0
@@ -152,6 +148,7 @@ export default function PatientFormPage() {
   const validateSection = () => {
     const nextErrors: Record<string, string> = {};
     currentQuestions.forEach((question) => {
+      if (question.manualRequired || question.derived) return;
       const answer = answers[question.id];
       if (
         question.required &&
@@ -203,15 +200,9 @@ export default function PatientFormPage() {
     setIsSubmitting(true);
     setSubmitError('');
     try {
-      const backendAnswers = apiMode
-        ? Object.fromEntries(
-            visibleQuestions
-              .filter((question) => answers[question.id] !== undefined)
-              .map((question) => [question.id, answers[question.id]])
-          )
-        : answers;
+      const backendAnswers = patientAnswerValues(visibleQuestions, answers);
       await careRepository.submitQuestionnaire(taskId, backendAnswers);
-      submitForm(taskId, requiredQuestions.length);
+      submitForm(taskId, requiredQuestions.length, backendAnswers);
       if (task?.consentRequired) {
         updateTask(taskId, { taskStatus: 'in_progress' });
       }
@@ -295,11 +286,11 @@ export default function PatientFormPage() {
               <div className="flex items-center gap-2">
                 <IntegrationStatus compact />
                 <Badge variant="primary" size="sm">
-                  {answeredCount}/{requiredQuestions.length}
+                  {answeredCount}/{requiredQuestions.length} · 等待人工 {visibleQuestions.filter((question) => question.manualRequired && !questionnaire?.answers.some((answer) => answer.questionId === question.id)).length} 项
                 </Badge>
               </div>
             </div>
-            <Progress value={answeredCount} max={requiredQuestions.length} size="md" />
+            <Progress value={answeredCount} max={requiredQuestions.length || 1} size="md" />
             <div className="mt-2 flex items-center gap-1 text-xs text-green-700">
               <CloudArrowUpIcon className="w-4 h-4" />
               {draftStatus === 'saving'
@@ -322,6 +313,7 @@ export default function PatientFormPage() {
               key={question.id}
               question={question}
               value={answers[question.id]}
+              manualDisplayValue={questionnaire?.answers.find((answer) => answer.questionId === question.id)?.displayValue}
               onChange={(value) => handleAnswer(question.id, value)}
               error={errors[question.id]}
             />

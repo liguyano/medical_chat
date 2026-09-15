@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -36,6 +37,7 @@ from app.services.assessment_progress_service import (
     refresh_assessment_progress,
     valid_assessment_answer_condition,
 )
+from app.services.manual_question_service import filter_manual_tasks
 from app.utils.redis_client import RedisClient
 from app.workers.dialog_output_store import DialogOutputStore
 from app.workers.event_publisher import DialogEventPublisher
@@ -117,6 +119,7 @@ class DialogAgentRunner:
             if plan is not None and plan.tasks
             else await self.loader.load_questions_by_scale_codes(self.scale_codes)
         )
+        questions = await asyncio.to_thread(filter_manual_tasks, questions)
         if not questions:
             return {"status": "failed", "reason": "no_questions_loaded"}
         self._load_session_context()
