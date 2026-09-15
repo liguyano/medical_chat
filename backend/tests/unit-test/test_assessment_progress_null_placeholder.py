@@ -44,7 +44,9 @@ def test_literal_null_text_is_unanswered_but_real_values_remain_valid():
                 (2, ' NULL ', NULL, NULL, NULL, NULL, NULL, 0.95),
                 (3, '正常进食', NULL, NULL, NULL, NULL, NULL, 0.95),
                 (4, NULL, NULL, NULL, NULL, NULL, NULL, 0.95),
-                (5, NULL, 0, NULL, NULL, NULL, NULL, 0.95)
+                (5, NULL, 0, NULL, NULL, NULL, NULL, 0.95),
+                (6, '', NULL, NULL, NULL, NULL, NULL, 0.95),
+                (7, NULL, NULL, 0, NULL, NULL, NULL, 0.95)
             """
         )
 
@@ -54,4 +56,4 @@ def test_literal_null_text_is_unanswered_but_real_values_remain_valid():
             .order_by(AssessmentAnswer.id)
         ).scalars().all()
 
-    assert valid_ids == [3, 5]
+    assert valid_ids == [3, 5, 7]
