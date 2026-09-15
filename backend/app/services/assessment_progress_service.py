@@ -43,13 +43,14 @@ MIN_VALID_EXTRACTION_CONFIDENCE = Decimal("0.6")
 
 def valid_assessment_answer_condition() -> ColumnElement[bool]:
     """构建有效结构化答案条件。
-    作用：空答案、空文本和低置信度 AI 抽取不得推进完成进度；
+    作用：空答案、空文本、文本 null 占位和低置信度 AI 抽取不得推进完成进度；
     布尔 False、数值 0、日期时间和有效选择项均属于有效答案。
     """
     has_value = or_(
         and_(
             AssessmentAnswer.answer_text.is_not(None),
             func.length(func.trim(AssessmentAnswer.answer_text)) > 0,
+            func.lower(func.trim(AssessmentAnswer.answer_text)) != "null",
         ),
         AssessmentAnswer.answer_number.is_not(None),
         AssessmentAnswer.answer_boolean.is_not(None),
