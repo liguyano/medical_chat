@@ -1068,7 +1068,7 @@ async def test_voice_gateway_keeps_non_education_schedule_guidance(
     tmp_path: Path,
     monkeypatch,
 ):
-    """普通调度约束仍应正常下发，避免关闭宣教误伤其他 Schedule 能力。"""
+    """兼容入口仍可手动下发普通 Schedule guidance，但正常语音流程不再调用。"""
     gateway = VoiceGateway()
     session = make_session(tmp_path)
     monkeypatch.setattr(
@@ -1178,11 +1178,11 @@ def _mock_voice_gateway_connect_dependencies(
 
 
 @pytest.mark.asyncio
-async def test_reenter_partial_session_connects_with_only_first_remaining_question(
+async def test_reenter_partial_session_connects_with_all_remaining_questions(
     tmp_path: Path,
     monkeypatch,
 ):
-    """重新进入 20/22 会话时，Qwen 初始化只允许看到首个 null/remaining 问题。"""
+    """重新进入 20/22 会话时，只暴露全部 remaining，不进入逐题恢复模式。"""
     gateway = VoiceGateway()
     q1 = _question_task(1, "已经回答过的问题")
     q21 = _question_task(21, "夜间路灯和楼道照明是否良好？")
@@ -1218,14 +1218,15 @@ async def test_reenter_partial_session_connects_with_only_first_remaining_questi
     client.connect.assert_awaited_once()
     connect_prompt = client.connect.await_args.kwargs["instructions"]
 
-    assert "会话恢复模式" in connect_prompt
     assert "夜间路灯和楼道照明是否良好" in connect_prompt
+    assert "室内楼梯是否有可用扶手" in connect_prompt
     assert "已经回答过的问题" not in connect_prompt
-    assert "室内楼梯是否有可用扶手" not in connect_prompt
-    assert "当前唯一允许询问的问题" in connect_prompt
-    assert session.recovery_mode_active is True
-    assert session.recovery_instruction_active is True
-    assert session.recovery_current_question_id == 21
+    assert "当前唯一允许询问的问题" not in connect_prompt
+    assert "实时语音剩余评估范围" in connect_prompt
+    assert "会话恢复模式" not in connect_prompt
+    assert session.recovery_mode_active is False
+    assert session.recovery_instruction_active is False
+    assert session.recovery_current_question_id is None
     assert len(session.task_list) == 3
 
 
@@ -1234,7 +1235,7 @@ async def test_new_zero_progress_session_still_uses_normal_task_prompt(
     tmp_path: Path,
     monkeypatch,
 ):
-    """全新 0/N 会话仍按正常流程启动，不误进入恢复模式。"""
+    """全新 0/N 会话把全部未回答项交给 Realtime，自然启动且不进入恢复模式。"""
     gateway = VoiceGateway()
     q1 = _question_task(1, "第一个正常问题")
     q2 = _question_task(2, "第二个正常问题")
