@@ -59,6 +59,35 @@ MAX_AUDIO_BUFFER_BYTES = 12 * 1024 * 1024
 INPUT_PRE_ROLL_BYTES = 32_000
 VOICE_CLOSE_RECOVERY_POLL_SECONDS = 0.25
 VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS = 20.0
+VOICE_ASSESSMENT_FINISH_TOOL_NAME = "request_assessment_finish"
+VOICE_ASSESSMENT_FINISH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": VOICE_ASSESSMENT_FINISH_TOOL_NAME,
+        "description": (
+            "当你认为当前护理评估的患者可回答项目已经全部收集完毕、准备向患者宣布"
+            "评估完成或结束前，必须先调用此工具。后端会以结构化评估进度决定是否允许"
+            "结束；若未完成，会返回唯一允许继续询问的下一项。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    },
+}
+VOICE_TOOLS = [*DIALOG_TOOLS, VOICE_ASSESSMENT_FINISH_TOOL]
+VOICE_ASSESSMENT_FINISH_RULES = (
+    "【实时语音结束确认规则】\n"
+    "当你认为当前护理评估已经全部问完，准备说‘评估完成’、‘都问完了’、"
+    "‘今天先到这里’、请患者休息或其他结束性话术时，必须先原生调用 "
+    f"{VOICE_ASSESSMENT_FINISH_TOOL_NAME}。\n"
+    "在工具明确返回 completed=true 之前，不得直接宣布评估完成，不得向患者告别，"
+    "也不得暗示所有问题已经问完。\n"
+    "若工具返回 completed=false，严格继续处理系统指定的 next_question，"
+    "不得自行选择其他问题，也不得结束评估。\n"
+    "若工具返回 success=false，说明完成状态尚未被系统确认；不得结束评估。"
+)
 
 
 @dataclass
@@ -228,9 +257,13 @@ class VoiceGateway:
             task_list = await asyncio.to_thread(
                 filter_manual_tasks, plan.tasks if plan is not None else []
             )
-            base_instructions = build_system_prompt(
-                patient_info=patient_info,
-                task_list=task_list,
+            base_instructions = (
+                build_system_prompt(
+                    patient_info=patient_info,
+                    task_list=task_list,
+                )
+                + "\n\n"
+                + VOICE_ASSESSMENT_FINISH_RULES
             )
 
             initial_recovery_mode = False
@@ -302,7 +335,7 @@ class VoiceGateway:
             turn_detection = str(voice_extra.get("turn_detection") or "server_vad")
             await client.connect(
                 instructions=connect_instructions,
-                tools=DIALOG_TOOLS,
+                tools=VOICE_TOOLS,
                 turn_detection=turn_detection,
                 vad_threshold=float(voice_extra.get("vad_threshold", 0.1)),
                 silence_duration_ms=int(
@@ -1606,6 +1639,129 @@ class VoiceGateway:
             session.recovery_answer_response_pending = False
             session.next_response_is_recovery = False
 
+    async def _handle_assessment_finish_tool(
+        self,
+        session: VoiceSession,
+    ) -> dict[str, Any]:
+        """模型准备结束时，以权威结构化进度决定是否允许结束或进入既有恢复补问。"""
+        source_message_no = await asyncio.to_thread(
+            VoiceTurnGuard.latest_patient_message_no,
+            session.session_no,
+        )
+        waited = 0.0
+        while not VoiceTurnGuard.extraction_processed(
+            session.redis,
+            session.session_no,
+            source_message_no,
+        ):
+            if session.closed:
+                return {
+                    "success": False,
+                    "completed": False,
+                    "message": "语音会话已经关闭，无法确认评估完成状态。",
+                }
+            if waited >= VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS:
+                logger.warning(
+                    "语音结束检查等待 Extraction 超时: session=%s source=%s",
+                    session.session_no,
+                    source_message_no,
+                )
+                return {
+                    "success": False,
+                    "completed": False,
+                    "message": (
+                        "最新回答仍在结构化处理中，当前不得宣布评估完成；"
+                        "请等待系统确认后再结束。"
+                    ),
+                }
+            await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
+            waited += VOICE_CLOSE_RECOVERY_POLL_SECONDS
+
+        decision = await asyncio.to_thread(
+            VoiceTurnGuard.build_recovery_decision,
+            session.session_no,
+            session.task_list,
+        )
+        progress = decision.progress
+        if progress.completed:
+            logger.info(
+                "语音模型结束检查通过: session=%s progress=%s/%s",
+                session.session_no,
+                progress.current,
+                progress.total,
+            )
+            return {
+                "success": True,
+                "completed": True,
+                "current": progress.current,
+                "total": progress.total,
+                "remaining_count": 0,
+                "message": "结构化评估已确认完成，可以向患者礼貌结束本次评估。",
+            }
+
+        if decision.next_question is None:
+            mapping_error_instructions = self._build_recovery_mapping_error_instructions()
+            await session.client.update_instructions(mapping_error_instructions)
+            session.recovery_mode_active = True
+            session.recovery_current_question_id = None
+            session.recovery_source_message_no = None
+            session.recovery_answer_response_pending = False
+            session.recovery_instruction_active = True
+            session.next_response_is_recovery = True
+            logger.error(
+                "语音结束检查发现未完成项但无法映射下一题: session=%s remaining=%s",
+                session.session_no,
+                list(progress.remaining_question_ids),
+            )
+            return {
+                "success": False,
+                "completed": False,
+                "current": progress.current,
+                "total": progress.total,
+                "remaining_count": len(progress.remaining_question_ids),
+                "next_question": None,
+                "message": (
+                    "评估尚未完成，但系统暂时无法安全确定下一题。"
+                    "不得宣布结束，请等待系统更新。"
+                ),
+            }
+
+        recovery_instructions = self._build_recovery_question_instructions(
+            session.patient_info,
+            decision.next_question,
+            mode_label="完成检查恢复模式",
+            transition_rule=(
+                "系统确认仍有未完成项目。不要解释数据库或进度状态，"
+                "直接自然询问下面这一项。"
+            ),
+        )
+        await session.client.update_instructions(recovery_instructions)
+        session.recovery_mode_active = True
+        session.recovery_current_question_id = decision.next_question.question_id
+        session.recovery_source_message_no = None
+        session.recovery_answer_response_pending = False
+        session.recovery_instruction_active = True
+        session.next_response_is_recovery = True
+        logger.info(
+            "语音模型结束检查未通过，进入现有恢复补问: "
+            "session=%s progress=%s/%s question_id=%s remaining=%s",
+            session.session_no,
+            progress.current,
+            progress.total,
+            decision.next_question.question_id,
+            list(progress.remaining_question_ids),
+        )
+        return {
+            "success": True,
+            "completed": False,
+            "current": progress.current,
+            "total": progress.total,
+            "remaining_count": len(progress.remaining_question_ids),
+            "next_question_id": decision.next_question.question_id,
+            "next_question": decision.next_question.patient_text,
+            "message": "评估尚未完成，请继续询问系统指定的下一项，不得宣布结束。",
+        }
+
     async def _handle_tool_call(
         self,
         session: VoiceSession,
@@ -1636,7 +1792,10 @@ class VoiceGateway:
         if generation is not None:
             generation.tool_call_only = True
         try:
-            result = await execute_tool(name, arguments)
+            if name == VOICE_ASSESSMENT_FINISH_TOOL_NAME:
+                result = await self._handle_assessment_finish_tool(session)
+            else:
+                result = await execute_tool(name, arguments)
         except Exception:
             logger.exception("语音工具执行失败: session=%s tool=%s", session.session_no, name)
             result = {"success": False, "message": "工具执行失败"}
