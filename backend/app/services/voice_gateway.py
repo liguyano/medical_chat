@@ -65,9 +65,8 @@ VOICE_ASSESSMENT_FINISH_TOOL = {
     "function": {
         "name": VOICE_ASSESSMENT_FINISH_TOOL_NAME,
         "description": (
-            "当你认为当前护理评估的患者可回答项目已经全部收集完毕、准备向患者宣布"
-            "评估完成或结束前，必须先调用此工具。后端会以结构化评估进度决定是否允许"
-            "结束；若未完成，会返回唯一允许继续询问的下一项。"
+            "当你认为当前护理评估已经全部收集完毕、准备向患者宣布结束前，必须先调用"
+            "此工具。后端会检查结构化进度；若仍有遗漏，会返回当前全部未完成项目。"
         ),
         "parameters": {
             "type": "object",
@@ -79,14 +78,11 @@ VOICE_ASSESSMENT_FINISH_TOOL = {
 VOICE_TOOLS = [*DIALOG_TOOLS, VOICE_ASSESSMENT_FINISH_TOOL]
 VOICE_ASSESSMENT_FINISH_RULES = (
     "【实时语音结束确认规则】\n"
-    "当你认为当前护理评估已经全部问完，准备说‘评估完成’、‘都问完了’、"
-    "‘今天先到这里’、请患者休息或其他结束性话术时，必须先原生调用 "
-    f"{VOICE_ASSESSMENT_FINISH_TOOL_NAME}。\n"
-    "在工具明确返回 completed=true 之前，不得直接宣布评估完成，不得向患者告别，"
-    "也不得暗示所有问题已经问完。\n"
-    "若工具返回 completed=false，严格继续处理系统指定的 next_question，"
-    "不得自行选择其他问题，也不得结束评估。\n"
-    "若工具返回 success=false，说明完成状态尚未被系统确认；不得结束评估。"
+    "当你认为当前护理评估已经全部问完，准备宣布完成、告别、请患者休息或结束本次评估前，"
+    f"必须先调用 {VOICE_ASSESSMENT_FINISH_TOOL_NAME}。\n"
+    "在工具明确返回 completed=true 之前，不得直接宣布评估完成。\n"
+    "若工具返回 completed=false，请自然完成系统重新提供的全部剩余评估项目；"
+    "不要回头重问已经不在当前任务列表中的项目，完成后再次调用该工具。"
 )
 
 
@@ -191,6 +187,46 @@ class VoiceGateway:
             or code in {"no_active_response", "conversation_no_active_response"}
         )
 
+    @staticmethod
+    def _select_remaining_tasks(
+        task_list: list[QuestionTask],
+        remaining_question_ids: Any,
+    ) -> tuple[list[QuestionTask], set[int]]:
+        """按既有 Task-todo 顺序筛出所有 remaining，并报告无法映射的 question_id。"""
+        remaining = {int(question_id) for question_id in remaining_question_ids or ()}
+        selected: list[QuestionTask] = []
+        covered: set[int] = set()
+        for task in task_list:
+            task_ids = {int(task.question_id)}
+            source_ids = getattr(task, "source_question_ids", None) or []
+            task_ids.update(int(question_id) for question_id in source_ids)
+            matched = task_ids & remaining
+            if matched:
+                selected.append(task)
+                covered.update(matched)
+        return selected, remaining - covered
+
+    @staticmethod
+    def _build_remaining_assessment_instructions(
+        patient_info: dict[str, Any],
+        remaining_tasks: list[QuestionTask],
+    ) -> str:
+        """只把当前权威 remaining 列表交给 Realtime，之后由模型自然推进。"""
+        return (
+            build_system_prompt(
+                patient_info=patient_info,
+                task_list=remaining_tasks,
+            )
+            + "\n\n"
+            + VOICE_ASSESSMENT_FINISH_RULES
+            + "\n\n【实时语音剩余评估范围】\n"
+            "上面的评估任务列表就是系统当前确认仍未完成的全部患者可回答项目。"
+            "请结合当前实时对话自然完成这些项目，不要求逐字朗读，也不要求固定顺序。\n"
+            "已经不在上面列表中的评估项目视为已完成，不要主动回头重问或重新核对。\n"
+            "当你认为上面的剩余项目都已经完成时，再次调用 request_assessment_finish；"
+            "只有工具返回 completed=true 后才能结束评估。"
+        )
+
     async def _maybe_create_response(self, session: VoiceSession) -> None:
         """在工具结果写回后，等待当前响应结束再幂等触发下一轮响应。"""
         if (
@@ -257,18 +293,6 @@ class VoiceGateway:
             task_list = await asyncio.to_thread(
                 filter_manual_tasks, plan.tasks if plan is not None else []
             )
-            base_instructions = (
-                build_system_prompt(
-                    patient_info=patient_info,
-                    task_list=task_list,
-                )
-                + "\n\n"
-                + VOICE_ASSESSMENT_FINISH_RULES
-            )
-
-            initial_recovery_mode = False
-            initial_recovery_question_id: int | None = None
-            connect_instructions = base_instructions
             try:
                 initial_decision = await asyncio.to_thread(
                     VoiceTurnGuard.build_recovery_decision,
@@ -277,7 +301,7 @@ class VoiceGateway:
                 )
             except Exception:
                 logger.exception(
-                    "建立语音会话前读取结构化进度失败，拒绝根据未知状态裁剪题表: "
+                    "建立语音会话前读取结构化进度失败，拒绝根据未知状态构建题表: "
                     "session=%s",
                     session_no,
                 )
@@ -286,41 +310,36 @@ class VoiceGateway:
             if initial_decision.progress.completed:
                 connect_instructions = self._build_completed_wait_instructions()
                 logger.info(
-                    "重新进入已完成语音评估，禁止继续提问: session=%s progress=%s/%s",
+                    "进入已完成语音评估，禁止继续提问: session=%s progress=%s/%s",
                     session_no,
                     initial_decision.progress.current,
                     initial_decision.progress.total,
                 )
-            elif initial_decision.progress.current > 0:
-                initial_recovery_mode = True
-                if initial_decision.next_question is not None:
-                    initial_recovery_question_id = (
-                        initial_decision.next_question.question_id
+            else:
+                remaining_tasks, unmapped_ids = self._select_remaining_tasks(
+                    task_list,
+                    initial_decision.progress.remaining_question_ids,
+                )
+                if unmapped_ids or not remaining_tasks:
+                    connect_instructions = self._build_recovery_mapping_error_instructions()
+                    logger.error(
+                        "建立语音会话时 remaining 无法完整映射到 Task-todo，禁止回退完整题表: "
+                        "session=%s remaining=%s unmapped=%s",
+                        session_no,
+                        list(initial_decision.progress.remaining_question_ids),
+                        sorted(unmapped_ids),
                     )
-                    connect_instructions = self._build_recovery_question_instructions(
+                else:
+                    connect_instructions = self._build_remaining_assessment_instructions(
                         patient_info,
-                        initial_decision.next_question,
-                        mode_label="会话恢复模式",
-                        transition_rule=(
-                            "这是重新进入已有评估会话。不要重新开场或回顾已完成问题，"
-                            "直接自然继续确认下面这一项。"
-                        ),
+                        remaining_tasks,
                     )
                     logger.info(
-                        "重新进入未完成语音评估，仅暴露首个 remaining 问题: "
-                        "session=%s progress=%s/%s question_id=%s remaining=%s",
+                        "建立语音会话，仅向 Realtime 暴露当前 remaining 列表: "
+                        "session=%s progress=%s/%s remaining=%s",
                         session_no,
                         initial_decision.progress.current,
                         initial_decision.progress.total,
-                        initial_recovery_question_id,
-                        list(initial_decision.progress.remaining_question_ids),
-                    )
-                else:
-                    connect_instructions = self._build_recovery_mapping_error_instructions()
-                    logger.error(
-                        "重新进入语音评估时 remaining 无法映射到 Task-todo，"
-                        "禁止回退完整题表: session=%s remaining=%s",
-                        session_no,
                         list(initial_decision.progress.remaining_question_ids),
                     )
 
@@ -349,16 +368,16 @@ class VoiceGateway:
                 patient_id=patient_id,
                 patient_info=patient_info,
                 scale_codes=scale_codes,
-                instructions=base_instructions,
+                instructions=connect_instructions,
                 client=client,
                 redis=redis,
                 audio_store=DialogAudioStore(),
                 publisher=DialogEventPublisher(session_no),
                 task_list=task_list,
                 turn_detection=turn_detection,
-                recovery_mode_active=initial_recovery_mode,
-                recovery_current_question_id=initial_recovery_question_id,
-                recovery_instruction_active=initial_recovery_mode,
+                recovery_mode_active=False,
+                recovery_current_question_id=None,
+                recovery_instruction_active=False,
                 require_transcript_confirmation=False,
             )
             self._sessions[session_no] = gateway_session
@@ -786,8 +805,8 @@ class VoiceGateway:
         session.pending_transcript_audio_url = None
         session.pending_transcript_turn_no = 0
         session.input_committed = False
-        if not session.recovery_mode_active:
-            await self._refresh_schedule_guidance(session)
+        # 正常实时语音不再按轮读取 Schedule guidance 并重写 instructions。
+        # Schedule/Extraction 继续在后台运行，评估范围只在会话建立和 finish tool 校准时更新。
         if session.responding and not session.response_cancel_requested:
             session.audio_suppressed = True
             if session.current_response_id:
@@ -814,7 +833,7 @@ class VoiceGateway:
         await self._broadcast_state(session, "transcribing")
 
     async def _refresh_schedule_guidance(self, session: VoiceSession) -> None:
-        """在当前患者发言结束前注入上一轮已经生成的 Schedule 指引。"""
+        """兼容旧调用入口；正常实时语音流程不再调用此方法重写 instructions。"""
         guidance = ScheduleTaskStore(session.redis).get_guidance(session.session_no)
         guidance_prompt = str(guidance.get("constraint_prompt") or "") if guidance else ""
         if not guidance_prompt:
@@ -1564,8 +1583,8 @@ class VoiceGateway:
     ) -> str:
         """构建只暴露一个 remaining/null 问题的恢复提示词。
 
-        提前结束恢复与重新进入旧会话共用此入口，避免任何恢复路径重新把完整
-        Task-todo 暴露给 Qwen。
+        该入口仅保留给 closing regex 的最后兜底恢复；正常实时语音和 finish tool
+        都使用完整 remaining 列表，不再逐题接管模型。
         """
         patient_name = str(patient_info.get("name") or "患者")
         patient_age = patient_info.get("age")
@@ -1598,8 +1617,8 @@ class VoiceGateway:
         """remaining 与 Task-todo 映射异常时宁可停问，也不能回退完整题表。"""
         return (
             "你是一名专业的AI护理助手。当前评估存在未完成结构化项目，"
-            "但系统暂时无法安全确定下一道允许询问的问题。"
-            "在系统更新指令前，不得询问任何新的量表问题，不得重复历史问题，"
+            "但系统暂时无法安全确定仍未完成的问题范围。"
+            "在系统更新指令前，不得询问新的量表问题，不得重复历史问题，"
             "不得自行展开健康教育或宣布评估完成。"
         )
 
@@ -1643,7 +1662,7 @@ class VoiceGateway:
         self,
         session: VoiceSession,
     ) -> dict[str, Any]:
-        """模型准备结束时，以权威结构化进度决定是否允许结束或进入既有恢复补问。"""
+        """模型准备结束时，以权威结构化进度确认完成或一次性刷新全部 remaining。"""
         source_message_no = await asyncio.to_thread(
             VoiceTurnGuard.latest_patient_message_no,
             session.session_no,
@@ -1699,19 +1718,26 @@ class VoiceGateway:
                 "message": "结构化评估已确认完成，可以向患者礼貌结束本次评估。",
             }
 
-        if decision.next_question is None:
+        remaining_tasks, unmapped_ids = self._select_remaining_tasks(
+            session.task_list,
+            progress.remaining_question_ids,
+        )
+        if unmapped_ids or not remaining_tasks:
             mapping_error_instructions = self._build_recovery_mapping_error_instructions()
             await session.client.update_instructions(mapping_error_instructions)
-            session.recovery_mode_active = True
+            session.instructions = mapping_error_instructions
+            session.recovery_mode_active = False
             session.recovery_current_question_id = None
             session.recovery_source_message_no = None
             session.recovery_answer_response_pending = False
-            session.recovery_instruction_active = True
-            session.next_response_is_recovery = True
+            session.recovery_instruction_active = False
+            session.next_response_is_recovery = False
             logger.error(
-                "语音结束检查发现未完成项但无法映射下一题: session=%s remaining=%s",
+                "语音结束检查发现未完成项但无法完整映射题表: "
+                "session=%s remaining=%s unmapped=%s",
                 session.session_no,
                 list(progress.remaining_question_ids),
+                sorted(unmapped_ids),
             )
             return {
                 "success": False,
@@ -1719,36 +1745,32 @@ class VoiceGateway:
                 "current": progress.current,
                 "total": progress.total,
                 "remaining_count": len(progress.remaining_question_ids),
-                "next_question": None,
+                "remaining_question_ids": list(progress.remaining_question_ids),
+                "remaining_questions": [],
                 "message": (
-                    "评估尚未完成，但系统暂时无法安全确定下一题。"
+                    "评估尚未完成，但系统暂时无法安全确定全部剩余问题。"
                     "不得宣布结束，请等待系统更新。"
                 ),
             }
 
-        recovery_instructions = self._build_recovery_question_instructions(
+        remaining_instructions = self._build_remaining_assessment_instructions(
             session.patient_info,
-            decision.next_question,
-            mode_label="完成检查恢复模式",
-            transition_rule=(
-                "系统确认仍有未完成项目。不要解释数据库或进度状态，"
-                "直接自然询问下面这一项。"
-            ),
+            remaining_tasks,
         )
-        await session.client.update_instructions(recovery_instructions)
-        session.recovery_mode_active = True
-        session.recovery_current_question_id = decision.next_question.question_id
+        await session.client.update_instructions(remaining_instructions)
+        session.instructions = remaining_instructions
+        session.recovery_mode_active = False
+        session.recovery_current_question_id = None
         session.recovery_source_message_no = None
         session.recovery_answer_response_pending = False
-        session.recovery_instruction_active = True
-        session.next_response_is_recovery = True
+        session.recovery_instruction_active = False
+        session.next_response_is_recovery = False
         logger.info(
-            "语音模型结束检查未通过，进入现有恢复补问: "
-            "session=%s progress=%s/%s question_id=%s remaining=%s",
+            "语音模型结束检查未通过，已一次性刷新 remaining 列表: "
+            "session=%s progress=%s/%s remaining=%s",
             session.session_no,
             progress.current,
             progress.total,
-            decision.next_question.question_id,
             list(progress.remaining_question_ids),
         )
         return {
@@ -1757,9 +1779,12 @@ class VoiceGateway:
             "current": progress.current,
             "total": progress.total,
             "remaining_count": len(progress.remaining_question_ids),
-            "next_question_id": decision.next_question.question_id,
-            "next_question": decision.next_question.patient_text,
-            "message": "评估尚未完成，请继续询问系统指定的下一项，不得宣布结束。",
+            "remaining_question_ids": list(progress.remaining_question_ids),
+            "remaining_questions": [task.patient_text for task in remaining_tasks],
+            "message": (
+                "评估尚未完成，请自然完成系统重新提供的全部剩余项目；"
+                "完成后再次调用 request_assessment_finish。"
+            ),
         }
 
     async def _handle_tool_call(
