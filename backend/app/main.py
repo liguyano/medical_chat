@@ -83,6 +83,7 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3000",
             "http://192.168.144.1:3000",
             "http://hohofrontend.cpolar.top",
+            "https://hohofrontend.cpolar.top",
         ],
         allow_credentials=True,
         allow_methods=["*"],
