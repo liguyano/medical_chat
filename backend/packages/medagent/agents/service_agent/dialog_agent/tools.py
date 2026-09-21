@@ -381,14 +381,13 @@ _TOOL_REGISTRY: dict[str, BaseTool] = {t.name: t for t in _TOOL_OBJECTS}
 
 _MODEL_TOOL_OBJECTS: list[BaseTool] = [
     trigger_consent_form,
-    request_nurse_assistance,
 ]
 
 
 def build_openai_tool_schemas() -> list[dict[str, Any]]:
     """构建模型可见的 OpenAI function schema。
 
-    健康宣教工具与兼容 play_audio 不再暴露给 Dialog/Qwen，防止模型主动触发。
+    健康宣教、护士协助与兼容 play_audio 不再暴露给 Dialog/Qwen，防止模型主动触发。
     """
     return [convert_to_openai_tool(t) for t in _MODEL_TOOL_OBJECTS]
 

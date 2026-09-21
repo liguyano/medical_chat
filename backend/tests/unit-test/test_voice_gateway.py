@@ -1125,6 +1125,7 @@ def _mock_voice_gateway_connect_dependencies(
     tasks,
     progress,
     next_question,
+    remaining_questions=None,
 ):
     voice_config = SimpleNamespace(
         websocket_url="wss://example.invalid/realtime",
@@ -1164,6 +1165,7 @@ def _mock_voice_gateway_connect_dependencies(
         lambda _session_no, _tasks: SimpleNamespace(
             progress=progress,
             next_question=next_question,
+            remaining_questions=tuple(remaining_questions or ()),
             should_recover=(
                 not progress.completed and next_question is not None
             ),
@@ -1228,6 +1230,105 @@ async def test_reenter_partial_session_connects_with_all_remaining_questions(
     assert session.recovery_instruction_active is False
     assert session.recovery_current_question_id is None
     assert len(session.task_list) == 3
+
+
+@pytest.mark.asyncio
+async def test_reenter_partial_session_uses_database_fallback_question_when_plan_is_stale(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Redis 计划缺题时，重连必须使用数据库恢复的下一题继续问。"""
+    gateway = VoiceGateway()
+    answered = _question_task(1, "已经回答过的问题")
+    fallback = _question_task(21, "最近有没有头晕或站起时眼前发黑？")
+    later = _question_task(22, "最近一年内跌倒过几次？")
+    progress = SimpleNamespace(
+        current=1,
+        total=3,
+        completed=False,
+        remaining_question_ids=(21, 22),
+    )
+    _mock_voice_gateway_connect_dependencies(
+        monkeypatch,
+        gateway,
+        tasks=[answered],
+        progress=progress,
+        next_question=fallback,
+        remaining_questions=[fallback, later],
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "DialogAudioStore",
+        lambda: DialogAudioStore(tmp_path),
+    )
+
+    session = await gateway.get_or_create(
+        session_no="SESS-RESUME-STALE-PLAN",
+        task_id=1,
+        patient_id=2,
+        patient_info={"name": "林晓莉", "gender": "女", "age": 65},
+        scale_codes=["scale"],
+    )
+
+    client = FakeRealtimeClientForConnect.instances[-1]
+    connect_prompt = client.connect.await_args.kwargs["instructions"]
+
+    assert fallback.patient_text in connect_prompt
+    assert later.patient_text in connect_prompt
+    assert connect_prompt.index(fallback.patient_text) < connect_prompt.index(later.patient_text)
+    assert answered.patient_text not in connect_prompt
+    assert "实时语音剩余评估范围" in connect_prompt
+    assert "当前唯一允许询问的问题" not in connect_prompt
+    assert "无法安全确定仍未完成的问题范围" not in connect_prompt
+    assert session.recovery_mode_active is False
+    assert session.recovery_instruction_active is False
+    assert session.recovery_current_question_id is None
+
+@pytest.mark.asyncio
+async def test_reenter_partial_session_stops_when_database_fallback_is_incomplete(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """数据库未恢复全部 remaining 时，不能向模型下发不完整题表。"""
+    gateway = VoiceGateway()
+    answered = _question_task(1, "已经回答过的问题")
+    only_recovered = _question_task(21, "只恢复出来的一道题")
+    progress = SimpleNamespace(
+        current=1,
+        total=3,
+        completed=False,
+        remaining_question_ids=(21, 22),
+    )
+    _mock_voice_gateway_connect_dependencies(
+        monkeypatch,
+        gateway,
+        tasks=[answered],
+        progress=progress,
+        next_question=only_recovered,
+        remaining_questions=[only_recovered],
+    )
+    monkeypatch.setattr(
+        voice_gateway_module,
+        "DialogAudioStore",
+        lambda: DialogAudioStore(tmp_path),
+    )
+
+    session = await gateway.get_or_create(
+        session_no="SESS-RESUME-INCOMPLETE-DB",
+        task_id=1,
+        patient_id=2,
+        patient_info={"name": "患者"},
+        scale_codes=["scale"],
+    )
+
+    client = FakeRealtimeClientForConnect.instances[-1]
+    connect_prompt = client.connect.await_args.kwargs["instructions"]
+
+    assert only_recovered.patient_text not in connect_prompt
+    assert "无法安全确定仍未完成的问题范围" in connect_prompt
+    assert session.recovery_mode_active is False
+    assert session.recovery_instruction_active is False
+    assert session.recovery_current_question_id is None
 
 
 @pytest.mark.asyncio

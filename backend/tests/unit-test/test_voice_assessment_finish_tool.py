@@ -242,7 +242,7 @@ async def test_new_voice_connection_exposes_all_unanswered_questions(
 
 
 @pytest.mark.asyncio
-async def test_finish_check_tool_reloads_all_remaining_questions_without_recovery_mode(
+async def test_finish_check_tool_uses_database_recovered_remaining_questions(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -250,8 +250,16 @@ async def test_finish_check_tool_reloads_all_remaining_questions_without_recover
     session = make_session(tmp_path)
     q1 = question(1, "已经完成的进食问题")
     q2 = question(2, "剩余的床椅转移问题")
+    q2.options = [
+        SimpleNamespace(
+            option_code="independent",
+            option_label="可独立完成",
+            option_value="independent",
+        )
+    ]
     q3 = question(3, "剩余的上下楼梯问题")
-    session.task_list = [q1, q2, q3]
+    # 模拟现场：旧 Schedule Task-todo 只保留已完成题，剩余题由 PostgreSQL 恢复。
+    session.task_list = [q1]
     execute = AsyncMock(return_value={"success": True, "completed": True})
     monkeypatch.setattr(voice_gateway_module, "execute_tool", execute)
     monkeypatch.setattr(voice_gateway_module, "publish_tool_result", Mock())
@@ -276,6 +284,7 @@ async def test_finish_check_tool_reloads_all_remaining_questions_without_recover
         lambda _session_no, _tasks: SimpleNamespace(
             should_recover=True,
             next_question=q2,
+            remaining_questions=(q2, q3),
             progress=SimpleNamespace(
                 current=1,
                 total=3,
@@ -312,8 +321,13 @@ async def test_finish_check_tool_reloads_all_remaining_questions_without_recover
     assert q1.patient_text not in refreshed_prompt
     assert q2.patient_text in refreshed_prompt
     assert q3.patient_text in refreshed_prompt
+    assert '"question_id": 2' in refreshed_prompt
+    assert '"question_name": "剩余的床椅转移问题"' in refreshed_prompt
+    assert '"question_type": "单选"' in refreshed_prompt
+    assert '"option_code": "independent"' in refreshed_prompt
+    assert '"option_label": "可独立完成"' in refreshed_prompt
     assert "当前唯一允许询问的问题" not in refreshed_prompt
-    assert "完成后再次调用 request_assessment_finish" in refreshed_prompt
+    assert "request_assessment_finish" in refreshed_prompt
     assert session.instructions == refreshed_prompt
     assert session.recovery_mode_active is False
     assert session.recovery_current_question_id is None

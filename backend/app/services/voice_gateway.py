@@ -212,11 +212,35 @@ class VoiceGateway:
         remaining_tasks: list[QuestionTask],
     ) -> str:
         """只把当前权威 remaining 列表交给 Realtime，之后由模型自然推进。"""
+        question_details = []
+        for index, task in enumerate(remaining_tasks, 1):
+            options = [
+                {
+                    "option_code": option.option_code,
+                    "option_label": option.option_label,
+                    "option_value": option.option_value,
+                }
+                for option in (task.options or [])
+            ]
+            question_details.append(
+                {
+                    "order": index,
+                    "question_id": task.question_id,
+                    "question_code": task.question_code,
+                    "question_name": task.question_name,
+                    "patient_text": task.patient_text,
+                    "question_type": task.question_type,
+                    "required": task.required,
+                    "options": options,
+                }
+            )
         return (
             build_system_prompt(
                 patient_info=patient_info,
                 task_list=remaining_tasks,
             )
+            + "\n\n【剩余题完整结构】\n"
+            + json.dumps(question_details, ensure_ascii=False, indent=2)
             + "\n\n"
             + VOICE_ASSESSMENT_FINISH_RULES
             + "\n\n【实时语音剩余评估范围】\n"
@@ -321,14 +345,39 @@ class VoiceGateway:
                     initial_decision.progress.remaining_question_ids,
                 )
                 if unmapped_ids or not remaining_tasks:
-                    connect_instructions = self._build_recovery_mapping_error_instructions()
-                    logger.error(
-                        "建立语音会话时 remaining 无法完整映射到 Task-todo，禁止回退完整题表: "
-                        "session=%s remaining=%s unmapped=%s",
-                        session_no,
-                        list(initial_decision.progress.remaining_question_ids),
-                        sorted(unmapped_ids),
+                    fallback_remaining = tuple(
+                        getattr(initial_decision, "remaining_questions", ())
                     )
+                    expected_ids = list(
+                        initial_decision.progress.remaining_question_ids
+                    )
+                    fallback_ids = [
+                        question.question_id for question in fallback_remaining
+                    ]
+                    if fallback_ids == expected_ids:
+                        connect_instructions = self._build_remaining_assessment_instructions(
+                            patient_info,
+                            list(fallback_remaining),
+                        )
+                        logger.warning(
+                            "建立语音会话时 Redis plan 无法完整映射 remaining，"
+                            "已从 PostgreSQL 恢复完整剩余题表: "
+                            "session=%s remaining=%s unmapped=%s",
+                            session_no,
+                            expected_ids,
+                            sorted(unmapped_ids),
+                        )
+                    else:
+                        connect_instructions = self._build_recovery_mapping_error_instructions()
+                        logger.error(
+                            "建立语音会话时 remaining 无法完整映射到 Task-todo，"
+                            "且数据库未恢复完整剩余题表，禁止下发部分题表: "
+                            "session=%s remaining=%s recovered=%s unmapped=%s",
+                            session_no,
+                            expected_ids,
+                            fallback_ids,
+                            sorted(unmapped_ids),
+                        )
                 else:
                     connect_instructions = self._build_remaining_assessment_instructions(
                         patient_info,
@@ -1718,8 +1767,9 @@ class VoiceGateway:
                 "message": "结构化评估已确认完成，可以向患者礼貌结束本次评估。",
             }
 
+        recovered_tasks = list(decision.remaining_questions)
         remaining_tasks, unmapped_ids = self._select_remaining_tasks(
-            session.task_list,
+            recovered_tasks,
             progress.remaining_question_ids,
         )
         if unmapped_ids or not remaining_tasks:

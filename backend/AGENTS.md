@@ -235,6 +235,10 @@ from medagent.configs.agent_config import get_agent_config
   `related_question_id=None` 中断患者对话。Dialog 下一题以有效结构化答案缺口为依据。
   单个候选无效、低置信度或 Extraction 重试耗尽只记录诊断状态，不得转换为
   `handoff_requested`、设置任务人工介入或向护士发送紧急呼叫。
+- 评估对话中的 AI 自动人工介入已停用：Dialog/Qwen 模型工具列表不得暴露
+  `request_nurse_assistance`，提示词和关键词中间件不得要求或强制调用该工具，应用层
+  Dialog 工具执行器必须拒绝历史或越权的该工具调用。患者主动呼叫护士 API、
+  `manual_required` 人工题等待/护士填写、既有 handoff 事件回放与处理接口继续保留。
 - 评估完成的唯一事实来源是全部生效量表中 `required=true` 且 `derived=false` 的结构化
   `assessment_answer`。Dialog 禁止按问题下标、消息轮数或 Task-todo 是否问完直接完成任务。
 - Extraction 更新结构化进度；进度完整后异步派发 Dialog CICARE Exit，结束语落库后再发布
@@ -277,11 +281,17 @@ from medagent.configs.agent_config import get_agent_config
 - Qwen Realtime 恢复逻辑统一以结构化 `remaining_question_ids` 为事实来源，覆盖两种入口：
   1) 患者可见回复明确提前宣告评估完成/结束后的事后 `VoiceTurnGuard`；
   2) 重新进入已经存在有效结构化答案的旧语音会话。
-  建立新 Realtime 连接前必须刷新结构化进度；若 `current > 0` 且尚未完成，禁止把完整
-  Task-todo 作为 Qwen instructions 下发，只可按当前 Schedule 原顺序从 remaining 中选择一条，
-  进入持续恢复模式。若 remaining 无法映射到 Schedule，宁可停止提问也不得回退完整题表；
-  若结构化进度已完成，重新进入后禁止继续询问任何历史量表问题。
-- 持续恢复模式的 Realtime instructions 仅暴露患者上下文与“当前唯一允许询问的问题”。
+  建立新 Realtime 连接前必须刷新结构化进度；若尚未完成，只能向模型暴露 remaining 对应的
+  完整剩余题表，不得回退包含已回答题目的原始完整 Task-todo。优先保留 Schedule 中仍有效题目
+  的原顺序，Redis plan 缺题或过期时按 PostgreSQL 当前题目快照补齐；只有全部 remaining 都能
+  安全恢复时才可下发，恢复不完整时必须停止提问。若结构化进度已完成，重新进入后禁止继续
+  询问任何历史量表问题。
+  模型调用结束工具但进度未完成时，必须直接使用 PostgreSQL 恢复出的完整 remaining 题目对象，
+  并向语音模型提供题目 ID、代码、名称、患者问法、题型和选项；禁止再次仅从旧
+  `session.task_list` 按 ID 映射。
+- 重新进入旧会话时，Realtime instructions 一次性提供完整剩余题表，并要求模型每次只问一题、
+  不得重复已完成题目，全部问完后调用完成检查工具。提前结束后的事后恢复仍采用持续恢复模式，
+  instructions 仅暴露患者上下文与“当前唯一允许询问的问题”。
   已经形成有效结构化答案的问题不得重复询问、核对或换一种说法再问。患者回答当前恢复题后，
   必须等待该患者消息被 Extraction Agent 写入 `processed_message_ids`，并等待当前自动语音
   `response.done`，再刷新 remaining 并选择下一题；remaining 清空后进入停止提问状态并等待

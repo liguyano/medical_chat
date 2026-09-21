@@ -98,8 +98,8 @@ def test_constraint_update_prompt_handles_empty_and_multiple_items():
 
 
 def test_dialog_tool_schemas_follow_openai_function_contract():
-    """模型侧只暴露知情同意与护士协助，不再暴露宣教工具。"""
-    assert len(DIALOG_TOOLS) == 2
+    """模型侧只暴露知情同意，不再暴露护士协助与宣教工具。"""
+    assert len(DIALOG_TOOLS) == 1
     names = set()
     for tool in DIALOG_TOOLS:
         assert tool["type"] == "function"
@@ -107,10 +107,8 @@ def test_dialog_tool_schemas_follow_openai_function_contract():
         names.add(function["name"])
         assert function["parameters"]["type"] == "object"
         assert function["parameters"]["required"]
-    assert names == {
-        "trigger_consent_form",
-        "request_nurse_assistance",
-    }
+    assert names == {"trigger_consent_form"}
+    assert "request_nurse_assistance" not in names
     assert "get_education_material" not in names
     assert "play_audio" not in names
 
@@ -128,6 +126,36 @@ async def test_application_dialog_executor_blocks_education_tool():
         "disabled": True,
         "message": "健康宣教工具已停用",
     }
+
+
+@pytest.mark.asyncio
+async def test_application_dialog_executor_blocks_nurse_assistance_tool():
+    """即使模型发送旧护士工具调用，应用层也不得创建人工介入请求。"""
+    result = await execute_app_tool(
+        "request_nurse_assistance",
+        {
+            "requested_action": "other",
+            "reason": "患者自述走路容易摔倒",
+            "urgency": "routine",
+        },
+    )
+
+    assert result == {
+        "success": False,
+        "disabled": True,
+        "message": "AI 自动人工介入已停用",
+    }
+
+
+def test_system_prompt_does_not_instruct_ai_to_call_nurse():
+    """评估提示词不得再要求 AI 自动呼叫护士。"""
+    prompt = build_system_prompt(
+        {"name": "患者"},
+        [question()],
+    )
+
+    assert "request_nurse_assistance" not in prompt
+    assert "立即调用呼叫工具" not in prompt
 
 
 @pytest.mark.asyncio

@@ -117,10 +117,16 @@ def test_recovery_decision_falls_back_to_database_when_schedule_plan_is_stale(
         answered_question_ids=frozenset(range(1, 21)),
         remaining_question_ids=(121, 122),
     )
-    database_question = SimpleNamespace(
-        question_id=121,
-        patient_text="夜间路灯和楼道照明是否良好？",
-    )
+    database_questions = {
+        121: SimpleNamespace(
+            question_id=121,
+            patient_text="夜间路灯和楼道照明是否良好？",
+        ),
+        122: SimpleNamespace(
+            question_id=122,
+            patient_text="室内楼梯是否有可用扶手？",
+        ),
+    }
 
     class FakeDb:
         def __enter__(self):
@@ -144,9 +150,7 @@ def test_recovery_decision_falls_back_to_database_when_schedule_plan_is_stale(
         VoiceTurnGuard,
         "_load_question_task_from_db",
         staticmethod(
-            lambda _db, question_id: (
-                database_question if question_id == 121 else None
-            )
+            lambda _db, question_id: database_questions.get(question_id)
         ),
     )
 
@@ -163,3 +167,8 @@ def test_recovery_decision_falls_back_to_database_when_schedule_plan_is_stale(
     assert decision.should_recover
     assert decision.next_question.question_id == 121
     assert decision.next_question.patient_text == "夜间路灯和楼道照明是否良好？"
+    assert [question.question_id for question in decision.remaining_questions] == [121, 122]
+    assert [question.patient_text for question in decision.remaining_questions] == [
+        "夜间路灯和楼道照明是否良好？",
+        "室内楼梯是否有可用扶手？",
+    ]

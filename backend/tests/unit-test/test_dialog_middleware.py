@@ -78,6 +78,23 @@ async def test_keyword_middleware_matches_and_deduplicates_constraints():
 
 
 @pytest.mark.asyncio
+async def test_keyword_middleware_does_not_force_nurse_assistance():
+    """测量类关键词不得再注入护士工具调用或人工介入约束。"""
+    context = {
+        "patient_input": "我有点头晕，请帮我量血压",
+        "constraints": [],
+    }
+
+    await KeywordInterceptMiddleware().before_agent(context)
+
+    assert context.get("required_tool_calls", []) == []
+    assert all(
+        "request_nurse_assistance" not in constraint
+        for constraint in context["constraints"]
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "patient_input",
     ["我不抽烟", "从不吸烟", "已经戒烟", "不喝酒", "无需手术"],

@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { mapExtractedField, mapQuestionnaireDto } from '@/lib/api/mappers';
+import { prototypeQuestions } from '@/lib/mock/assessment';
 import { getStructuredAnswerDisplayValue } from '@/lib/structuredAnswer';
 import { RecordedAnswersPanel } from '@/components/patient/RecordedAnswersPanel';
 import QuestionCard from '@/components/assessment/QuestionCard';
@@ -9,6 +10,14 @@ import type { QuestionnaireDto } from '@/lib/api/contracts';
 
 const field = { question_id: 1, question_code: 'Q', question_text: '人工测量', manual_required: true };
 describe('人工题元数据与真实答案', () => {
+  it('Mock 的下床与行走能力题默认等待人工', () => {
+    expect(
+      prototypeQuestions.find(
+        (question) => question.questionCode === 'ADL_MOBILITY'
+      )?.manualRequired
+    ).toBe(true);
+  });
+
   it('映射人工标记且不生成答案', () => {
     const answer = mapExtractedField(field);
     expect(answer).toMatchObject({ manualRequired: true });

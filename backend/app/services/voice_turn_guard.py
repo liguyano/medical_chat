@@ -47,6 +47,7 @@ class VoiceRecoveryDecision:
 
     progress: AssessmentProgress
     next_question: QuestionTask | None
+    remaining_questions: tuple[QuestionTask, ...] = ()
 
     @property
     def should_recover(self) -> bool:
@@ -170,30 +171,38 @@ class VoiceTurnGuard:
         session_no: str,
         task_list: Iterable[QuestionTask],
     ) -> VoiceRecoveryDecision:
-        """刷新权威结构化进度，并选择一条未完成必填题。
+        """刷新权威结构化进度，并恢复全部未完成必填题。
 
-        优先保留 Schedule plan 的原有排序；若 Redis 中的 plan 已过期、缺题或 question_id
-        与当前评估实例不一致，则直接按 remaining_question_ids 从 PostgreSQL 当前题目快照
-        恢复问题文本。不得因为 Redis 缓存不一致而退回完整题表。
+        以 remaining_question_ids 的顺序为准；优先复用 Schedule plan 中仍然有效的题目，
+        缺失题目从 PostgreSQL 当前题目快照恢复。返回列表不完整时由调用方安全停止，
+        不得回退包含已回答题目的完整原始题表。
         """
         if model_base.SessionLocal is None:
             raise RuntimeError("数据库未初始化")
         with model_base.SessionLocal() as db:
             progress = refresh_assessment_progress(db, session_no)
-            remaining = set(progress.remaining_question_ids)
-            next_question = next(
-                (question for question in task_list if question.question_id in remaining),
-                None,
-            )
-            if next_question is None and progress.remaining_question_ids:
-                for question_id in progress.remaining_question_ids:
-                    next_question = VoiceTurnGuard._load_question_task_from_db(
-                        db,
-                        question_id,
-                    )
-                    if next_question is not None:
-                        break
+            remaining_ids = set(progress.remaining_question_ids)
+            remaining_questions = [
+                question
+                for question in task_list
+                if question.question_id in remaining_ids
+            ]
+            restored_ids = {
+                question.question_id for question in remaining_questions
+            }
+            for question_id in progress.remaining_question_ids:
+                if question_id in restored_ids:
+                    continue
+                question = VoiceTurnGuard._load_question_task_from_db(
+                    db,
+                    question_id,
+                )
+                if question is not None:
+                    remaining_questions.append(question)
+                    restored_ids.add(question_id)
+            next_question = remaining_questions[0] if remaining_questions else None
         return VoiceRecoveryDecision(
             progress=progress,
             next_question=next_question,
+            remaining_questions=tuple(remaining_questions),
         )

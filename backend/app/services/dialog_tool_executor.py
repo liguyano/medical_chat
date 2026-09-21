@@ -13,10 +13,14 @@ from medagent.agents.service_agent.dialog_agent.tools import (
 
 async def execute_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     """执行应用层 Dialog 工具。健康宣教入口已停用。"""
-    if tool_name == "get_education_material":
+    disabled_tools = {
+        "get_education_material": "健康宣教工具已停用",
+        "request_nurse_assistance": "AI 自动人工介入已停用",
+    }
+    if tool_name in disabled_tools:
         return {
             "success": False,
             "disabled": True,
-            "message": "健康宣教工具已停用",
+            "message": disabled_tools[tool_name],
         }
     return await execute_sdk_tool(tool_name, arguments)

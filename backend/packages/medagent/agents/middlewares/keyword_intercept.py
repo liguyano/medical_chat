@@ -30,116 +30,12 @@ class KeywordInterceptMiddleware(DialogMiddleware):
             "手术": "你必须让患者阅读手术知情同意书，调用 trigger_consent_form(form_type='surgery')",
             "青霉素过敏": "你必须追问具体过敏反应，不扩展其他话题。",
             "药物过敏": "你必须追问具体过敏药物名称和反应，不扩展其他话题。",
-            "量体温": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_temperature') 呼叫护士，禁止仅用文字等待"
-            ),
-            "测体温": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_temperature') 呼叫护士，禁止仅用文字等待"
-            ),
-            "量血压": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_blood_pressure') 呼叫护士，禁止仅用文字等待"
-            ),
-            "测血压": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_blood_pressure') 呼叫护士，禁止仅用文字等待"
-            ),
-            "量体重": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_weight') 呼叫护士，禁止仅用文字等待"
-            ),
-            "测体重": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_weight') 呼叫护士，禁止仅用文字等待"
-            ),
-            "量身高": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_height') 呼叫护士，禁止仅用文字等待"
-            ),
-            "测身高": (
-                "必须调用 request_nurse_assistance("
-                "requested_action='measure_height') 呼叫护士，禁止仅用文字等待"
-            ),
         }
         self.builtin_tool_calls: dict[str, list[dict[str, Any]]] = {
             "手术": [
                 {
                     "name": "trigger_consent_form",
                     "arguments": {"form_type": "surgery"},
-                }
-            ],
-            "量体温": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_temperature",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "测体温": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_temperature",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "量血压": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_blood_pressure",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "测血压": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_blood_pressure",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "量体重": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_weight",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "测体重": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_weight",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "量身高": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_height",
-                        "urgency": "routine",
-                    },
-                }
-            ],
-            "测身高": [
-                {
-                    "name": "request_nurse_assistance",
-                    "arguments": {
-                        "requested_action": "measure_height",
-                        "urgency": "routine",
-                    },
                 }
             ],
         }

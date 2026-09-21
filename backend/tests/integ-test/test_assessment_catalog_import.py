@@ -16,6 +16,7 @@ from app.models import (
     AssessmentScale,
     AssessmentScaleVersion,
 )
+from app.services.manual_question_service import automatic_question_condition
 
 CATALOG_DIR = (
     Path(__file__).resolve().parents[3]
@@ -131,13 +132,15 @@ async def test_loader_returns_published_questions_options_and_order(
                 AssessmentQuestion.scale_version_id.in_(version_ids)
             )
         )
-        derived_questions = db.scalar(
+        automatic_questions = db.scalar(
             select(func.count(AssessmentQuestion.id)).where(
                 AssessmentQuestion.scale_version_id.in_(version_ids),
-                AssessmentQuestion.derived.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                automatic_question_condition(),
             )
         )
-    assert len(tasks) == total_questions - derived_questions
+    assert total_questions > automatic_questions
+    assert len(tasks) == automatic_questions
     assert {task.scale_code for task in tasks} == set(scale_codes)
     loaded_codes = {task.question_code for task in tasks}
     assert "bmi" not in loaded_codes
@@ -148,6 +151,11 @@ async def test_loader_returns_published_questions_options_and_order(
     adl_code = next(code for code in scale_codes if code.startswith("adl_"))
     adl_tasks = [task for task in tasks if task.scale_code == adl_code]
     assert [task.question_code for task in adl_tasks[:2]] == ["feeding", "bathing"]
+    assert {
+        'bed_chair_transfer',
+        'walking_45m',
+        'stairs',
+    }.isdisjoint(task.question_code for task in adl_tasks)
     assert [option.clinical_score for option in adl_tasks[0].options] == [
         0.0,
         5.0,

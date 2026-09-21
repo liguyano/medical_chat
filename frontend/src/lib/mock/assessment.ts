@@ -112,6 +112,7 @@ export const prototypeQuestions: AssessmentQuestion[] = [
     required: true,
     scored: true,
     derived: false,
+    manualRequired: true,
     options: [
       { optionCode: 'independent', optionLabel: '不需要协助', clinicalScore: 15 },
       { optionCode: 'supervision', optionLabel: '需要陪同或搀扶', clinicalScore: 10 },
