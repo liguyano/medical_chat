@@ -570,10 +570,10 @@ export default function TaskDetailPage() {
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => router.push(`/nurse/tasks/${task.id}/review`)}
+                        onClick={() => router.push(`/nurse/tasks/${task.id}/report`)}
                         className="w-full"
                       >
-                        查看评估报告
+                        查看患者身体状况报告
                       </Button>
                       <Button
                         variant="outline"

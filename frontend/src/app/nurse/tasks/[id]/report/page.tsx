@@ -11,37 +11,17 @@ import { careRepository } from '@/lib/repositories';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type { AssessmentReport } from '@/lib/types';
 import {
+  buildAbilitySummaries,
+  buildAssessmentRows,
+  getAssessmentScales,
+} from '@/lib/assessmentReportView';
+import {
   ArrowLeftIcon,
   ArrowPathIcon,
   CheckCircleIcon,
   DocumentTextIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
-
-interface ScaleSnapshot {
-  scale_code?: string;
-  scale_name?: string;
-  result_summary?: string | null;
-  risk_level?: string | null;
-  answers?: Array<{
-    question?: string;
-    value?: unknown;
-    clinical_score?: number | null;
-    abnormal?: boolean;
-  }>;
-  scores?: Array<{
-    score_name?: string;
-    score_value?: number | null;
-    max_score?: number | null;
-    risk_level?: string | null;
-    interpretation?: string | null;
-  }>;
-}
-
-function assessments(report: AssessmentReport): ScaleSnapshot[] {
-  const value = report.sourceSnapshot.assessments;
-  return Array.isArray(value) ? (value as ScaleSnapshot[]) : [];
-}
 
 function ReportList({ title, items }: { title: string; items: string[] }) {
   return (
@@ -110,6 +90,10 @@ export default function AssessmentReportPage() {
     }
   };
 
+  const scaleSnapshots = report ? getAssessmentScales(report) : [];
+  const abilitySummaries = buildAbilitySummaries(scaleSnapshots);
+  const detailRows = scaleSnapshots.flatMap(buildAssessmentRows);
+
   return (
     <NurseLayout>
       <div className="mx-auto max-w-6xl space-y-5">
@@ -118,7 +102,7 @@ export default function AssessmentReportPage() {
             <Link href={`/nurse/tasks/${taskId}`} className="mb-2 inline-flex items-center gap-2 text-sm text-foreground-muted">
               <ArrowLeftIcon className="h-4 w-4" /> 返回任务详情
             </Link>
-            <h1 className="text-3xl">量表<span className="italic text-primary">评估报告</span></h1>
+            <h1 className="text-3xl">患者身体状况<span className="italic text-primary">评估报告</span></h1>
             <p className="mt-1 text-sm text-foreground-muted">
               {task ? `${task.patientName} · ${task.bedNo} · ${task.taskNo}` : `任务 ${taskId}`}
             </p>
@@ -174,51 +158,94 @@ export default function AssessmentReportPage() {
             </div>
 
             <Card padding="lg" className="border-primary/20 bg-primary-tint">
-              <CardHeader><CardTitle>AI 综合评估结论</CardTitle></CardHeader>
-              <CardContent><p className="text-sm leading-7">{report.reportContent.overallSummary}</p></CardContent>
+              <CardHeader>
+                <CardTitle>患者身体状况</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-7">{report.reportContent.overallSummary}</p>
+              </CardContent>
             </Card>
 
             <section className="space-y-3">
               <div>
-                <h2 className="text-xl font-semibold">量表结果</h2>
-                <p className="mt-1 text-sm text-foreground-muted">以下内容来自生成报告时保存的结构化评估快照，不由模型改写。</p>
+                <h2 className="text-xl font-semibold">各项能力概览</h2>
+                <p className="mt-1 text-sm text-foreground-muted">
+                  根据本次全部量表结果汇总患者的功能状态、能力水平和风险情况。
+                </p>
               </div>
-              {assessments(report).map((scale, index) => (
-                <Card key={scale.scale_code ?? `${scale.scale_name}-${index}`} padding="lg">
-                  <CardHeader>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <CardTitle>{scale.scale_name ?? '未命名量表'}</CardTitle>
-                      <div className="flex gap-2">
-                        {scale.risk_level && <Badge variant="warning">{scale.risk_level}</Badge>}
-                        {scale.result_summary && <Badge variant="info">{scale.result_summary}</Badge>}
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {abilitySummaries.map((ability) => (
+                  <Card key={ability.code} padding="md" className="h-full">
+                    <div className="flex h-full flex-col gap-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="font-semibold leading-6">{ability.name}</h3>
+                        {ability.riskLevel && (
+                          <Badge variant="warning">{ability.riskLevel}</Badge>
+                        )}
                       </div>
+                      <p className="text-lg font-semibold text-primary">
+                        {ability.conclusion}
+                      </p>
+                      {ability.score && (
+                        <p className="mt-auto text-sm text-foreground-muted">
+                          {ability.score}
+                        </p>
+                      )}
                     </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {!!scale.scores?.length && (
-                      <div className="flex flex-wrap gap-2">
-                        {scale.scores.map((score, scoreIndex) => (
-                          <Badge key={`${score.score_name}-${scoreIndex}`} variant="info">
-                            {score.score_name ?? '得分'}：{score.score_value ?? '—'}{score.max_score != null ? ` / ${score.max_score}` : ''}
-                            {score.interpretation ? ` · ${score.interpretation}` : ''}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                    <div className="divide-y divide-border">
-                      {(scale.answers ?? []).map((answer, answerIndex) => (
-                        <div key={`${answer.question}-${answerIndex}`} className="grid gap-1 py-2 text-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:gap-4">
-                          <span>{answer.question ?? '评估项'}</span>
-                          <span className="font-medium">{String(answer.value ?? '未记录')}</span>
-                          {answer.abnormal ? <Badge variant="warning">异常关注</Badge> : <span />}
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                  </Card>
+                ))}
+              </div>
             </section>
 
+            <section className="space-y-3">
+              <div>
+                <h2 className="text-xl font-semibold">全部评估项目</h2>
+                <p className="mt-1 text-sm text-foreground-muted">
+                  以下内容来自生成报告时保存的结构化评估快照，展示全部题目和真实结果，不由模型改写。
+                </p>
+              </div>
+              <Card padding="none" className="overflow-hidden">
+                {detailRows.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full border-collapse text-left text-sm">
+                      <thead className="bg-surface-muted text-foreground-muted">
+                        <tr>
+                          <th className="whitespace-nowrap px-5 py-3 font-medium">能力分类</th>
+                          <th className="min-w-52 px-5 py-3 font-medium">评估项目</th>
+                          <th className="min-w-48 px-5 py-3 font-medium">患者情况</th>
+                          <th className="whitespace-nowrap px-5 py-3 text-center font-medium">得分</th>
+                          <th className="whitespace-nowrap px-5 py-3 font-medium">结果</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {detailRows.map((row) => (
+                          <tr
+                            key={row.id}
+                            className={row.abnormal ? 'bg-amber-50/70' : 'bg-surface'}
+                          >
+                            <td className="whitespace-nowrap px-5 py-4 text-foreground-muted">
+                              {row.ability}
+                            </td>
+                            <td className="px-5 py-4 font-medium">{row.question}</td>
+                            <td className="px-5 py-4">{row.value}</td>
+                            <td className="px-5 py-4 text-center tabular-nums">{row.score}</td>
+                            <td className="px-5 py-4">
+                              <Badge variant={row.abnormal ? 'warning' : 'success'}>
+                                {row.status}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="p-8 text-center text-sm text-foreground-muted">
+                    暂无结构化评估项目
+                  </p>
+                )}
+              </Card>
+            </section>
             <div className="grid gap-4 md:grid-cols-2">
               <ReportList title="重点发现" items={report.reportContent.keyFindings} />
               <ReportList title="风险概览" items={report.reportContent.riskOverview} />
