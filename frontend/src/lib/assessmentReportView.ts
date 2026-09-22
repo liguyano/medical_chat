@@ -349,7 +349,9 @@ function displayScore(score: AssessmentScoreSnapshot): string {
 function normalize(value: string | undefined | null): string {
   return (value ?? '')
     .toLowerCase()
-    .replace(/[\s（）()【】\[\]{}·・_\-—/\\:：]/g, '');
+    .replace(/[\s（）()【】\[\]{}·・_\-—:：]/g, '')
+    .replace(/\//g, '')
+    .replace(/\\/g, '');
 }
 
 function scaleMatches(scale: AssessmentScaleSnapshot, item: CgaCatalogItem): boolean {
