@@ -70,7 +70,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   提供独立“关闭语音”按钮，主动关闭后保留文字输入能力。
 - 前端单元测试位于 `frontend/tests/`，使用 Vitest；涉及适配器变更时至少覆盖 DTO 映射、事件解析和传输边界。
 - 护士监控页的逐条 AI 质评通过 `CareRepository` 调用 `/api/rating`，整体质量评价通过 `/api/quality-reviews`；Mock 模式继续使用 Zustand sessionStorage，不得把本地保存描述为后端已入库。
-- 医护端评估报告页必须以持久化 `sourceSnapshot.assessments` 为事实来源展示全部题目，按量表生成能力概览，并以表格呈现患者结果、临床得分和关注状态；AI 综合摘要只作导读，不得改写原始题目结果。
+- 医护端评估报告页必须以持久化 `sourceSnapshot.assessments` 为事实来源展示全部题目；主报告按纸质老年综合评估（CGA）报告单的固定目录分区汇总量表结果，目录中未匹配到真实量表时必须明确显示“未进行相关量表”，不得补造结果、评估时间或签名人员。未落入固定目录的已完成量表必须继续保留展示；患者结果、临床得分和关注状态仍需提供原始明细，AI 综合摘要只作导读，不得改写原始题目结果。
 - 结构化答案的 `selectedOptions` 是内部选项编码，只用于审计；患者端和医护端必须通过 `displayValue` / `selectedOptionLabels` 展示目标量表真实值，禁止把 `option_3` 等编码直接暴露给用户。
 - API 模式进入医护监控详情页时必须刷新最新任务详情，使用后端住院号、床位、科室、性别年龄、入院时间和在院状态构造顶部患者摘要，不能复用 sessionStorage 中的旧任务快照。
 - API 模式医护登录成功后必须调用 `CareRepository.listMyTasks()` 刷新当前护士负责的历史任务，并替换 `useTaskStore` 中的本地快照；监控中心、任务管理和工作台不得仅依赖 sessionStorage。
