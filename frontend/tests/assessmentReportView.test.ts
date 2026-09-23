@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAbilitySummaries,
   buildAssessmentRows,
+  buildCgaReportSections,
+  formatAssessmentScaleResult,
   getAssessmentScales,
 } from '@/lib/assessmentReportView';
 import type { AssessmentReport } from '@/lib/types';
@@ -78,5 +80,68 @@ describe('assessment report view', () => {
         riskLevel: '',
       },
     ]);
+  });
+
+  it('maps completed scales into the fixed CGA catalogue', () => {
+    const sections = buildCgaReportSections(getAssessmentScales(report));
+    const physical = sections.find((section) => section.id === 'physical');
+    const sleep = sections.find((section) => section.id === 'sleep');
+
+    expect(physical?.rows.find((row) => row.id === 'adl')).toMatchObject({
+      item: '自理能力',
+      scaleLabel: '日常生活能力评估',
+      completed: true,
+    });
+    expect(sleep?.rows.find((row) => row.id === 'sleep')).toMatchObject({
+      item: '睡眠',
+      scaleLabel: '睡眠情况',
+      result: '已完成评估',
+      completed: true,
+    });
+  });
+
+  it('shows an explicit placeholder when a CGA scale was not performed', () => {
+    const sections = buildCgaReportSections(getAssessmentScales(report));
+    const mental = sections.find((section) => section.id === 'mental');
+    const depression = mental?.rows.find((row) => row.id === 'depression');
+
+    expect(depression).toMatchObject({
+      item: '抑郁',
+      scaleLabel: '抑郁评分量表（PHQ-9）',
+      result: '未进行相关量表',
+      completed: false,
+    });
+  });
+
+  it('formats the real scale conclusion and score without changing the facts', () => {
+    const [adl] = getAssessmentScales(report);
+
+    expect(formatAssessmentScaleResult(adl)).toContain('轻度依赖');
+    expect(formatAssessmentScaleResult(adl)).toContain('需要关注');
+    expect(formatAssessmentScaleResult(adl)).toContain('轻度功能障碍 75分');
+  });
+
+  it('keeps completed scales that are outside the reference CGA catalogue', () => {
+    const customReport = {
+      sourceSnapshot: {
+        assessments: [
+          {
+            scale_code: 'CUSTOM_SCALE',
+            scale_name: '专科自定义量表',
+            result_summary: '已完成专科评估',
+          },
+        ],
+      },
+    } as unknown as AssessmentReport;
+
+    const sections = buildCgaReportSections(getAssessmentScales(customReport));
+    const other = sections.find((section) => section.id === 'other-completed');
+
+    expect(other?.rows).toHaveLength(1);
+    expect(other?.rows[0]).toMatchObject({
+      scaleLabel: '专科自定义量表',
+      result: '已完成专科评估',
+      completed: true,
+    });
   });
 });
