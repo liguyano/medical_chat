@@ -1,5 +1,7 @@
 """医护账号认证与演示种子单元测试。"""
 
+from datetime import date
+
 import pytest
 
 from app.errors.codes import ErrorCode
@@ -153,3 +155,17 @@ def test_patient_demo_seeds_have_unique_identity_credentials() -> None:
     assert len(set(id_cards)) == len(id_cards)
     assert len(set(phones)) == len(phones)
     assert all(len(card) == 18 for card in id_cards)
+
+
+
+def test_patient_demo_seeds_are_all_over_60() -> None:
+    """演示患者应全部为 60 岁以上人群，并保持生日与身份证出生日期一致。"""
+    today = date.today()
+
+    for seed in _PATIENT_SEEDS:
+        birthday = date.fromisoformat(seed["birthday"])
+        age = today.year - birthday.year - (
+            (today.month, today.day) < (birthday.month, birthday.day)
+        )
+        assert age > 60, seed["patient_no"]
+        assert seed["id_card_no"][6:14] == birthday.strftime("%Y%m%d")
