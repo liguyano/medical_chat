@@ -118,7 +118,8 @@ describe('assessment report view', () => {
 
     expect(formatAssessmentScaleResult(adl)).toContain('轻度依赖');
     expect(formatAssessmentScaleResult(adl)).toContain('需要关注');
-    expect(formatAssessmentScaleResult(adl)).toContain('轻度功能障碍 75分');
+    expect(formatAssessmentScaleResult(adl)).toContain('轻度功能障碍');
+    expect(formatAssessmentScaleResult(adl)).toContain('75/100分');
   });
 
   it('keeps completed scales that are outside the reference CGA catalogue', () => {
@@ -144,4 +145,64 @@ describe('assessment report view', () => {
       completed: true,
     });
   });
+  it('deduplicates matching result summary and score interpretation', () => {
+    const scale = {
+      scale_code: 'home_environment_screening',
+      scale_name: '居家环境筛查表',
+      score_status: 'complete' as const,
+      result_summary: '得分越低，表明居家环境风险越大',
+      scores: [{
+        score_name: '总分',
+        score_value: 12,
+        interpretation: '得分越低，表明居家环境风险越大',
+      }],
+    };
+    const result = formatAssessmentScaleResult(scale);
+
+    expect(result.split('得分越低，表明居家环境风险越大')).toHaveLength(2);
+    expect(result).toContain('12分');
+  });
+
+  it('keeps a genuine zero but never turns missing score into zero', () => {
+    const scale = {
+      scale_code: 'home_environment_screening',
+      scale_name: '居家环境筛查表',
+      score_status: 'complete' as const,
+      scores: [{ score_name: '总分', score_value: 0 }],
+    };
+    expect(formatAssessmentScaleResult(scale)).toContain('0分');
+
+    const incomplete = {
+      ...scale,
+      score_status: 'incomplete' as const,
+      scores: [],
+      result_summary: '旧的错误摘要',
+    };
+    expect(formatAssessmentScaleResult(incomplete)).toBe('未完成计分');
+    expect(buildAbilitySummaries([incomplete])[0].score).toBe('未完成计分');
+  });
+
+  it('distinguishes an unfinished scored scale from a non-scoring assessment', () => {
+    const incomplete = {
+      scale_code: 'adl',
+      scale_name: 'ADL',
+      score_status: 'incomplete' as const,
+      scores: [],
+    };
+    const nonScoring = {
+      scale_code: 'admission_assessment',
+      scale_name: '入院评估表',
+      score_status: 'not_applicable' as const,
+      scores: [],
+    };
+    expect(formatAssessmentScaleResult(incomplete)).toBe('未完成计分');
+    expect(formatAssessmentScaleResult(nonScoring)).toBe('已完成评估');
+
+    const physical = buildCgaReportSections([incomplete]).find(
+      (section) => section.id === 'physical'
+    );
+    expect(physical?.rows.find((row) => row.id === 'adl')?.result).toBe('未完成计分');
+    expect(physical?.rows.find((row) => row.id === 'fall')?.result).toBe('未进行相关量表');
+  });
+
 });
