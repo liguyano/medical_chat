@@ -7,7 +7,7 @@ import re
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import (
@@ -22,6 +22,221 @@ from app.models.assessment_template import AssessmentQuestion
 from app.services.manual_question_service import automatic_question_condition
 
 logger = logging.getLogger(__name__)
+
+
+
+def _selected_answer_score(
+    answer: AssessmentAnswer,
+    selected_options: list[AssessmentAnswerOption],
+) -> Decimal | None:
+    """从有效答案的选项快照取得真实临床分值。
+
+    选择题必须有已选选项，且各选项都定义了分值；明确选择 0 分是合法结果。
+    非选择题沿用已经计算并写入答案的临床分数，不直接使用患者输入数值。
+    """
+    if answer.answer_type in {"single_choice", "multiple_choice"}:
+        if not selected_options or any(
+            option.clinical_score is None for option in selected_options
+        ):
+            return None
+        return sum(
+            (Decimal(str(option.clinical_score)) for option in selected_options),
+            Decimal(0),
+        )
+    return (
+        Decimal(str(answer.clinical_score))
+        if answer.clinical_score is not None
+        else None
+    )
+
+
+def _score_rule_matches(expression: str, total: Decimal) -> bool:
+    """只识别已有量表导入器支持的 total_score 简单比较表达式。"""
+    clauses = re.split(r"\s+and\s+", expression.strip(), flags=re.IGNORECASE)
+    for clause in clauses:
+        match = re.fullmatch(
+            r"\s*total_score\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*",
+            clause,
+        )
+        if match is None:
+            return False
+        threshold = Decimal(match.group(2))
+        operator = match.group(1)
+        if not {
+            ">=": total >= threshold,
+            "<=": total <= threshold,
+            "==": total == threshold,
+            ">": total > threshold,
+            "<": total < threshold,
+        }[operator]:
+            return False
+    return bool(clauses)
+
+
+def recalculate_submission_score(
+    db: Session,
+    submission_id: int,
+    scale_version_id: int,
+    *,
+    creator: str = "system",
+) -> list[AssessmentScore]:
+    """重新汇总某一次提交的有效计分答案；由调用方决定何时提交事务。
+
+    未完成的必填题、没有计分题和缺失选项分值必须返回空结果，
+    不能将 None 隐式转换为 0 分，也不能套用跨量表通用风险阈值。
+    """
+    from app.services.assessment_progress_service import (
+        valid_assessment_answer_condition,
+    )
+
+    submission = db.get(AssessmentSubmission, submission_id)
+    if submission is None:
+        raise ValueError(f"评估提交不存在: {submission_id}")
+
+    required_ids = set(
+        db.scalars(
+            select(AssessmentQuestion.id).where(
+                AssessmentQuestion.scale_version_id == scale_version_id,
+                AssessmentQuestion.required.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                AssessmentQuestion.deleted == 0,
+            )
+        ).all()
+    )
+    scored_questions = list(
+        db.scalars(
+            select(AssessmentQuestion).where(
+                AssessmentQuestion.scale_version_id == scale_version_id,
+                AssessmentQuestion.scored.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                AssessmentQuestion.deleted == 0,
+            )
+        ).all()
+    )
+    answers = list(
+        db.scalars(
+            select(AssessmentAnswer).where(
+                AssessmentAnswer.submission_id == submission_id,
+                AssessmentAnswer.deleted == 0,
+                valid_assessment_answer_condition(),
+            )
+        ).all()
+    )
+    answers_by_question = {answer.question_id: answer for answer in answers}
+
+    def clear_incomplete_score() -> list[AssessmentScore]:
+        """清除旧的无效总分，防止报告把尚未计算的量表显示为 0 分。"""
+        db.execute(
+            delete(AssessmentScore).where(
+                AssessmentScore.submission_id == submission_id
+            )
+        )
+        submission.total_score = None
+        submission.risk_level = None
+        submission.result_summary = None
+        submission.updator = creator
+        return []
+
+    if (
+        not scored_questions
+        or required_ids - answers_by_question.keys()
+        or {question.id for question in scored_questions} - answers_by_question.keys()
+    ):
+        return clear_incomplete_score()
+
+    scored_answers = [
+        answers_by_question[question.id]
+        for question in scored_questions
+        if question.id in answers_by_question
+    ]
+    if not scored_answers:
+        return clear_incomplete_score()
+
+    option_answer_ids = [
+        answer.id
+        for answer in scored_answers
+        if answer.answer_type in {"single_choice", "multiple_choice"}
+    ]
+    selected_by_answer: dict[int, list[AssessmentAnswerOption]] = {}
+    if option_answer_ids:
+        selected_options = db.scalars(
+            select(AssessmentAnswerOption).where(
+                AssessmentAnswerOption.assessment_answer_id.in_(option_answer_ids),
+                AssessmentAnswerOption.selected_flag.is_(True),
+                AssessmentAnswerOption.deleted == 0,
+            )
+        ).all()
+        for option in selected_options:
+            selected_by_answer.setdefault(
+                option.assessment_answer_id, []
+            ).append(option)
+
+    scores_by_question: dict[str, float] = {}
+    total_score = Decimal(0)
+    incomplete = False
+    for answer in scored_answers:
+        score = _selected_answer_score(
+            answer, selected_by_answer.get(answer.id, [])
+        )
+        if answer.answer_type in {"single_choice", "multiple_choice"}:
+            # 重算并保存每题的选项累计分，以供报告原始明细直接展示。
+            answer.clinical_score = score
+        if score is None:
+            incomplete = True
+            continue
+        total_score += score
+        scores_by_question[f"question_{answer.question_id}"] = float(score)
+
+    if incomplete:
+        return clear_incomplete_score()
+
+    result_summary = None
+    risk_level = None
+    rules = db.scalars(
+        select(AssessmentRule).where(
+            AssessmentRule.scale_version_id == scale_version_id,
+            AssessmentRule.deleted == 0,
+            AssessmentRule.status.in_(("启用", "active", "enabled")),
+        ).order_by(AssessmentRule.priority.asc(), AssessmentRule.id.asc())
+    ).all()
+    for rule in rules:
+        expression = (rule.condition_expression or {}).get("expression")
+        if not isinstance(expression, str) or not _score_rule_matches(
+            expression, total_score
+        ):
+            continue
+        payload = rule.result_payload or {}
+        result_summary = str(
+            payload.get("result") or payload.get("summary") or ""
+        ) or None
+        raw_risk = payload.get("risk_level")
+        risk_level = str(raw_risk) if raw_risk is not None else None
+        break
+
+    db.execute(
+        delete(AssessmentScore).where(
+            AssessmentScore.submission_id == submission_id
+        )
+    )
+    score = AssessmentScore(
+        submission_id=submission_id,
+        score_code="total_score",
+        score_name="总分",
+        score_type="total",
+        score_value=total_score,
+        risk_level=risk_level,
+        interpretation=result_summary,
+        calculation_detail=scores_by_question,
+        creator=creator,
+        updator=creator,
+    )
+    db.add(score)
+    submission.total_score = total_score
+    submission.risk_level = risk_level
+    submission.result_summary = result_summary
+    submission.updator = creator
+    return [score]
+
 
 
 class ExtractionResultWriter:
@@ -417,161 +632,24 @@ class ExtractionResultWriter:
         scale_version_id: int,
         creator: str = "system",
     ) -> list[AssessmentScore]:
-        """计算临床得分
-        作用：汇总 clinical_score，计算 risk_level
-        Args:
-            - submission_id: 提交记录ID
-            - scale_version_id: 量表版本ID
-            - creator: 创建者
-        Return:
-            - AssessmentScore 列表
-        """
+        """按当前已选选项和量表专属规则计算临床得分。"""
         with self._new_session() as db:
             try:
-                from app.services.assessment_progress_service import (
-                    valid_assessment_answer_condition,
+                scores = recalculate_submission_score(
+                    db, submission_id, scale_version_id, creator=creator
                 )
-
-                manual_scored_ids = set(
-                    db.scalars(
-                        select(AssessmentQuestion.id).where(
-                            AssessmentQuestion.scale_version_id == scale_version_id,
-                            AssessmentQuestion.scored.is_(True),
-                            AssessmentQuestion.derived.is_(False),
-                            ~automatic_question_condition(),
-                            AssessmentQuestion.deleted == 0,
-                        )
-                    ).all()
-                )
-                answered_manual_ids = set(
-                    db.scalars(
-                        select(AssessmentAnswer.question_id).where(
-                            AssessmentAnswer.submission_id == submission_id,
-                            AssessmentAnswer.question_id.in_(manual_scored_ids),
-                            AssessmentAnswer.deleted == 0,
-                            valid_assessment_answer_condition(),
-                        )
-                    ).all()
-                )
-                if manual_scored_ids - answered_manual_ids:
-                    db.query(AssessmentScore).filter(
-                        AssessmentScore.submission_id == submission_id
-                    ).delete()
-                    submission = db.get(AssessmentSubmission, submission_id)
-                    if submission is not None:
-                        submission.total_score = None
-                        submission.risk_level = None
-                        submission.result_summary = None
-                        submission.updator = creator
-                    db.commit()
-                    return []
-
-                answers = (
-                    db.execute(
-                        select(AssessmentAnswer).where(
-                            AssessmentAnswer.submission_id == submission_id,
-                            AssessmentAnswer.deleted == 0,
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-
-                total_score = sum(float(ans.clinical_score or 0.0) for ans in answers)
-
-                rules = db.scalars(
-                    select(AssessmentRule)
-                    .where(
-                        AssessmentRule.scale_version_id == scale_version_id,
-                        AssessmentRule.deleted == 0,
-                        AssessmentRule.status.in_(("启用", "active", "enabled")),
-                    )
-                    .order_by(AssessmentRule.priority.asc(), AssessmentRule.id.asc())
-                ).all()
-                result_summary = None
-                for rule in rules:
-                    expression = (rule.condition_expression or {}).get("expression")
-                    if not isinstance(expression, str):
-                        continue
-                    clauses = re.split(r"\s+and\s+", expression.strip(), flags=re.IGNORECASE)
-                    matches = True
-                    for clause in clauses:
-                        match = re.fullmatch(
-                            r"\s*total_score\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*",
-                            clause,
-                        )
-                        if not match:
-                            matches = False
-                            break
-                        threshold = float(match.group(2))
-                        operator = match.group(1)
-                        matches = {
-                            ">=": total_score >= threshold,
-                            "<=": total_score <= threshold,
-                            "==": total_score == threshold,
-                            ">": total_score > threshold,
-                            "<": total_score < threshold,
-                        }[operator]
-                        if not matches:
-                            break
-                    if matches:
-                        payload = rule.result_payload or {}
-                        result_summary = str(
-                            payload.get("result") or payload.get("summary") or ""
-                        ) or None
-                        break
-
-                # 有量表解释规则时保留规则结论，不强行套用跨量表风险分段。
-                if rules:
-                    risk_level = None
-                elif total_score >= 10:
-                    risk_level = "high_risk"
-                elif total_score >= 5:
-                    risk_level = "medium_risk"
-                else:
-                    risk_level = "low_risk"
-
-                calculation_detail = {
-                    f"question_{ans.question_id}": float(ans.clinical_score or 0.0)
-                    for ans in answers
-                    if ans.clinical_score
-                }
-
-                # 删除旧得分记录
-                db.query(AssessmentScore).filter(
-                    AssessmentScore.submission_id == submission_id
-                ).delete()
-
-                # 创建新得分
-                score = AssessmentScore(
-                    submission_id=submission_id,
-                    score_code="total_score",
-                    score_name="总分",
-                    score_type="total",
-                    score_value=Decimal(str(total_score)),
-                    risk_level=risk_level,
-                    interpretation=result_summary,
-                    calculation_detail=calculation_detail,
-                    creator=creator,
-                )
-
-                db.add(score)
-                submission = db.get(AssessmentSubmission, submission_id)
-                if submission is not None:
-                    submission.total_score = Decimal(str(total_score))
-                    submission.risk_level = risk_level
-                    submission.result_summary = result_summary
-                    submission.updator = creator
                 db.commit()
-                db.refresh(score)
-
+                for score in scores:
+                    db.refresh(score)
                 logger.info(
-                    f"[ExtractionResultWriter] 计算得分: submission_id={submission_id}, "
-                    f"total={total_score}, risk={risk_level}"
+                    "[ExtractionResultWriter] 重新计算得分: submission_id=%s, total=%s",
+                    submission_id,
+                    scores[0].score_value if scores else "未完成计分",
                 )
-                return [score]
-
+                return scores
             except Exception:
                 db.rollback()
-                logger.exception("[ExtractionResultWriter] calculate_scores 失败")
+                logger.exception(
+                    "[ExtractionResultWriter] calculate_scores 失败"
+                )
                 raise

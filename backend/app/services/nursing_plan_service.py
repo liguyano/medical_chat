@@ -160,6 +160,84 @@ def _answer_value(
     return None
 
 
+
+def _scored_submission_values(
+    db: Session,
+    submission_id: int,
+    scale_version_id: int,
+) -> dict[int, str]:
+    """读取某份提交的计分题真实答案；选择题按已保存的选项标签比较。"""
+    scored_rows = db.execute(
+        select(AssessmentAnswer, AssessmentQuestion)
+        .join(AssessmentQuestion, AssessmentQuestion.id == AssessmentAnswer.question_id)
+        .where(
+            AssessmentAnswer.submission_id == submission_id,
+            AssessmentAnswer.deleted == 0,
+            AssessmentQuestion.scale_version_id == scale_version_id,
+            AssessmentQuestion.scored.is_(True),
+            AssessmentQuestion.derived.is_(False),
+            AssessmentQuestion.deleted == 0,
+        )
+    ).all()
+    answer_ids = [answer.id for answer, _ in scored_rows]
+    labels: dict[int, list[str]] = defaultdict(list)
+    if answer_ids:
+        selected = db.execute(
+            select(
+                AssessmentAnswerOption.assessment_answer_id,
+                AssessmentAnswerOption.option_label_snapshot,
+            )
+            .where(
+                AssessmentAnswerOption.assessment_answer_id.in_(answer_ids),
+                AssessmentAnswerOption.selected_flag.is_(True),
+                AssessmentAnswerOption.deleted == 0,
+            )
+            .order_by(AssessmentAnswerOption.id.asc())
+        ).all()
+        for answer_id, label in selected:
+            labels[answer_id].append(label)
+
+    values: dict[int, str] = {}
+    for answer, _ in scored_rows:
+        value = _answer_value(answer, labels.get(answer.id, []))
+        if value is not None:
+            values[answer.question_id] = "".join(str(value).split())
+    return values
+
+
+def _can_reuse_source_score(
+    db: Session,
+    target: AssessmentSubmission,
+    score_source: AssessmentSubmission,
+    scale_version_id: int,
+) -> bool:
+    """仅当两份提交的全部计分题答案一致，才复用历史选项分数。
+
+    最终确认提交往往只有护士填写的文本答案。若护士更正了任何计分题，
+    不得将旧 AI 得分冒充最终评估分数。
+    """
+    required_scored_ids = set(
+        db.scalars(
+            select(AssessmentQuestion.id).where(
+                AssessmentQuestion.scale_version_id == scale_version_id,
+                AssessmentQuestion.scored.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                AssessmentQuestion.deleted == 0,
+            )
+        ).all()
+    )
+    if not required_scored_ids:
+        return False
+    target_values = _scored_submission_values(db, target.id, scale_version_id)
+    source_values = _scored_submission_values(
+        db, score_source.id, scale_version_id
+    )
+    return (
+        set(target_values) == required_scored_ids
+        and set(source_values) == required_scored_ids
+        and target_values == source_values
+    )
+
 def build_generation_source(
     db: Session,
     task: CareTask,
@@ -187,11 +265,13 @@ def build_generation_source(
     )
     source_submissions: list[AssessmentSubmission] = []
     scale_by_instance: dict[int, AssessmentScale] = {}
+    version_by_instance: dict[int, int] = {}
     for instance, scale in instance_rows:
         submission = _select_source_submission(db, instance.id)
         if submission is not None:
             source_submissions.append(submission)
             scale_by_instance[instance.id] = scale
+            version_by_instance[instance.id] = instance.scale_version_id
     if not source_submissions:
         raise AppError(
             ErrorCode.ERR_COMMON_001,
@@ -299,11 +379,30 @@ def build_generation_source(
         )
         if fallback_scores:
             latest_source_id = fallback_scores[0].submission_id
-            scores_by_submission[submission.id] = [
-                score_payload(score)
-                for score in fallback_scores
-                if score.submission_id == latest_source_id
-            ]
+            score_source = db.get(AssessmentSubmission, latest_source_id)
+            if score_source is not None and _can_reuse_source_score(
+                db,
+                submission,
+                score_source,
+                version_by_instance[submission.assessment_instance_id],
+            ):
+                scores_by_submission[submission.id] = [
+                    score_payload(score)
+                    for score in fallback_scores
+                    if score.submission_id == latest_source_id
+                ]
+
+    # 量表本身不含计分题与计分依据不足应当分开展示。
+    scored_versions = set(
+        db.scalars(
+            select(AssessmentQuestion.scale_version_id).where(
+                AssessmentQuestion.scale_version_id.in_(list(version_by_instance.values())),
+                AssessmentQuestion.scored.is_(True),
+                AssessmentQuestion.derived.is_(False),
+                AssessmentQuestion.deleted == 0,
+            )
+        ).all()
+    )
 
     session = db.scalar(
         select(InteractionSession)
@@ -328,6 +427,14 @@ def build_generation_source(
                 or first_score.get("interpretation"),
                 "risk_level": submission.risk_level
                 or first_score.get("risk_level"),
+                "score_status": (
+                    "not_applicable"
+                    if version_by_instance[submission.assessment_instance_id]
+                    not in scored_versions
+                    else "complete"
+                    if any(item.get("score_value") is not None for item in scores)
+                    else "incomplete"
+                ),
                 "answers": answers_by_submission[submission.id],
                 "scores": scores,
             }
