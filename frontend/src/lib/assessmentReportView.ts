@@ -20,6 +20,7 @@ export interface AssessmentScaleSnapshot {
   scale_name?: string;
   result_summary?: string | null;
   risk_level?: string | null;
+  score_status?: 'complete' | 'incomplete' | 'not_applicable' | null;
   answers?: AssessmentAnswerSnapshot[];
   scores?: AssessmentScoreSnapshot[];
   assessor_name?: string | null;
@@ -377,26 +378,48 @@ function scaleMatches(scale: AssessmentScaleSnapshot, item: CgaCatalogItem): boo
 
 function conciseScore(score: AssessmentScoreSnapshot): string {
   if (score.score_value === null || score.score_value === undefined || score.score_value === '') {
-    return score.interpretation?.trim() ?? '';
+    return '';
   }
-
   const value = String(score.score_value);
-  const scoreText = /分$/.test(value) ? value : `${value}分`;
-  return [score.interpretation?.trim(), scoreText].filter(Boolean).join(' ');
+  const maximum = score.max_score === null || score.max_score === undefined || score.max_score === ''
+    ? ''
+    : `/${score.max_score}`;
+  const label = score.score_name && score.score_name !== '总分'
+    ? `${score.score_name}：`
+    : '';
+  return `${label}${value}${maximum}分`;
 }
 
 export function formatAssessmentScaleResult(scale: AssessmentScaleSnapshot): string {
-  const parts = [
+  const validScores = (scale.scores ?? []).filter(
+    (score) => score.score_value !== null &&
+      score.score_value !== undefined &&
+      score.score_value !== ''
+  );
+  if (
+    scale.score_status === 'incomplete' ||
+    (scale.score_status === 'complete' && !validScores.length)
+  ) {
+    return '未完成计分';
+  }
+
+  // 摘要和得分解释来自两个不同字段，先对解释单独去重，再拼接数字。
+  const explanations = [
     scale.result_summary?.trim(),
     scale.risk_level?.trim(),
-    ...(scale.scores ?? []).map(conciseScore),
+    ...(scale.scores ?? []).map((score) => score.interpretation?.trim()),
   ].filter((value): value is string => Boolean(value));
-
-  const uniqueParts = parts.filter(
-    (value, index) => parts.findIndex((candidate) => normalize(candidate) === normalize(value)) === index
+  const uniqueExplanations = explanations.filter(
+    (value, index) => explanations.findIndex(
+      (candidate) => normalize(candidate) === normalize(value)
+    ) === index
   );
+  const scoreTexts = validScores.map(conciseScore).filter(Boolean);
+  const parts = [...uniqueExplanations, ...scoreTexts];
 
-  return uniqueParts.join('；') || '已完成评估';
+  if (parts.length) return parts.join('；');
+  if (scale.score_status === 'not_applicable') return '已完成评估';
+  return '未完成计分';
 }
 
 export function getAssessmentScales(
@@ -475,8 +498,12 @@ export function buildAbilitySummaries(
   return scales.map((scale, index) => ({
     code: scale.scale_code ?? `scale-${index + 1}`,
     name: scale.scale_name ?? '未命名量表',
-    conclusion: scale.result_summary || '已完成评估',
-    score: (scale.scores ?? []).map(displayScore).filter(Boolean).join('；'),
+    conclusion: scale.score_status === 'incomplete'
+      ? '未完成计分'
+      : scale.result_summary || '已完成评估',
+    score: scale.score_status === 'incomplete'
+      ? '未完成计分'
+      : (scale.scores ?? []).map(displayScore).filter(Boolean).join('；'),
     riskLevel: scale.risk_level || '',
   }));
 }

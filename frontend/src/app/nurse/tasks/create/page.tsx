@@ -209,7 +209,7 @@ function CreateTaskContent() {
             <Badge variant="primary">步骤 {step}/4</Badge>
             <IntegrationStatus compact />
           </div>
-          <h1 className="text-3xl mt-2">创建<span className="text-primary italic">评估任务包</span></h1>
+          <h1 className="text-3xl mt-2">创建<span className="text-primary italic">老年量表收集任务</span></h1>
           <p className="text-foreground-muted mt-1">选择患者、量表、采集方式和配套宣教内容</p>
         </div>
 
@@ -329,7 +329,7 @@ function CreateTaskContent() {
                     value: 'ai_dialogue',
                     label: 'AI对话采集',
                     detail: apiMode
-                      ? '文字问诊、实时抽取与护理监控'
+                      ? '文字问诊、实时抽取与量表收集监控'
                       : '文字/语音模拟、实时抽取与宣教',
                   },
                   { value: 'traditional_form', label: '传统问卷', detail: '分组填写、自动保存与断点续答' },

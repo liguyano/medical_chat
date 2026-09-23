@@ -53,7 +53,7 @@ export default function NurseTasksPage() {
           <h1 className="text-3xl font-serif font-medium text-foreground mb-2">
             任务<span className="text-primary italic">管理</span>
           </h1>
-          <p className="text-foreground-muted">管理所有护理评估任务</p>
+          <p className="text-foreground-muted">管理所有老年量表收集任务</p>
         </div>
         <Button
           onClick={() => router.push('/nurse/tasks/create')}

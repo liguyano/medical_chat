@@ -98,7 +98,7 @@ export default function NurseDashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>我的任务</CardTitle>
-              <CardDescription>分配给我的护理评估任务</CardDescription>
+              <CardDescription>分配给我的老年量表收集任务</CardDescription>
             </div>
             <Badge variant="primary">{myTasks.length} 项</Badge>
           </div>

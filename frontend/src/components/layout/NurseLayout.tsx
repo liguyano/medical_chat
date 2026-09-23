@@ -167,7 +167,7 @@ export default function NurseLayout({
                 <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                   <span className="text-white font-bold">医</span>
                 </div>
-                <span className="text-xl font-serif font-medium">智能护理评估</span>
+                <span className="text-xl font-serif font-medium">老年量表收集</span>
               </Link>
 
               {/* 导航菜单 */}

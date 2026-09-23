@@ -16,6 +16,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.configs.app_config import get_app_config
+from app.managers.extraction_result_writer import recalculate_submission_score
+from app.models.assessment_execution import AssessmentInstance, AssessmentSubmission
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.models.assessment_report import AssessmentReport
@@ -190,6 +192,39 @@ def get_assessment_report(
     return _to_dto(report, history)
 
 
+def _refresh_task_ai_scores(db: Session, task_id: int) -> None:
+    """生成新版报告前重算历史 AI 选项分数，不覆盖已存报告快照。
+
+    护士最终确认提交目前是文本答案，不能无依据为其分配选项分数；
+    只重算已存储原始选项快照的最新 AI 提交，供后续事实聚合审慎引用。
+    """
+    instances = db.scalars(
+        select(AssessmentInstance).where(
+            AssessmentInstance.task_id == task_id,
+            AssessmentInstance.deleted == 0,
+        )
+    ).all()
+    for instance in instances:
+        ai_submission = db.scalar(
+            select(AssessmentSubmission)
+            .where(
+                AssessmentSubmission.assessment_instance_id == instance.id,
+                AssessmentSubmission.submission_type.in_(
+                    ("ai_extraction", "ai_extracted", "AI抽取")
+                ),
+                AssessmentSubmission.deleted == 0,
+            )
+            .order_by(AssessmentSubmission.id.desc())
+        )
+        if ai_submission is not None:
+            recalculate_submission_score(
+                db,
+                ai_submission.id,
+                instance.scale_version_id,
+                creator="assessment_report",
+            )
+
+
 async def generate_assessment_report(
     db: Session,
     task_ref: str | int,
@@ -207,6 +242,9 @@ async def generate_assessment_report(
     if history and not force:
         return _to_dto(history[0], history)
 
+    # 新报告读取前先修复既有 AI 选项分值；旧报告版本保持不可变。
+    _refresh_task_ai_scores(db, task.id)
+    db.commit()
     source, submission_ids = build_generation_source(db, task)
     output, model_name = await generate_ai_report(source, model=model)
     version_no = int(
