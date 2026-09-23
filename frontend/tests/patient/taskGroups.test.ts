@@ -59,7 +59,7 @@ describe('患者 API 演示身份', () => {
     expect(new Set(patientDemoAccounts.map((item) => item.phone)).size).toBe(10);
     expect(patientDemoAccounts.find((item) => item.name === '周海燕')).toEqual({
       name: '周海燕',
-      idCardNo: '110101197206150028',
+      idCardNo: '110101195206150028',
       phone: '13800000006',
     });
   });
