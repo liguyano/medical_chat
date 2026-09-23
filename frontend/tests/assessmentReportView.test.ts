@@ -32,6 +32,7 @@ const report = {
       {
         scale_code: 'SLEEP',
         scale_name: '睡眠情况',
+        score_status: 'incomplete',
         answers: [
           { question: '总睡眠质量', value: '一般', abnormal: false },
         ],
@@ -75,8 +76,8 @@ describe('assessment report view', () => {
       {
         code: 'SLEEP',
         name: '睡眠情况',
-        conclusion: '已完成评估',
-        score: '',
+        conclusion: '未完成计分',
+        score: '未完成计分',
         riskLevel: '',
       },
     ]);
@@ -95,7 +96,7 @@ describe('assessment report view', () => {
     expect(sleep?.rows.find((row) => row.id === 'sleep')).toMatchObject({
       item: '睡眠',
       scaleLabel: '睡眠情况',
-      result: '已完成评估',
+      result: '未完成计分',
       completed: true,
     });
   });
