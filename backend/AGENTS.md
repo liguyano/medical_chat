@@ -230,6 +230,16 @@ from medagent.configs.agent_config import get_agent_config
   `confidence`。选择题必须返回题库真实 `option_code`；无法明确对应任何题目时返回空
   `answers`。应用层只校验题目是否属于当前量表、类型/选项是否合法、置信度是否达到有效阈值，
   不得根据“有/没有/是/否”等关键词、选项标签或 AI 问句关联二次猜测答案。
+
+- 量表计分只依据实际存储的有效计分题和选中选项快照：单选/多选对
+  `assessment_answer_option.clinical_score` 求和，非选择题仅使用已经计算并
+  保存的 `assessment_answer.clinical_score`；禁止将缺失分数当成 0，也不得
+  同时叠加选择题答案级旧分数。必填题或计分项不完整时清除无效得分记录，
+  有效全零答案仍必须保留真实 0 分；无专属量表风险规则时不套用通用 5/10 分阈值。
+- 评估报告新版本生成前可重算同任务 AI 提交的持久化选项分数，原有报告版本
+  `source_snapshot` 不得回写。护士最终确认记录只有文本答案时，只有该
+  量表所有计分题的答案与得分来源逐项一致，才能复用历史提交的计分结果；
+  无依据时将新报告中的计分状态标记为 `incomplete`。
 - `interaction_message.related_question_id` 仅可作为 Dialog 目标题/诊断提示，不能作为
   Extraction 答案归属事实来源；旧消息该字段为空时 Dialog 必须使用运行游标继续，不能因
   `related_question_id=None` 中断患者对话。Dialog 下一题以有效结构化答案缺口为依据。
