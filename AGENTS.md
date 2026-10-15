@@ -48,7 +48,7 @@ guide rather than expecting full detail here:
 ├─ tests/                   # 测试开发模块
 ├─ config.example.yaml      # Template → copy to config.yaml (gitignored) at repo root
 ├── extensions_config.json  # MCP servers and skills configuration
-└─ README.md                # 项目手册, 先强制为空文档.
+└─ README.md                # 中文项目手册，提供功能、启动、检查与部署文档入口。
 ```
 
 ## 开发规范
