@@ -59,6 +59,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - API 模式进入患者对话页时必须以最新后端快照校正 Zustand 中的持久化会话，不能因为
   sessionStorage 已存在旧会话就跳过刷新；首问完成事件必须把旧 `pending` 状态切换为
   `active`。`streamingTaskId` 等瞬时传输状态不得跨页面恢复为正在生成。
+- 患者对话快照只能在请求成功后标记已加载；Effect 清理取消请求后必须允许重新加载，
+  且取消后的迟到成功/失败不能写入页面或 Store。快照失败提供“重新加载会话”入口，
+  重试完成前保持加载态并禁止订阅 SSE，不能要求患者刷新整个页面才能恢复。
 - 患者实时语音仅通过 `src/lib/transports/voiceSocket.ts` 连接后端 WebSocket；浏览器音频必须量化为 16kHz 单声道 PCM16，不得直接发送 Float32 底层字节。
 - 语音或网络失败时保留文字输入，并在 UI 显示 Mock/API、SSE 和语音连接状态。
 - API 模式语音页面使用 Qwen Realtime 的后端网关；患者/AI 音频完成索引通过

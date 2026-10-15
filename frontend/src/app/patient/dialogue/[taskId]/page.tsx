@@ -13,7 +13,7 @@ import { PatientIcon } from '@/components/patient/PatientIcon';
 import { VoiceOrb } from '@/components/patient/VoiceOrb';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
 import { useRealtimeStream } from '@/hooks/useRealtimeStream';
-import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
+import { startDialogueSnapshotLoad } from '@/lib/dialogue/snapshotLoad';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
 import { buildDialogueHistoryTimeline } from '@/lib/dialogue/historyTimeline';
@@ -294,6 +294,8 @@ export default function PatientDialoguePage() {
   const [resolvedSnapshotKey, setResolvedSnapshotKey] = useState<string | null>(
     null
   );
+  const [snapshotError, setSnapshotError] = useState('');
+  const [snapshotRetryCount, setSnapshotRetryCount] = useState(0);
   const snapshotLoading = isDialogueSnapshotLoading(
     runtimeConfig.dataMode,
     dialogueSnapshotKey,
@@ -370,14 +372,12 @@ export default function PatientDialoguePage() {
       return;
     }
 
-    loadedSnapshotKeyRef.current = dialogueSnapshotKey;
     // API 快照是当前任务的事实来源。加载前移除同任务编号下可能残留的
     // Mock 或其他患者会话，禁止在请求期间展示旧患者数据。
     useChatStore.getState().clearSession(taskId);
-    const controller = new AbortController();
-    void careRepository
-      .getDialogueSnapshot(currentTask, controller.signal)
-      .then((snapshot) => {
+    return startDialogueSnapshotLoad({
+      load: (signal) => careRepository.getDialogueSnapshot(currentTask, signal),
+      onSuccess: (snapshot) => {
         loadedSnapshotKeyRef.current = buildDialogueSnapshotKey(
           taskId,
           snapshot.session.id
@@ -392,6 +392,7 @@ export default function PatientDialoguePage() {
             : ''
         );
         snapshot.events.forEach(applyRealtimeEvent);
+        setSnapshotError('');
         setConnectionError('');
         setResolvedSnapshotKey(
           buildDialogueSnapshotKey(taskId, snapshot.session.id)
@@ -412,22 +413,22 @@ export default function PatientDialoguePage() {
                 },
               }),
         });
-      })
-      .catch((loadError) => {
-        if (controller.signal.aborted || isRequestCancelled(loadError)) return;
+      },
+      onError: (loadError) => {
         loadedSnapshotKeyRef.current = null;
         setResolvedSnapshotKey(dialogueSnapshotKey);
-        setConnectionError(
+        setSnapshotError(
           loadError instanceof Error
             ? `会话加载失败：${loadError.message}`
             : '会话加载失败'
         );
-      });
-    return () => abortRequest(controller);
+      },
+    });
   }, [
     dialogueSnapshotKey,
     readOnly,
     setSession,
+    snapshotRetryCount,
     taskId,
     totalQuestions,
     updateTask,
@@ -975,6 +976,30 @@ export default function PatientDialoguePage() {
             className="mx-auto h-24 w-24"
           />
           <p className="mt-4 font-bold">任务不存在或已经失效</p>
+        </div>
+      </PatientLayout>
+    );
+  }
+
+  if (snapshotError && !snapshotLoading) {
+    return (
+      <PatientLayout title="AI智能评估" showBack>
+        <div className="flex min-h-[60dvh] items-center justify-center p-6">
+          <div className="text-center">
+            <p role="alert" className="font-bold text-danger">{snapshotError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                loadedSnapshotKeyRef.current = null;
+                setSnapshotError('');
+                setResolvedSnapshotKey(null);
+                setSnapshotRetryCount((count) => count + 1);
+              }}
+              className="patient-primary-button mt-4 min-h-12 px-6"
+            >
+              重新加载会话
+            </button>
+          </div>
         </div>
       </PatientLayout>
     );
