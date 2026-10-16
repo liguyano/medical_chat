@@ -67,7 +67,7 @@ export interface PatientRecordInput {
     department: string;
     ward: string;
     bedNo: string;
-    admissionDate: string;
+    admissionDate?: string;
     dischargeDate?: string;
     encounterStatus: PatientEncounter['encounterStatus'];
     primaryDiagnosis: string;

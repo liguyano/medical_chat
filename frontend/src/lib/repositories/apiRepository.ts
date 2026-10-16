@@ -198,8 +198,12 @@ function patientRecordBody(input: PatientRecordInput, updating: boolean) {
       department_name: input.encounter.department,
       ward_name: input.encounter.ward,
       bed_no: input.encounter.bedNo,
-      admission_time: input.encounter.admissionDate,
-      discharge_time: input.encounter.dischargeDate || null,
+      ...(input.encounter.admissionDate !== undefined
+        ? { admission_time: input.encounter.admissionDate }
+        : {}),
+      ...(input.encounter.dischargeDate !== undefined
+        ? { discharge_time: input.encounter.dischargeDate || null }
+        : {}),
       encounter_status: toBackendEncounterStatus(
         input.encounter.encounterStatus
       ),

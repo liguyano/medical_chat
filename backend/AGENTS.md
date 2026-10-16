@@ -37,6 +37,10 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 
 # 开发规范
 
+- 新增患者住院记录时，未提供 `admission_time` 使用服务端当前 UTC 时间，
+  默认 `encounter_status=在院`、`discharge_time=null`；显式历史时间继续兼容。
+  编辑请求未包含日期时保留数据库原值，不以空值覆盖；此规则不改变数据库字段约束。
+
 1. Python 环境：在 `backend` 下使用 uv 创建环境, 默认采用 python=3.11.
 
 2. 代码大幅重构时不保留旧类名、旧函数、旧配置字段或旧导入路径兼容层, 旧入口直接直接删除, 全部采用新方案.

@@ -4,6 +4,7 @@
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -36,8 +37,6 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
             "department_name": "心内科",
             "ward_name": "心内病区A",
             "bed_no": "99-1",
-            "admission_time": "2026-08-20T08:00:00+08:00",
-            "encounter_status": "在院",
             "diagnosis_snapshot": {
                 "primary": "冠心病",
                 "secondary": ["高血压"],
@@ -58,11 +57,24 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
             )
             assert login.status_code == 200, login.text
 
+            before_create = datetime.now(UTC)
             created = client.post("/api/patients", json=payload)
             assert created.status_code == 200, created.text
             created_data = created.json()["data"]
             patient_id = int(created_data["patient"]["id"])
             encounter_id = int(created_data["encounter"]["id"])
+            assert model_base.SessionLocal is not None
+            with model_base.SessionLocal() as verification_db:
+                saved_patient = verification_db.get(Patient, patient_id)
+                saved_encounter = verification_db.get(PatientEncounter, encounter_id)
+                assert saved_patient is not None
+                assert saved_patient.patient_name == "接口测试患者"
+                assert saved_encounter is not None
+                assert saved_encounter.patient_id == saved_patient.id
+                assert before_create <= saved_encounter.admission_time <= datetime.now(UTC)
+                assert saved_encounter.discharge_time is None
+                assert saved_encounter.encounter_status == "在院"
+                saved_admission_time = saved_encounter.admission_time
             assert created_data["patient"]["id_card_masked"]
             assert "id_card_no" not in created_data["patient"]
             assert "id_card_ciphertext" not in created_data["patient"]
@@ -106,6 +118,11 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
             assert updated_data["patient"]["patient_name"] == "接口测试患者已编辑"
             assert updated_data["encounter"]["bed_no"] == "99-2"
             assert updated_data["encounter"]["nursing_level"] == "二级护理"
+            with model_base.SessionLocal() as verification_db:
+                saved_encounter = verification_db.get(PatientEncounter, encounter_id)
+                assert saved_encounter is not None
+                assert saved_encounter.admission_time == saved_admission_time
+                assert saved_encounter.discharge_time is None
 
             duplicate = client.post("/api/patients", json=payload)
             assert duplicate.status_code == 409, duplicate.text

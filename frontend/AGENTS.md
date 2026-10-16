@@ -110,6 +110,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `/nurse/patients`、`/nurse/patients/new`、`/nurse/patients/[patientId]` 和编辑页统一通过
   `CareRepository` 管理患者主档与本次住院记录；列表需展示护理级别、过敏摘要、任务摘要
   和人工介入状态，新增/编辑共享同一表单，API 模式禁止读取 `src/lib/mock` 补数据。
+- 护士新增/编辑患者表单不提供入院、出院日期或住院状态选择；新建默认在院，
+  入院时间由后端生成，出院时间留空。编辑时不提交隐藏日期，保留历史时间与状态；
+  Mock 新建须补当前时间，Mock 编辑须保留未提供的原日期。
 - 患者主动呼叫必须为一次按钮异步操作生成唯一 `clientInvocationId` 并在请求完成前锁定
   重复提交；HTTP 回退、SSE 与历史快照继续按领域 `event_id` / `request_id` 更新同一组件。
   不同领域事件必须分别展示，前端不得按工具名称或参数合并模型调用。

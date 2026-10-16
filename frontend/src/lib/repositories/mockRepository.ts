@@ -531,7 +531,7 @@ function buildMockRecordFromInput(
     department: input.encounter.department,
     ward: input.encounter.ward,
     bedNo: input.encounter.bedNo,
-    admissionDate: input.encounter.admissionDate,
+    admissionDate: input.encounter.admissionDate ?? new Date().toISOString(),
     dischargeDate: input.encounter.dischargeDate,
     diagnosis: input.encounter.primaryDiagnosis,
     diagnosisSnapshot: {
@@ -671,7 +671,16 @@ export class MockCareRepository implements CareRepository {
     const currentPatient = mockPatients[patientIndex];
     const currentEncounter = mockEncounters[encounterIndex];
     const record = buildMockRecordFromInput(
-      input,
+      {
+        ...input,
+        encounter: {
+          ...input.encounter,
+          admissionDate: input.encounter.admissionDate ?? currentEncounter.admissionDate,
+          dischargeDate: input.encounter.dischargeDate === undefined
+            ? currentEncounter.dischargeDate
+            : input.encounter.dischargeDate,
+        },
+      },
       currentPatient.id,
       currentEncounter.id,
       currentPatient.patientNo,

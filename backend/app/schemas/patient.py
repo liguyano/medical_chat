@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -98,7 +98,7 @@ class PatientEncounterCreatePayload(BaseModel):
     department_name: str = Field(..., min_length=1, max_length=128)
     ward_name: str = Field(..., min_length=1, max_length=128)
     bed_no: str = Field(..., min_length=1, max_length=32)
-    admission_time: datetime
+    admission_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     discharge_time: datetime | None = None
     encounter_status: EncounterStatus = "在院"
     diagnosis_snapshot: dict | None = None

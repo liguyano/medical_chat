@@ -46,6 +46,76 @@ const patientInput = {
 };
 
 describe('patient management repository', () => {
+  it('API 新增和编辑省略未提供的住院日期，交由服务端维护', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => okResponse({
+      patient: {
+        id: 9, patient_no: 'P0009', patient_name: '测试患者', sex: '女',
+        birthday: '1980-01-02', phone: '13899990001',
+      },
+      encounter: {
+        id: 19, patient_id: 9, encounter_no: 'E0019', inpatient_no: 'ZY-CODEX-1',
+        department_name: '心内科', ward_name: '心内病区A', bed_no: '99-1',
+        admission_time: '2026-10-16T00:00:00Z', encounter_status: '在院',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const repository = new ApiCareRepository();
+    const input = {
+      ...patientInput,
+      encounter: { ...patientInput.encounter, admissionDate: undefined },
+    };
+    await repository.createPatient(input);
+    await repository.updatePatient('9', {
+      ...input, encounter: { ...input.encounter, id: '19' },
+    });
+    for (const call of fetchMock.mock.calls) {
+      const body = JSON.parse(String((call[1] as RequestInit).body));
+      expect(body.encounter).not.toHaveProperty('admission_time');
+      expect(body.encounter).not.toHaveProperty('discharge_time');
+      expect(body.encounter.encounter_status).toBe('在院');
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('Mock 新增自动填写入院时间，编辑时保留已有住院日期', async () => {
+    const repository = new MockCareRepository();
+    const before = Date.now();
+    const input = {
+      ...patientInput,
+      encounter: { ...patientInput.encounter, inpatientNo: 'MOCK-AUTO-TIME', admissionDate: undefined },
+    };
+    const created = await repository.createPatient(input);
+    expect(Date.parse(created.encounter.admissionDate)).toBeGreaterThanOrEqual(before);
+    expect(created.encounter.dischargeDate).toBeUndefined();
+    const updated = await repository.updatePatient(created.patient.id, {
+      ...input, encounter: { ...input.encounter, id: created.encounter.id, bedNo: 'TEST-NEW' },
+    });
+    expect(updated.encounter.admissionDate).toBe(created.encounter.admissionDate);
+  });
+
+  it('Mock 编辑已出院患者时保留历史入院、出院日期和状态', async () => {
+    const repository = new MockCareRepository();
+    const historical = {
+      ...patientInput,
+      encounter: {
+        ...patientInput.encounter, inpatientNo: 'MOCK-HISTORY-DATES',
+        admissionDate: '2020-01-01T00:00:00Z',
+        dischargeDate: '2020-01-08T00:00:00Z', encounterStatus: 'discharged' as const,
+      },
+    };
+    const created = await repository.createPatient(historical);
+    const updated = await repository.updatePatient(created.patient.id, {
+      ...historical,
+      encounter: {
+        ...historical.encounter, id: created.encounter.id,
+        admissionDate: undefined, dischargeDate: undefined, bedNo: 'TEST-EDIT',
+      },
+    });
+    expect(updated.encounter.admissionDate).toBe('2020-01-01T00:00:00Z');
+    expect(updated.encounter.dischargeDate).toBe('2020-01-08T00:00:00Z');
+    expect(updated.encounter.encounterStatus).toBe('discharged');
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

@@ -1,5 +1,7 @@
 # PostgreSQL 集成测试
 
+患者管理测试 `test_patient_management.py` 验证省略日期的新建、独立数据库会话查询患者主档与住院记录、编辑保留日期，并在 finally 中清理本次测试记录。
+
 前置条件：
 
 - Docker 容器 `medical-evaluate-postgres` 正常运行。

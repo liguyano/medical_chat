@@ -21,14 +21,6 @@ interface PatientRecordFormProps {
 const fieldClassName =
   'w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary';
 
-function toLocalDateTime(value?: string): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
-
 function diagnosisValue(
   record: PatientWithEncounter | undefined,
   key: 'secondary' | 'risk_note'
@@ -64,8 +56,6 @@ export default function PatientRecordForm({
     department: initialRecord?.encounter.department ?? '',
     ward: initialRecord?.encounter.ward ?? '',
     bedNo: initialRecord?.encounter.bedNo ?? '',
-    admissionDate: toLocalDateTime(initialRecord?.encounter.admissionDate),
-    dischargeDate: toLocalDateTime(initialRecord?.encounter.dischargeDate),
     encounterStatus:
       initialRecord?.encounter.encounterStatus ?? ('in_hospital' as const),
     primaryDiagnosis: initialRecord?.encounter.diagnosis ?? '',
@@ -87,7 +77,6 @@ export default function PatientRecordForm({
       ['科室', form.department],
       ['病区', form.ward],
       ['床号', form.bedNo],
-      ['入院时间', form.admissionDate],
       ['主要诊断', form.primaryDiagnosis],
       ...(mode === 'create' ? ([['身份证号', form.idCardNo]] as const) : []),
     ],
@@ -104,10 +93,6 @@ export default function PatientRecordForm({
     const missing = requiredFields.find(([, value]) => !value.trim());
     if (missing) {
       setValidationError(`请填写${missing[0]}`);
-      return;
-    }
-    if (form.dischargeDate && form.encounterStatus === 'in_hospital') {
-      setValidationError('已填写出院时间时，住院状态不能仍为“在院”');
       return;
     }
     await onSubmit({
@@ -133,10 +118,6 @@ export default function PatientRecordForm({
         department: form.department.trim(),
         ward: form.ward.trim(),
         bedNo: form.bedNo.trim(),
-        admissionDate: new Date(form.admissionDate).toISOString(),
-        dischargeDate: form.dischargeDate
-          ? new Date(form.dischargeDate).toISOString()
-          : undefined,
         encounterStatus: form.encounterStatus,
         primaryDiagnosis: form.primaryDiagnosis.trim(),
         secondaryDiagnoses: form.secondaryDiagnoses
@@ -263,33 +244,12 @@ export default function PatientRecordForm({
             value={form.bedNo}
             onChange={(event) => update('bedNo', event.target.value)}
           />
-          <label className="text-sm font-medium">
-            <span className="mb-1.5 block">住院状态 *</span>
-            <select
-              value={form.encounterStatus}
-              onChange={(event) =>
-                update('encounterStatus', event.target.value)
-              }
-              className={fieldClassName}
-            >
-              <option value="pending_admission">待入院</option>
-              <option value="in_hospital">在院</option>
-              <option value="discharged">已出院</option>
-              <option value="cancelled">取消</option>
-            </select>
-          </label>
-          <Input
-            label="入院时间 *"
-            type="datetime-local"
-            value={form.admissionDate}
-            onChange={(event) => update('admissionDate', event.target.value)}
-          />
-          <Input
-            label="出院时间"
-            type="datetime-local"
-            value={form.dischargeDate}
-            onChange={(event) => update('dischargeDate', event.target.value)}
-          />
+          <div className="text-sm font-medium">
+            <span className="mb-1.5 block">住院状态</span>
+            <p className={fieldClassName}>
+              {({ pending_admission: '待入院', in_hospital: '在院', discharged: '已出院', cancelled: '取消' })[form.encounterStatus]}
+            </p>
+          </div>
           <Input
             label="入院来源"
             value={form.admissionSource}

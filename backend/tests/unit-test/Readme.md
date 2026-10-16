@@ -1,5 +1,7 @@
 # 单元测试
 
+患者住院默认值测试 `test_patient_encounter_defaults.py` 覆盖省略入院时间时自动生成 UTC 时间、默认在院及历史时间兼容。
+
 在 `backend` 目录执行：
 
 ```powershell
