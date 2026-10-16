@@ -12,6 +12,7 @@ import { getStructuredAnswerDisplayValue, hasStructuredAnswerValue } from '@/lib
 import { prototypeQuestions } from '@/lib/mock/assessment';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
+import { buildReviewAnswers } from '@/lib/reviewAnswers';
 import { useChatStore } from '@/lib/stores/useChatStore';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import type { AssessmentReview } from '@/lib/types';
@@ -114,8 +115,11 @@ export default function NurseReviewPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const effectiveNurseAnswers =
-    Object.keys(nurseAnswers).length > 0 ? nurseAnswers : sourceAnswers;
+  const reviewAnswers = buildReviewAnswers(
+    reviewQuestions.map((question) => question.id), sourceAnswers, nurseAnswers, reasons
+  );
+  const effectiveNurseAnswers = reviewAnswers.answers;
+  const changedIds = new Set(reviewAnswers.changedIds);
 
   if (!task) {
     return <NurseLayout><Card padding="lg">任务不存在</Card></NurseLayout>;
@@ -126,8 +130,7 @@ export default function NurseReviewPage() {
   }
 
   const differences = reviewQuestions.filter(
-    (question) =>
-      effectiveNurseAnswers[question.id] !== sourceAnswers[question.id]
+    (question) => changedIds.has(question.id)
   );
 
   const persistReview = async (status: AssessmentReview['status']) => {
@@ -140,7 +143,7 @@ export default function NurseReviewPage() {
       taskId,
       nurseAnswers: effectiveNurseAnswers,
       finalAnswers: effectiveNurseAnswers,
-      correctionReasons: reasons,
+      correctionReasons: reviewAnswers.correctionReasons,
       supplementaryInquiry,
       status,
       reviewedAt: new Date().toISOString(),
@@ -212,7 +215,7 @@ export default function NurseReviewPage() {
         {reviewQuestions.map((question) => {
           const source = sourceAnswers[question.id] ?? '';
           const nurse = effectiveNurseAnswers[question.id] ?? '';
-          const different = source !== nurse;
+          const different = changedIds.has(question.id);
           const sourceMessages = aiAnswers?.find((answer) => answer.questionId === question.id)?.sourceMessageIds;
           return (
             <Card key={question.id} padding="lg" className={different ? 'border-amber-300' : ''}>
@@ -241,8 +244,10 @@ export default function NurseReviewPage() {
                   )}
                 </div>
                 <div>
-                  <label className="text-xs text-foreground-muted">护士独立确认答案</label>
+                  <label htmlFor={`review-answer-${question.id}`} className="text-xs text-foreground-muted">护士独立确认答案</label>
                   <input
+                    id={`review-answer-${question.id}`}
+                    aria-label={`${question.questionText}的护士确认答案`}
                     value={nurse}
                     onChange={(event) =>
                       setNurseAnswers((current) => ({
@@ -253,7 +258,15 @@ export default function NurseReviewPage() {
                     className="w-full mt-2 rounded-xl border border-border bg-surface px-4 py-3"
                   />
                   {different && (
-                    <input
+                    <div className="mt-3">
+                    <label htmlFor={`review-reason-${question.id}`} className="text-sm font-medium text-amber-800">
+                      修改原因（必填）
+                    </label>
+                    <textarea
+                      id={`review-reason-${question.id}`}
+                      aria-label={`${question.questionText}的修改原因`}
+                      required
+                      rows={3}
                       value={reasons[question.id] ?? ''}
                       onChange={(event) =>
                         setReasons((current) => ({
@@ -262,8 +275,9 @@ export default function NurseReviewPage() {
                         }))
                       }
                       className="w-full mt-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm"
-                      placeholder="必填：说明修改原因"
+                      placeholder="请说明本题答案的修改依据"
                     />
+                    </div>
                   )}
                 </div>
               </div>
