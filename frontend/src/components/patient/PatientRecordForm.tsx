@@ -51,18 +51,14 @@ export default function PatientRecordForm({
     emergencyContactPhone:
       initialRecord?.patient.emergencyContactPhone ?? '',
     address: initialRecord?.patient.address ?? '',
-    inpatientNo: initialRecord?.encounter.inpatientNo ?? '',
     departmentCode: initialRecord?.encounter.departmentCode ?? '',
     department: initialRecord?.encounter.department ?? '',
     ward: initialRecord?.encounter.ward ?? '',
-    bedNo: initialRecord?.encounter.bedNo ?? '',
     encounterStatus:
       initialRecord?.encounter.encounterStatus ?? ('in_hospital' as const),
     primaryDiagnosis: initialRecord?.encounter.diagnosis ?? '',
     secondaryDiagnoses: diagnosisValue(initialRecord, 'secondary'),
     riskNote: diagnosisValue(initialRecord, 'risk_note'),
-    admissionSource: initialRecord?.encounter.admissionSource ?? '门诊',
-    nursingLevel: initialRecord?.encounter.nursingLevel ?? '二级护理',
     insuranceType: initialRecord?.encounter.insuranceType ?? '',
     allergySummary: initialRecord?.encounter.allergySummary ?? '',
   }));
@@ -73,10 +69,8 @@ export default function PatientRecordForm({
       ['患者姓名', form.name],
       ['出生日期', form.birthday],
       ['联系电话', form.phone],
-      ['住院号', form.inpatientNo],
       ['科室', form.department],
       ['病区', form.ward],
-      ['床号', form.bedNo],
       ['主要诊断', form.primaryDiagnosis],
       ...(mode === 'create' ? ([['身份证号', form.idCardNo]] as const) : []),
     ],
@@ -113,11 +107,9 @@ export default function PatientRecordForm({
       },
       encounter: {
         id: initialRecord?.encounter.id,
-        inpatientNo: form.inpatientNo.trim(),
         departmentCode: form.departmentCode.trim() || undefined,
         department: form.department.trim(),
         ward: form.ward.trim(),
-        bedNo: form.bedNo.trim(),
         encounterStatus: form.encounterStatus,
         primaryDiagnosis: form.primaryDiagnosis.trim(),
         secondaryDiagnoses: form.secondaryDiagnoses
@@ -125,8 +117,6 @@ export default function PatientRecordForm({
           .map((item) => item.trim())
           .filter(Boolean),
         riskNote: form.riskNote.trim() || undefined,
-        admissionSource: form.admissionSource.trim() || undefined,
-        nursingLevel: form.nursingLevel.trim() || undefined,
         insuranceType: form.insuranceType.trim() || undefined,
         allergySummary: form.allergySummary.trim() || undefined,
       },
@@ -220,11 +210,6 @@ export default function PatientRecordForm({
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Input
-            label="住院号 *"
-            value={form.inpatientNo}
-            onChange={(event) => update('inpatientNo', event.target.value)}
-          />
-          <Input
             label="科室编码"
             value={form.departmentCode}
             onChange={(event) => update('departmentCode', event.target.value)}
@@ -239,29 +224,12 @@ export default function PatientRecordForm({
             value={form.ward}
             onChange={(event) => update('ward', event.target.value)}
           />
-          <Input
-            label="床号 *"
-            value={form.bedNo}
-            onChange={(event) => update('bedNo', event.target.value)}
-          />
           <div className="text-sm font-medium">
             <span className="mb-1.5 block">住院状态</span>
             <p className={fieldClassName}>
               {({ pending_admission: '待入院', in_hospital: '在院', discharged: '已出院', cancelled: '取消' })[form.encounterStatus]}
             </p>
           </div>
-          <Input
-            label="入院来源"
-            value={form.admissionSource}
-            onChange={(event) => update('admissionSource', event.target.value)}
-            placeholder="门诊 / 急诊 / 转院"
-          />
-          <Input
-            label="护理级别"
-            value={form.nursingLevel}
-            onChange={(event) => update('nursingLevel', event.target.value)}
-            placeholder="特级 / 一级 / 二级 / 三级护理"
-          />
           <Input
             label="医保类别"
             value={form.insuranceType}

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -93,17 +94,20 @@ class PatientCreatePayload(BaseModel):
 class PatientEncounterCreatePayload(BaseModel):
     """新增住院记录输入。"""
 
-    inpatient_no: str = Field(..., min_length=1, max_length=64)
+    inpatient_no: str = Field(
+        default_factory=lambda: f"ZY-{datetime.now(UTC):%Y%m%d}-{uuid4().hex.upper()}",
+        min_length=1, max_length=64,
+    )
     department_code: str | None = Field(default=None, max_length=64)
     department_name: str = Field(..., min_length=1, max_length=128)
     ward_name: str = Field(..., min_length=1, max_length=128)
-    bed_no: str = Field(..., min_length=1, max_length=32)
+    bed_no: str = Field(default="待分配", min_length=1, max_length=32)
     admission_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     discharge_time: datetime | None = None
     encounter_status: EncounterStatus = "在院"
     diagnosis_snapshot: dict | None = None
-    admission_source: str | None = Field(default=None, max_length=32)
-    nursing_level: str | None = Field(default=None, max_length=32)
+    admission_source: str | None = Field(default="未登记", max_length=32)
+    nursing_level: str | None = Field(default="待评定", max_length=32)
     insurance_type: str | None = Field(default=None, max_length=64)
     allergy_summary: str | None = Field(default=None, max_length=2000)
 

@@ -212,8 +212,12 @@ function patientRecordBody(input: PatientRecordInput, updating: boolean) {
         secondary: input.encounter.secondaryDiagnoses,
         risk_note: input.encounter.riskNote || '',
       },
-      admission_source: input.encounter.admissionSource || null,
-      nursing_level: input.encounter.nursingLevel || null,
+      ...(input.encounter.admissionSource !== undefined
+        ? { admission_source: input.encounter.admissionSource || null }
+        : {}),
+      ...(input.encounter.nursingLevel !== undefined
+        ? { nursing_level: input.encounter.nursingLevel || null }
+        : {}),
       insurance_type: input.encounter.insuranceType || null,
       allergy_summary: input.encounter.allergySummary || null,
     },

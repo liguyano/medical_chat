@@ -40,6 +40,8 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 - 新增患者住院记录时，未提供 `admission_time` 使用服务端当前 UTC 时间，
   默认 `encounter_status=在院`、`discharge_time=null`；显式历史时间继续兼容。
   编辑请求未包含日期时保留数据库原值，不以空值覆盖；此规则不改变数据库字段约束。
+- 住院记录新建缺省住院号由服务端生成 `ZY-日期-UUID`，床号/护理级别/入院来源
+  默认“待分配”/“待评定”/“未登记”；保留显式字段兼容，编辑省略字段不得覆盖历史值。
 
 1. Python 环境：在 `backend` 下使用 uv 创建环境, 默认采用 python=3.11.
 

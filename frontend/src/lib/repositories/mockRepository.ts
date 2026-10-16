@@ -503,7 +503,8 @@ function buildMockRecordFromInput(
   encounterId: string,
   patientNo: string,
   encounterNo: string,
-  maskedIdCard?: string
+  maskedIdCard?: string,
+  existingEncounter?: PatientWithEncounter['encounter']
 ): PatientWithEncounter {
   const patient = {
     id: patientId,
@@ -526,11 +527,11 @@ function buildMockRecordFromInput(
     id: encounterId,
     patientId,
     encounterNo,
-    inpatientNo: input.encounter.inpatientNo,
+    inpatientNo: input.encounter.inpatientNo ?? existingEncounter?.inpatientNo ?? `ZY-${globalThis.crypto.randomUUID()}`,
     departmentCode: input.encounter.departmentCode,
     department: input.encounter.department,
     ward: input.encounter.ward,
-    bedNo: input.encounter.bedNo,
+    bedNo: input.encounter.bedNo ?? existingEncounter?.bedNo ?? '待分配',
     admissionDate: input.encounter.admissionDate ?? new Date().toISOString(),
     dischargeDate: input.encounter.dischargeDate,
     diagnosis: input.encounter.primaryDiagnosis,
@@ -540,8 +541,12 @@ function buildMockRecordFromInput(
       risk_note: input.encounter.riskNote ?? '',
     },
     encounterStatus: input.encounter.encounterStatus,
-    admissionSource: input.encounter.admissionSource,
-    nursingLevel: input.encounter.nursingLevel,
+    admissionSource: input.encounter.admissionSource !== undefined
+      ? input.encounter.admissionSource
+      : existingEncounter ? existingEncounter.admissionSource : '未登记',
+    nursingLevel: input.encounter.nursingLevel !== undefined
+      ? input.encounter.nursingLevel
+      : existingEncounter ? existingEncounter.nursingLevel : '待评定',
     insuranceType: input.encounter.insuranceType,
     allergySummary: input.encounter.allergySummary,
   };
@@ -685,7 +690,8 @@ export class MockCareRepository implements CareRepository {
       currentEncounter.id,
       currentPatient.patientNo,
       currentEncounter.encounterNo,
-      currentPatient.idCard
+      currentPatient.idCard,
+      currentEncounter
     );
     mockPatients[patientIndex] = record.patient;
     mockEncounters[encounterIndex] = record.encounter;

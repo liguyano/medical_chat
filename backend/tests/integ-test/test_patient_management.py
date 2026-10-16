@@ -32,18 +32,14 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
             "address": "接口测试地址",
         },
         "encounter": {
-            "inpatient_no": f"ZY-CODEX-{suffix}",
             "department_code": "CARD",
             "department_name": "心内科",
             "ward_name": "心内病区A",
-            "bed_no": "99-1",
             "diagnosis_snapshot": {
                 "primary": "冠心病",
                 "secondary": ["高血压"],
                 "risk_note": "注意跌倒",
             },
-            "admission_source": "急诊",
-            "nursing_level": "一级护理",
             "insurance_type": "城镇职工医保",
             "allergy_summary": "青霉素过敏",
         },
@@ -75,6 +71,11 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
                 assert saved_encounter.discharge_time is None
                 assert saved_encounter.encounter_status == "在院"
                 saved_admission_time = saved_encounter.admission_time
+                saved_inpatient_no = saved_encounter.inpatient_no
+                assert saved_inpatient_no.startswith("ZY-")
+                assert saved_encounter.bed_no == "待分配"
+                assert saved_encounter.nursing_level == "待评定"
+                assert saved_encounter.admission_source == "未登记"
             assert created_data["patient"]["id_card_masked"]
             assert "id_card_no" not in created_data["patient"]
             assert "id_card_ciphertext" not in created_data["patient"]
@@ -105,8 +106,6 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
                 "encounter": {
                     **payload["encounter"],
                     "id": encounter_id,
-                    "bed_no": "99-2",
-                    "nursing_level": "二级护理",
                 },
             }
             updated = client.put(
@@ -116,13 +115,17 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
             assert updated.status_code == 200, updated.text
             updated_data = updated.json()["data"]
             assert updated_data["patient"]["patient_name"] == "接口测试患者已编辑"
-            assert updated_data["encounter"]["bed_no"] == "99-2"
-            assert updated_data["encounter"]["nursing_level"] == "二级护理"
+            assert updated_data["encounter"]["bed_no"] == "待分配"
+            assert updated_data["encounter"]["nursing_level"] == "待评定"
             with model_base.SessionLocal() as verification_db:
                 saved_encounter = verification_db.get(PatientEncounter, encounter_id)
                 assert saved_encounter is not None
                 assert saved_encounter.admission_time == saved_admission_time
                 assert saved_encounter.discharge_time is None
+                assert saved_encounter.inpatient_no == saved_inpatient_no
+                assert saved_encounter.bed_no == "待分配"
+                assert saved_encounter.nursing_level == "待评定"
+                assert saved_encounter.admission_source == "未登记"
 
             duplicate = client.post("/api/patients", json=payload)
             assert duplicate.status_code == 409, duplicate.text

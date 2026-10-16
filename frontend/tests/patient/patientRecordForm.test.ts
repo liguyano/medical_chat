@@ -13,5 +13,9 @@ describe('护士患者录入表单', () => {
     expect(html).not.toContain('出院时间');
     expect(html).not.toContain('value="discharged"');
     expect(html).toContain('在院');
+    expect(html).not.toContain('住院号');
+    expect(html).not.toContain('床号');
+    expect(html).not.toContain('护理级别');
+    expect(html).not.toContain('入院来源');
   });
 });

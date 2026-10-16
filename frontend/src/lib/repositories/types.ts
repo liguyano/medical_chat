@@ -62,11 +62,11 @@ export interface PatientRecordInput {
   };
   encounter: {
     id?: string;
-    inpatientNo: string;
+    inpatientNo?: string;
     departmentCode?: string;
     department: string;
     ward: string;
-    bedNo: string;
+    bedNo?: string;
     admissionDate?: string;
     dischargeDate?: string;
     encounterStatus: PatientEncounter['encounterStatus'];

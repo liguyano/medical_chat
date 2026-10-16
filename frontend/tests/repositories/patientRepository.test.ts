@@ -62,7 +62,10 @@ describe('patient management repository', () => {
     const repository = new ApiCareRepository();
     const input = {
       ...patientInput,
-      encounter: { ...patientInput.encounter, admissionDate: undefined },
+      encounter: {
+        ...patientInput.encounter, admissionDate: undefined,
+        inpatientNo: undefined, bedNo: undefined, nursingLevel: undefined, admissionSource: undefined,
+      },
     };
     await repository.createPatient(input);
     await repository.updatePatient('9', {
@@ -73,6 +76,10 @@ describe('patient management repository', () => {
       expect(body.encounter).not.toHaveProperty('admission_time');
       expect(body.encounter).not.toHaveProperty('discharge_time');
       expect(body.encounter.encounter_status).toBe('在院');
+      expect(body.encounter).not.toHaveProperty('inpatient_no');
+      expect(body.encounter).not.toHaveProperty('bed_no');
+      expect(body.encounter).not.toHaveProperty('nursing_level');
+      expect(body.encounter).not.toHaveProperty('admission_source');
     }
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -91,6 +98,43 @@ describe('patient management repository', () => {
       ...input, encounter: { ...input.encounter, id: created.encounter.id, bedNo: 'TEST-NEW' },
     });
     expect(updated.encounter.admissionDate).toBe(created.encounter.admissionDate);
+  });
+
+  it('Mock 自动填充住院四项，编辑省略时保留旧值', async () => {
+    const repository = new MockCareRepository();
+    const input = {
+      ...patientInput,
+      encounter: {
+        ...patientInput.encounter, inpatientNo: undefined, bedNo: undefined,
+        nursingLevel: undefined, admissionSource: undefined,
+      },
+    };
+    const created = await repository.createPatient(input);
+    expect(created.encounter.inpatientNo).toMatch(/^ZY-/);
+    expect(created.encounter.bedNo).toBe('待分配');
+    expect(created.encounter.nursingLevel).toBe('待评定');
+    expect(created.encounter.admissionSource).toBe('未登记');
+    const updated = await repository.updatePatient(created.patient.id, {
+      ...input, encounter: { ...input.encounter, id: created.encounter.id },
+    });
+    expect(updated.encounter.inpatientNo).toBe(created.encounter.inpatientNo);
+    expect(updated.encounter.bedNo).toBe('待分配');
+    expect(updated.encounter.nursingLevel).toBe('待评定');
+    expect(updated.encounter.admissionSource).toBe('未登记');
+    await repository.updatePatient(created.patient.id, {
+      ...input,
+      encounter: {
+        ...input.encounter, id: created.encounter.id, inpatientNo: 'ZY-LEGACY-RETAIN',
+        bedNo: '301-9', nursingLevel: '一级护理', admissionSource: '急诊',
+      },
+    });
+    const preserved = await repository.updatePatient(created.patient.id, {
+      ...input, encounter: { ...input.encounter, id: created.encounter.id },
+    });
+    expect(preserved.encounter.inpatientNo).toBe('ZY-LEGACY-RETAIN');
+    expect(preserved.encounter.bedNo).toBe('301-9');
+    expect(preserved.encounter.nursingLevel).toBe('一级护理');
+    expect(preserved.encounter.admissionSource).toBe('急诊');
   });
 
   it('Mock 编辑已出院患者时保留历史入院、出院日期和状态', async () => {
