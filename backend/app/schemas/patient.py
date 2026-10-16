@@ -99,8 +99,8 @@ class PatientEncounterCreatePayload(BaseModel):
         min_length=1, max_length=64,
     )
     department_code: str | None = Field(default=None, max_length=64)
-    department_name: str = Field(..., min_length=1, max_length=128)
-    ward_name: str = Field(..., min_length=1, max_length=128)
+    department_name: str = Field(default="未指定", min_length=1, max_length=128)
+    ward_name: str = Field(default="未分配", min_length=1, max_length=128)
     bed_no: str = Field(default="待分配", min_length=1, max_length=32)
     admission_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     discharge_time: datetime | None = None

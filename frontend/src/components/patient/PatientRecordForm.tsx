@@ -51,15 +51,9 @@ export default function PatientRecordForm({
     emergencyContactPhone:
       initialRecord?.patient.emergencyContactPhone ?? '',
     address: initialRecord?.patient.address ?? '',
-    departmentCode: initialRecord?.encounter.departmentCode ?? '',
-    department: initialRecord?.encounter.department ?? '',
-    ward: initialRecord?.encounter.ward ?? '',
-    encounterStatus:
-      initialRecord?.encounter.encounterStatus ?? ('in_hospital' as const),
     primaryDiagnosis: initialRecord?.encounter.diagnosis ?? '',
     secondaryDiagnoses: diagnosisValue(initialRecord, 'secondary'),
     riskNote: diagnosisValue(initialRecord, 'risk_note'),
-    insuranceType: initialRecord?.encounter.insuranceType ?? '',
     allergySummary: initialRecord?.encounter.allergySummary ?? '',
   }));
   const [validationError, setValidationError] = useState('');
@@ -69,8 +63,6 @@ export default function PatientRecordForm({
       ['患者姓名', form.name],
       ['出生日期', form.birthday],
       ['联系电话', form.phone],
-      ['科室', form.department],
-      ['病区', form.ward],
       ['主要诊断', form.primaryDiagnosis],
       ...(mode === 'create' ? ([['身份证号', form.idCardNo]] as const) : []),
     ],
@@ -107,17 +99,12 @@ export default function PatientRecordForm({
       },
       encounter: {
         id: initialRecord?.encounter.id,
-        departmentCode: form.departmentCode.trim() || undefined,
-        department: form.department.trim(),
-        ward: form.ward.trim(),
-        encounterStatus: form.encounterStatus,
         primaryDiagnosis: form.primaryDiagnosis.trim(),
         secondaryDiagnoses: form.secondaryDiagnoses
           .split(/\r?\n|、/)
           .map((item) => item.trim())
           .filter(Boolean),
         riskNote: form.riskNote.trim() || undefined,
-        insuranceType: form.insuranceType.trim() || undefined,
         allergySummary: form.allergySummary.trim() || undefined,
       },
     });
@@ -201,40 +188,6 @@ export default function PatientRecordForm({
               onChange={(event) => update('address', event.target.value)}
             />
           </div>
-        </CardContent>
-      </Card>
-
-      <Card padding="lg">
-        <CardHeader>
-          <CardTitle>本次住院信息</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Input
-            label="科室编码"
-            value={form.departmentCode}
-            onChange={(event) => update('departmentCode', event.target.value)}
-          />
-          <Input
-            label="科室 *"
-            value={form.department}
-            onChange={(event) => update('department', event.target.value)}
-          />
-          <Input
-            label="病区 *"
-            value={form.ward}
-            onChange={(event) => update('ward', event.target.value)}
-          />
-          <div className="text-sm font-medium">
-            <span className="mb-1.5 block">住院状态</span>
-            <p className={fieldClassName}>
-              {({ pending_admission: '待入院', in_hospital: '在院', discharged: '已出院', cancelled: '取消' })[form.encounterStatus]}
-            </p>
-          </div>
-          <Input
-            label="医保类别"
-            value={form.insuranceType}
-            onChange={(event) => update('insuranceType', event.target.value)}
-          />
         </CardContent>
       </Card>
 

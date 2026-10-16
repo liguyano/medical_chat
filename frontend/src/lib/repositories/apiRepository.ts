@@ -194,7 +194,9 @@ function patientRecordBody(input: PatientRecordInput, updating: boolean) {
         ? { id: Number(input.encounter.id) }
         : {}),
       inpatient_no: input.encounter.inpatientNo,
-      department_code: input.encounter.departmentCode || null,
+      ...(input.encounter.departmentCode !== undefined
+        ? { department_code: input.encounter.departmentCode || null }
+        : {}),
       department_name: input.encounter.department,
       ward_name: input.encounter.ward,
       bed_no: input.encounter.bedNo,
@@ -204,9 +206,9 @@ function patientRecordBody(input: PatientRecordInput, updating: boolean) {
       ...(input.encounter.dischargeDate !== undefined
         ? { discharge_time: input.encounter.dischargeDate || null }
         : {}),
-      encounter_status: toBackendEncounterStatus(
-        input.encounter.encounterStatus
-      ),
+      ...(input.encounter.encounterStatus !== undefined
+        ? { encounter_status: toBackendEncounterStatus(input.encounter.encounterStatus) }
+        : {}),
       diagnosis_snapshot: {
         primary: input.encounter.primaryDiagnosis,
         secondary: input.encounter.secondaryDiagnoses,
@@ -218,7 +220,9 @@ function patientRecordBody(input: PatientRecordInput, updating: boolean) {
       ...(input.encounter.nursingLevel !== undefined
         ? { nursing_level: input.encounter.nursingLevel || null }
         : {}),
-      insurance_type: input.encounter.insuranceType || null,
+      ...(input.encounter.insuranceType !== undefined
+        ? { insurance_type: input.encounter.insuranceType || null }
+        : {}),
       allergy_summary: input.encounter.allergySummary || null,
     },
   };

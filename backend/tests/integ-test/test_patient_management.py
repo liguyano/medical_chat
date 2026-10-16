@@ -32,15 +32,11 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
             "address": "接口测试地址",
         },
         "encounter": {
-            "department_code": "CARD",
-            "department_name": "心内科",
-            "ward_name": "心内病区A",
             "diagnosis_snapshot": {
                 "primary": "冠心病",
                 "secondary": ["高血压"],
                 "risk_note": "注意跌倒",
             },
-            "insurance_type": "城镇职工医保",
             "allergy_summary": "青霉素过敏",
         },
     }
@@ -76,6 +72,8 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
                 assert saved_encounter.bed_no == "待分配"
                 assert saved_encounter.nursing_level == "待评定"
                 assert saved_encounter.admission_source == "未登记"
+                assert saved_encounter.department_name == "未指定"
+                assert saved_encounter.ward_name == "未分配"
             assert created_data["patient"]["id_card_masked"]
             assert "id_card_no" not in created_data["patient"]
             assert "id_card_ciphertext" not in created_data["patient"]
@@ -123,6 +121,8 @@ def test_staff_can_create_search_view_and_update_patient() -> None:
                 assert saved_encounter.admission_time == saved_admission_time
                 assert saved_encounter.discharge_time is None
                 assert saved_encounter.inpatient_no == saved_inpatient_no
+                assert saved_encounter.department_name == "未指定"
+                assert saved_encounter.ward_name == "未分配"
                 assert saved_encounter.bed_no == "待分配"
                 assert saved_encounter.nursing_level == "待评定"
                 assert saved_encounter.admission_source == "未登记"

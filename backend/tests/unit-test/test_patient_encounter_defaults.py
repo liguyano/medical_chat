@@ -4,14 +4,15 @@ from app.schemas.patient import PatientEncounterCreatePayload
 
 
 def test_encounter_automatically_fills_unused_fields_and_unique_number() -> None:
-    fields = {"department_name": "测试科室", "ward_name": "测试病区"}
-    first = PatientEncounterCreatePayload(**fields)
-    second = PatientEncounterCreatePayload(**fields)
+    first = PatientEncounterCreatePayload()
+    second = PatientEncounterCreatePayload()
     assert first.inpatient_no.startswith("ZY-")
     assert first.inpatient_no != second.inpatient_no
     assert first.bed_no == "待分配"
     assert first.nursing_level == "待评定"
     assert first.admission_source == "未登记"
+    assert first.department_name == "未指定"
+    assert first.ward_name == "未分配"
 
 
 def test_encounter_defaults_to_current_time_and_in_hospital() -> None:

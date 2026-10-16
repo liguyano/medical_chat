@@ -65,6 +65,8 @@ describe('patient management repository', () => {
       encounter: {
         ...patientInput.encounter, admissionDate: undefined,
         inpatientNo: undefined, bedNo: undefined, nursingLevel: undefined, admissionSource: undefined,
+        department: undefined, ward: undefined, encounterStatus: undefined,
+        departmentCode: undefined, insuranceType: undefined,
       },
     };
     await repository.createPatient(input);
@@ -75,7 +77,11 @@ describe('patient management repository', () => {
       const body = JSON.parse(String((call[1] as RequestInit).body));
       expect(body.encounter).not.toHaveProperty('admission_time');
       expect(body.encounter).not.toHaveProperty('discharge_time');
-      expect(body.encounter.encounter_status).toBe('在院');
+      expect(body.encounter).not.toHaveProperty('encounter_status');
+      expect(body.encounter).not.toHaveProperty('department_name');
+      expect(body.encounter).not.toHaveProperty('ward_name');
+      expect(body.encounter).not.toHaveProperty('department_code');
+      expect(body.encounter).not.toHaveProperty('insurance_type');
       expect(body.encounter).not.toHaveProperty('inpatient_no');
       expect(body.encounter).not.toHaveProperty('bed_no');
       expect(body.encounter).not.toHaveProperty('nursing_level');
@@ -107,6 +113,8 @@ describe('patient management repository', () => {
       encounter: {
         ...patientInput.encounter, inpatientNo: undefined, bedNo: undefined,
         nursingLevel: undefined, admissionSource: undefined,
+        department: undefined, ward: undefined, encounterStatus: undefined,
+        departmentCode: undefined, insuranceType: undefined,
       },
     };
     const created = await repository.createPatient(input);
@@ -114,6 +122,9 @@ describe('patient management repository', () => {
     expect(created.encounter.bedNo).toBe('待分配');
     expect(created.encounter.nursingLevel).toBe('待评定');
     expect(created.encounter.admissionSource).toBe('未登记');
+    expect(created.encounter.department).toBe('未指定');
+    expect(created.encounter.ward).toBe('未分配');
+    expect(created.encounter.encounterStatus).toBe('in_hospital');
     const updated = await repository.updatePatient(created.patient.id, {
       ...input, encounter: { ...input.encounter, id: created.encounter.id },
     });
@@ -126,6 +137,8 @@ describe('patient management repository', () => {
       encounter: {
         ...input.encounter, id: created.encounter.id, inpatientNo: 'ZY-LEGACY-RETAIN',
         bedNo: '301-9', nursingLevel: '一级护理', admissionSource: '急诊',
+        department: '历史科室', ward: '历史病区', encounterStatus: 'discharged',
+        departmentCode: 'HISTORY', insuranceType: '历史医保',
       },
     });
     const preserved = await repository.updatePatient(created.patient.id, {
@@ -135,6 +148,11 @@ describe('patient management repository', () => {
     expect(preserved.encounter.bedNo).toBe('301-9');
     expect(preserved.encounter.nursingLevel).toBe('一级护理');
     expect(preserved.encounter.admissionSource).toBe('急诊');
+    expect(preserved.encounter.department).toBe('历史科室');
+    expect(preserved.encounter.ward).toBe('历史病区');
+    expect(preserved.encounter.encounterStatus).toBe('discharged');
+    expect(preserved.encounter.departmentCode).toBe('HISTORY');
+    expect(preserved.encounter.insuranceType).toBe('历史医保');
   });
 
   it('Mock 编辑已出院患者时保留历史入院、出院日期和状态', async () => {

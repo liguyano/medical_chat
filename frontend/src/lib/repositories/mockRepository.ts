@@ -528,9 +528,10 @@ function buildMockRecordFromInput(
     patientId,
     encounterNo,
     inpatientNo: input.encounter.inpatientNo ?? existingEncounter?.inpatientNo ?? `ZY-${globalThis.crypto.randomUUID()}`,
-    departmentCode: input.encounter.departmentCode,
-    department: input.encounter.department,
-    ward: input.encounter.ward,
+    departmentCode: input.encounter.departmentCode !== undefined
+      ? input.encounter.departmentCode : existingEncounter?.departmentCode,
+    department: input.encounter.department ?? existingEncounter?.department ?? '未指定',
+    ward: input.encounter.ward ?? existingEncounter?.ward ?? '未分配',
     bedNo: input.encounter.bedNo ?? existingEncounter?.bedNo ?? '待分配',
     admissionDate: input.encounter.admissionDate ?? new Date().toISOString(),
     dischargeDate: input.encounter.dischargeDate,
@@ -540,14 +541,15 @@ function buildMockRecordFromInput(
       secondary: input.encounter.secondaryDiagnoses,
       risk_note: input.encounter.riskNote ?? '',
     },
-    encounterStatus: input.encounter.encounterStatus,
+    encounterStatus: input.encounter.encounterStatus ?? existingEncounter?.encounterStatus ?? 'in_hospital',
     admissionSource: input.encounter.admissionSource !== undefined
       ? input.encounter.admissionSource
       : existingEncounter ? existingEncounter.admissionSource : '未登记',
     nursingLevel: input.encounter.nursingLevel !== undefined
       ? input.encounter.nursingLevel
       : existingEncounter ? existingEncounter.nursingLevel : '待评定',
-    insuranceType: input.encounter.insuranceType,
+    insuranceType: input.encounter.insuranceType !== undefined
+      ? input.encounter.insuranceType : existingEncounter?.insuranceType,
     allergySummary: input.encounter.allergySummary,
   };
   return { patient, encounter };

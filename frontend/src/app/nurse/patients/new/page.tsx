@@ -47,7 +47,7 @@ export default function NewPatientPage() {
           新增<span className="italic text-primary">患者</span>
         </h1>
         <p className="mt-1 text-foreground-muted">
-          一次录入患者主档、本次住院信息和临床安全摘要
+          录入患者基本信息和临床安全摘要
         </p>
       </div>
       <PatientRecordForm

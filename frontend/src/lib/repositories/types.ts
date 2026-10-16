@@ -64,12 +64,12 @@ export interface PatientRecordInput {
     id?: string;
     inpatientNo?: string;
     departmentCode?: string;
-    department: string;
-    ward: string;
+    department?: string;
+    ward?: string;
     bedNo?: string;
     admissionDate?: string;
     dischargeDate?: string;
-    encounterStatus: PatientEncounter['encounterStatus'];
+    encounterStatus?: PatientEncounter['encounterStatus'];
     primaryDiagnosis: string;
     secondaryDiagnoses: string[];
     riskNote?: string;
