@@ -16,7 +16,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from medagent.agents.factory import create_dialog_agent
 from medagent.agents.service_agent.dialog_agent.agent import GENERIC_ERROR_MESSAGE
 from medagent.agents.service_agent.dialog_agent.engine import TextChatEngine
-from medagent.agents.service_agent.dialog_agent.prompt import suggest_patient_salutation
+from medagent.agents.service_agent.dialog_agent.prompt import (
+    TOPIC_GUIDANCE,
+    suggest_patient_salutation,
+)
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
 from sqlalchemy import func, select
 
@@ -573,6 +576,7 @@ class DialogAgentRunner:
                     "随后自然过渡到一个护理评估问题。整段应像真人护士交流，"
                     "不要念量表名称，不要使用“您的某某情况是怎样的”这类问卷句式，"
                     "不要一次询问多个评估主题。"
+                    + TOPIC_GUIDANCE
                 )
             ),
             HumanMessage(
@@ -1002,6 +1006,8 @@ class DialogAgentRunner:
         else:
             turn_instruction = (
                 "先用一小句自然回应患者刚才的内容，再顺畅过渡到一个下一问。"
+                "将目标事实融入患者当前生活话题，优先询问尚不明确的细节；"
+                "话题不相关时简短说明再过渡，不强行套话、不延长闲聊。"
                 "不得生硬复述字段名，不得一次询问多个主题。"
                 f"本轮要收集的护理事实是：{next_question.question_name}；"
                 f"量表参考表达：{next_question.patient_text or next_question.question_name}。"
@@ -1012,7 +1018,7 @@ class DialogAgentRunner:
                 f"{turn_instruction}"
                 "患者提出问题时先简短回答；不知道具体病区设施位置时，应说明需向本病区护士确认，"
                 "不得编造开水房、茶水室或微波炉的位置。"
-                "药物过敏、吸烟饮酒、手术等特征应按工具规则追问或宣教。"
+                "药物过敏、吸烟饮酒、手术等特征应按量表需要追问，不主动展开宣教。"
                 + (f" Schedule Agent 最新引导：{schedule_prompt}" if schedule_prompt else "")
             )
         )

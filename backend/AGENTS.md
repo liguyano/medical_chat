@@ -2,6 +2,11 @@
 
 ## 真实模型联调约定
 
+- 评估对话采用生活话题引导：共享 Dialog 提示词适用于文本与实时语音，文本首问也须接入。
+  Schedule 聚集相关话题，不因相关过渡或调整顺序判为偏离；不得遗漏必答事实。
+  场景铺垫不等于答案：Extraction 必须保留患者原话依据、时间范围和协助程度，禁止从
+  家人做饭推断需要喂饭、从过去能力推断当前能力；固定施测要求优先，完成仍以数据库进度为准。
+
 - 文本模型统一使用 `ModelConfig.chat_completion_options()` 构建 Chat Completions 参数。
 - 第一阶段 `qwen3.5` 结构化链路使用 `extra_body.enable_thinking=false`，避免推理 token 截断 JSON。
 - Dialog 首问和后续问句均由真实语言模型生成；模型失败时发布 `agent_error` SSE 并触发 Celery 重试，禁止静默回退量表原文。
