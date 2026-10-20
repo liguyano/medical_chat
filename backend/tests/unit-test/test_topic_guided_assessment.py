@@ -1,10 +1,13 @@
 """话题式评估的模型输入契约，不替代真实模型效果评估。"""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
-from medagent.agents.service_agent.dialog_agent.prompt import build_system_prompt
+from medagent.agents.service_agent.dialog_agent.prompt import (
+    allows_topic_intro,
+    build_system_prompt,
+)
 from medagent.agents.service_agent.extraction_agent.prompt import (
     build_system_prompt as build_extraction_prompt,
 )
@@ -38,12 +41,70 @@ def test_shared_dialog_policy_keeps_topics_and_evidence_separate():
     assert "3至6轮" not in prompt
 
 
+def test_topic_policy_requires_interest_first_then_wait():
+    prompt = build_system_prompt({}, [task()])
+    for rule in (
+        "先选话题",
+        "喜欢看什么电视",
+        "喜欢吃什么",
+        "做什么运动",
+        "等待患者回答",
+        "同一轮",
+    ):
+        assert rule in prompt
+
+
+def test_sensation_topic_is_not_mistaken_for_direct_pain_assessment():
+    sensation = task().model_copy(
+        update={
+            "question_name": "感觉",
+            "patient_text": "有没有发麻，或冷热、疼痛感觉改变？",
+        }
+    )
+    assert allows_topic_intro(sensation)
+    assert not allows_topic_intro(task().model_copy(update={"question_name": "疼痛评分"}))
+
+
+@pytest.mark.parametrize(
+    "name,section,scale",
+    [
+        ("注意力", None, None),
+        ("执行指令", None, None),
+        ("画钟", None, None),
+        ("呼吸R", None, None),
+        ("BP", None, None),
+        ("项目一", "认知评估", None),
+        ("项目二", None, "MMSE"),
+    ],
+)
+def test_fixed_administration_and_vital_aliases_skip_interest_intro(name, section, scale):
+    question = task().model_copy(
+        update={"question_name": name, "section_name": section, "scale_code": scale}
+    )
+    assert not allows_topic_intro(question)
+
+
+@pytest.mark.parametrize("answered,expected", [(set(), 1), ({1}, 2)])
+def test_topic_intro_keeps_unanswered_target_then_skips_real_answers(answered, expected):
+    second = task().model_copy(update={"question_id": 2, "question_code": "walking"})
+    selected, exhausted = DialogAgentRunner._select_unanswered_question(
+        questions=[task(), second],
+        current_index=0,
+        answered_question_ids=answered,
+        prefer_current=True,
+    )
+    assert selected.question_id == expected
+    assert exhausted is False
+
+
 def test_voice_remaining_prompt_inherits_topic_policy():
     prompt = VoiceGateway._build_remaining_assessment_instructions(
         patient_info={}, remaining_tasks=[task()]
     )
     assert "【生活话题引导】" in prompt
     assert "completed=true" in prompt
+    assert "先选话题" in prompt
+    assert "等待患者回答" in prompt
 
 
 @pytest.mark.asyncio
@@ -81,7 +142,8 @@ def test_extraction_requires_patient_evidence_instead_of_topic_assumptions():
 
 
 @pytest.mark.asyncio
-async def test_followup_preserves_topic_guidance_and_actual_target(monkeypatch):
+@pytest.mark.parametrize("introduced", [False, True])
+async def test_followup_preserves_topic_guidance_and_actual_target(monkeypatch, introduced):
     from app.workers import dialog_agent_runner as module
     from app.workers import dialog_agent_runtime as runtime
 
@@ -102,7 +164,17 @@ async def test_followup_preserves_topic_guidance_and_actual_target(monkeypatch):
         redis_client=SimpleNamespace(),
     )
     runner.history = SimpleNamespace(
-        get_dialog_history=AsyncMock(return_value=[]), format_for_langchain=lambda _: []
+        get_dialog_history=AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    related_question_id=1,
+                    intent_type="话题引入",
+                )
+            ]
+            if introduced
+            else []
+        ),
+        format_for_langchain=lambda _: [],
     )
     await runner._build_agent(
         questions=[task()],
@@ -111,8 +183,72 @@ async def test_followup_preserves_topic_guidance_and_actual_target(monkeypatch):
         next_question=task(),
         plan_exhausted=False,
         text_delta_sink=AsyncMock(),
+        introduce_topic=True,
     )
     instructions = engine.update_session.call_args.kwargs["instructions"]
-    assert "融入患者当前生活话题" in instructions
+    assert ("本轮阶段：话题展开" if introduced else "本轮阶段：话题引入") in instructions
+    assert agent.topic_intro is (not introduced)
     assert "量表参考表达：进食是否需要帮助" in instructions
     assert "不主动展开宣教" in instructions
+
+
+@pytest.mark.asyncio
+async def test_answer_after_intro_expands_same_target_in_real_runner():
+    runner = DialogAgentRunner(
+        session_id="topic-test",
+        patient_info={},
+        scale_codes=[],
+        model=SimpleNamespace(),
+        redis_client=SimpleNamespace(),
+    )
+    first = task()
+    second = task().model_copy(update={"question_id": 2})
+    runner._load_patient_message = Mock(
+        return_value=SimpleNamespace(
+            turn_no=2,
+            content_text="喜欢吃面条",
+            asr_text=None,
+        )
+    )
+    runner._find_ai_message = Mock(
+        side_effect=lambda *, turn_no: (
+            SimpleNamespace(
+                related_question_id=1,
+                intent_type="话题引入",
+            )
+            if turn_no == 2
+            else None
+        )
+    )
+
+    def select(*, current_index, questions, prefer_current=False):
+        return runner._select_unanswered_question(
+            questions=questions,
+            current_index=current_index,
+            answered_question_ids=set(),
+            prefer_current=prefer_current,
+        )
+
+    runner._select_next_question = Mock(side_effect=select)
+    agent = SimpleNamespace(
+        handle_patient_input=AsyncMock(return_value="这顿面条是自己拿筷子吃的吗？"),
+        close=AsyncMock(),
+        topic_intro=False,
+    )
+    runner._build_agent = AsyncMock(return_value=agent)
+    runner._start_generation = Mock(return_value="1-0")
+    runner._persist_completed_question = AsyncMock(
+        return_value=(SimpleNamespace(message_no="ai3"), "2-0")
+    )
+    runner.output_store = SimpleNamespace(complete=Mock())
+    runner._save_state = Mock()
+    result = await runner._run_answer(
+        questions=[first, second],
+        state={"current_question_index": 0},
+        source_message_id="patient2",
+        source_event_id="0-1",
+    )
+    assert result["status"] == "turn_completed"
+    assert runner._build_agent.call_args.kwargs["next_question"].question_id == 1
+    assert runner._build_agent.call_args.kwargs["introduce_topic"] is False
+    assert runner._persist_completed_question.call_args.kwargs["introduce_topic"] is False

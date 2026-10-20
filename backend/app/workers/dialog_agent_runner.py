@@ -18,6 +18,8 @@ from medagent.agents.service_agent.dialog_agent.agent import GENERIC_ERROR_MESSA
 from medagent.agents.service_agent.dialog_agent.engine import TextChatEngine
 from medagent.agents.service_agent.dialog_agent.prompt import (
     TOPIC_GUIDANCE,
+    allows_topic_intro,
+    build_topic_turn_instruction,
     suggest_patient_salutation,
 )
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
@@ -365,6 +367,7 @@ class DialogAgentRunner:
                 text=opening_text,
                 turn_no=1,
                 is_opening=True,
+                introduce_topic=allows_topic_intro(question),
                 generation_id=generation_id,
                 message_id=message_id,
             )
@@ -453,9 +456,12 @@ class DialogAgentRunner:
         if not patient_answer:
             raise RuntimeError(f"患者答案为空: {source_message_id}")
 
+        previous_ai = self._find_ai_message(turn_no=patient_message.turn_no)
+        continuing_topic = getattr(previous_ai, "intent_type", None) == "话题引入"
         next_question, plan_exhausted = self._select_next_question(
             current_index=current_index,
             questions=questions,
+            prefer_current=continuing_topic,
         )
         next_index = self._question_index(next_question.question_id, questions)
         next_turn = patient_message.turn_no + 1
@@ -484,6 +490,7 @@ class DialogAgentRunner:
                 patient_answer=patient_answer,
                 next_question=next_question,
                 plan_exhausted=plan_exhausted,
+                introduce_topic=(next_index != current_index and allows_topic_intro(next_question)),
                 text_delta_sink=text_delta_sink,
             )
             generated_text = await agent.handle_patient_input(
@@ -507,6 +514,7 @@ class DialogAgentRunner:
                 text=next_text,
                 turn_no=next_turn,
                 is_opening=False,
+                introduce_topic=bool(getattr(agent, "topic_intro", False)),
                 generation_id=generation_id,
                 message_id=message_id,
             )
@@ -573,10 +581,11 @@ class DialogAgentRunner:
                     "开场需要自然完成：使用患者称呼、简短慰问、自我介绍、说明职责和评估配合方式。"
                     "称呼可能不合适时请允许患者纠正，但不要连续抛出身份核实问题。"
                     "开场最多一次使用姓名加礼貌昵称，后续使用昵称或“您”，不要每轮重复全名。"
-                    "随后自然过渡到一个护理评估问题。整段应像真人护士交流，"
+                    "随后进入指定的本轮阶段。整段应像真人护士交流，"
                     "不要念量表名称，不要使用“您的某某情况是怎样的”这类问卷句式，"
                     "不要一次询问多个评估主题。"
                     + TOPIC_GUIDANCE
+                    + build_topic_turn_instruction(question, introduce=allows_topic_intro(question))
                 )
             ),
             HumanMessage(
@@ -711,6 +720,7 @@ class DialogAgentRunner:
         is_opening: bool,
         generation_id: str,
         message_id: str,
+        introduce_topic: bool = False,
     ) -> tuple[InteractionMessage, str | None]:
         """保存 AI 完整问句并发布完成事件。"""
         message = await self.history.save_message(
@@ -720,7 +730,7 @@ class DialogAgentRunner:
             role_type="AI",
             message_type="文本",
             content_text=text,
-            intent_type="提问",
+            intent_type="话题引入" if introduce_topic else "提问",
             related_question_id=question.question_id,
             creator="dialog_agent",
         )
@@ -886,6 +896,7 @@ class DialogAgentRunner:
         *,
         current_index: int,
         questions: list[QuestionTask],
+        prefer_current: bool = False,
     ) -> tuple[QuestionTask, bool]:
         """仅以有效结构化答案选择下一道待收集题目。"""
         if model_base.SessionLocal is None:
@@ -911,6 +922,7 @@ class DialogAgentRunner:
             questions=questions,
             current_index=current_index,
             answered_question_ids=answered_question_ids,
+            prefer_current=prefer_current,
         )
 
     @staticmethod
@@ -919,11 +931,15 @@ class DialogAgentRunner:
         questions: list[QuestionTask],
         current_index: int,
         answered_question_ids: set[int],
+        prefer_current: bool = False,
     ) -> tuple[QuestionTask, bool]:
         """按 Task-todo 游标循环寻找尚未形成有效结构化答案的题目。"""
         if not questions:
             raise RuntimeError("Task-todo 为空")
         safe_index = current_index if 0 <= current_index < len(questions) else 0
+        # 引入轮仅获得兴趣信息时，下一轮先展开同一目标；有效答案仍优先跳过。
+        if prefer_current and questions[safe_index].question_id not in answered_question_ids:
+            return questions[safe_index], False
         ordered_indexes = [
             (safe_index + offset) % len(questions)
             for offset in range(1, len(questions) + 1)
@@ -965,6 +981,7 @@ class DialogAgentRunner:
         next_question: QuestionTask,
         plan_exhausted: bool,
         text_delta_sink: Callable[[str, dict[str, Any]], Awaitable[None]],
+        introduce_topic: bool = False,
     ):
         """按 PostgreSQL 历史重建单轮文本 Agent。"""
         from app.workers.dialog_agent_runtime import get_runtime_dependencies
@@ -985,6 +1002,13 @@ class DialogAgentRunner:
         await agent.initialize()
         agent.turn_counter = turn_no - 1
         history = await self.history.get_dialog_history(self.session_id)
+        # 已引入过的目标不再重复兴趣调查；从持久化消息恢复，不只依赖 Redis。
+        introduce_topic = introduce_topic and not any(
+            item.related_question_id == next_question.question_id
+            and item.intent_type == "话题引入"
+            for item in history
+        )
+        agent.topic_intro = introduce_topic
         formatted = self.history.format_for_langchain(history)
         if (
             formatted
@@ -1005,12 +1029,8 @@ class DialogAgentRunner:
             )
         else:
             turn_instruction = (
-                "先用一小句自然回应患者刚才的内容，再顺畅过渡到一个下一问。"
-                "将目标事实融入患者当前生活话题，优先询问尚不明确的细节；"
-                "话题不相关时简短说明再过渡，不强行套话、不延长闲聊。"
-                "不得生硬复述字段名，不得一次询问多个主题。"
-                f"本轮要收集的护理事实是：{next_question.question_name}；"
-                f"量表参考表达：{next_question.patient_text or next_question.question_name}。"
+                build_topic_turn_instruction(next_question, introduce=introduce_topic)
+                + "先用一小句回应，不得一次询问多个主题。"
             )
         schedule_prompt = str(guidance.get("constraint_prompt") or "").strip()
         await agent.engine.update_session(

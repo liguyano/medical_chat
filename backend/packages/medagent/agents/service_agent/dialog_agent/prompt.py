@@ -1,6 +1,7 @@
 """Dialog Agent 提示词工程
 作用：构建 system_prompt，内嵌 CICARE 六步 + 沟通风格 + 评估任务 + 工具使用说明。
 """
+
 import json
 import logging
 from typing import Any
@@ -13,9 +14,7 @@ logger = logging.getLogger(__name__)
 def suggest_patient_salutation(patient_info: dict[str, Any]) -> str:
     """根据患者偏好、年龄和性别生成自然且保守的礼貌称呼。"""
     preferred = str(
-        patient_info.get("preferred_salutation")
-        or patient_info.get("preferred_name")
-        or ""
+        patient_info.get("preferred_salutation") or patient_info.get("preferred_name") or ""
     ).strip()
     if preferred:
         return preferred
@@ -100,10 +99,22 @@ COMMUNICATION_STYLE = """
 TOPIC_GUIDANCE = """
 【生活话题引导】
 - 开场说明：通过聊日常生活了解护理需要，患者可纠正、暂停或拒答；不隐瞒评估用途。
+- 先选话题：先在内部根据待评估事实构思能自然接近它的兴趣或生活话题，而不是换个说法念原题。
+  可选入口如“您平时喜欢看什么电视？”“您平时喜欢吃什么？”“平时喜欢做什么运动？”；
+  根据目标灵活选择，不依次询问，不展示内部分析，不把三个兴趣问题一起抛出。
+- 分两阶段展开：新话题的引入轮只问一个兴趣或生活经历问题，然后等待患者回答。
+  禁止在同一轮问完兴趣，紧接着又问麻木、冷热、疼痛、协助程度等量表细节；
+  “我们聊聊平时的感觉，比如有没有发麻”仍是直接问卷，不算话题引入。
+  下一轮先接住具体回答，再从场景中补一个护理细节；已有相关话题就直接延续，不重新开场。
+  示例：想了解视听→先聊喜欢看的电视→患者说爱看新闻→再聊字幕看得清不清；
+  想了解感觉→先聊喜欢吃什么或平时下厨→患者谈到端碗做菜→再自然了解手部冷热或发麻；
+  想了解活动→先聊喜欢的运动→患者说散步→再聊近期距离、是否需要歇息或搀扶。
+  听到“不看电视”“不做运动”要接纳并换一个相关生活场景，不能据此判定能力受损。
 - 从患者刚说的吃饭、起居、活动、睡眠或家人陪伴接话，把待收集事实融入当前生活场景。
   先简短回应，再问同一话题中一个尚不明确的细节；没有合适关联时，简短说明再换话题。
-- 不固定安排闲聊轮数，不为每题铺垫多轮；能自然问到目标就直接问。
+- 不固定安排闲聊轮数，不为每题铺垫多轮；已进入相关场景时直接展开，不在每题前重复兴趣调查。
   患者疲劳、希望快些或拒答时，缩短过渡并尊重意愿，不反复施压，不把拒答填成正常。
+  紧急不适、过敏核实、生命体征和固定施测要求优先，允许直接问，不强行娱乐化。
 - 生活场景只是提问入口，不是答案证据。一句回答可覆盖多题，但只记录明确说出的事实，
   已明确的信息不重问；缺少协助程度、频率、数量或时间范围时，只补问缺失细节。
   区分入院前与当前住院情况；保留目标量表的时间范围和选项含义，固定施测要求优先，
@@ -117,6 +128,61 @@ TOPIC_GUIDANCE = """
 - 不虚构自己做饭、运动、看病等亲身经历来套近乎，不虚构患者的既往对话。
 - 目标题号仅代表本轮采集意图，话题铺垫不代表题目已完成；完成仍以系统结构化进度为准。
 """
+
+
+def allows_topic_intro(task: QuestionTask) -> bool:
+    """保守排除需直接核实或固定施测的目标，其他生活事实允许先引入话题。"""
+    # 以目标题名判断；感觉题举例提到“疼痛”不能误当成疼痛评分。
+    text = f"{task.question_name} {task.section_name or ''}"
+    if (task.scale_code or "").lower() in {"mmse", "moca", "mini-cog"}:
+        return False
+    if task.question_name.strip().lower() in {"bp", "t", "p", "r", "spo2", "hr"}:
+        return False
+    return not any(
+        word in text
+        for word in (
+            "过敏",
+            "疼痛",
+            "意识",
+            "定向",
+            "记忆",
+            "复述",
+            "命名",
+            "计算",
+            "认知",
+            "注意力",
+            "指令",
+            "画钟",
+            "回忆",
+            "阅读",
+            "书写",
+            "血压",
+            "体温",
+            "脉搏",
+            "血氧",
+            "呼吸困难",
+            "呼吸",
+            "胸痛",
+        )
+    )
+
+
+def build_topic_turn_instruction(task: QuestionTask, *, introduce: bool) -> str:
+    """明确区分只引入话题与根据回答展开，目标事实仍仅作为内部采集意图。"""
+    phase = (
+        "【本轮阶段：话题引入】先选话题，只问一个相关兴趣或日常经历问题，然后等待患者回答。"
+        "本轮不得紧接量表细节，不得把原题换个问卷句式直接问出来。"
+        if introduce
+        else "【本轮阶段：话题展开】先回应患者说出的具体内容，融入患者当前生活话题，"
+        "只补问尚不明确的一个护理细节；不要重新询问同一个兴趣。"
+    )
+    return (
+        phase
+        + "量表信息仅供内部理解，不是必须朗读的句子。"
+        + f"目标护理事实：{task.question_name}；"
+        + f"量表参考表达：{task.patient_text or task.question_name}。"
+    )
+
 
 TOOL_USAGE_GUIDE = """
 【工具使用规则】
@@ -185,7 +251,7 @@ def build_system_prompt(
 
     task_section = f"""
 【评估任务列表】（共{len(task_list)}项）
-{''.join(chr(10) + line for line in task_lines)}
+{"".join(chr(10) + line for line in task_lines)}
 
 *重要*：Task-todo 是护理事实清单，不是必须逐字朗读的问题。不得重复询问已经明确回答的事实。
 """
@@ -196,7 +262,7 @@ def build_system_prompt(
         constraint_lines = [f"- {c}" for c in constraints]
         constraint_section = f"""
 【当前约束】（请立即执行）
-{''.join(chr(10) + line for line in constraint_lines)}
+{"".join(chr(10) + line for line in constraint_lines)}
 """
 
     # 当前使用内置模板，应用层后续可在构建前注入已审核话术。
@@ -249,5 +315,5 @@ def build_constraint_update_prompt(constraints: list[str]) -> str:
     constraint_lines = [f"- {c}" for c in constraints]
     return f"""
 【紧急约束】（请立即执行）
-{''.join(chr(10) + line for line in constraint_lines)}
+{"".join(chr(10) + line for line in constraint_lines)}
 """.strip()
