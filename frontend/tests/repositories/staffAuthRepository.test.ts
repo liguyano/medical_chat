@@ -44,7 +44,7 @@ describe('staff authentication repository', () => {
         staff: {
           id: 1,
           staff_no: 'N001',
-          staff_name: '李护士',
+          staff_name: '李某',
           role_code: 'nurse',
           department_name: '心内科',
         },

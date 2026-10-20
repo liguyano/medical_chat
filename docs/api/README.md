@@ -121,7 +121,7 @@ Content-Type: application/json
     "patient_id": 1001,
     "patient_name": "张三",
     "nurse_id": 2001,
-    "nurse_name": "李护士",
+    "nurse_name": "李某",
     "department_id": 301,
     "department_name": "心内科",
     "form_ids": ["pain_scale", "fall_risk"],

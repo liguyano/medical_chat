@@ -12,7 +12,7 @@ describe('full CGA report demo', () => {
     expect(fixedRows).toHaveLength(27);
     expect(fixedRows.every((row) => row.completed)).toBe(true);
     expect(fixedRows.every((row) => row.result !== '未进行相关量表')).toBe(true);
-    expect(fixedRows.every((row) => row.assessor === '李护士')).toBe(true);
+    expect(fixedRows.every((row) => row.assessor === '李某')).toBe(true);
     expect(fixedRows.every((row) => Boolean(row.assessedAt))).toBe(true);
     expect(sections.some((section) => section.id === 'other-completed')).toBe(false);
   });

@@ -141,7 +141,7 @@ def test_staff_seeder_restores_logically_deleted_demo_account() -> None:
     result = StaffSeeder(session_factory=lambda: session).seed()
 
     assert result == {"created": 4, "updated": 1, "total": 5}
-    assert existing.staff_name == "李护士"
+    assert existing.staff_name == "李某"
     assert existing.account_status == "启用"
     assert existing.deleted == 0
 

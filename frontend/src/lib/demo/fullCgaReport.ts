@@ -18,7 +18,7 @@ function scale(
     result_summary: summary,
     risk_level: riskLevel,
     score_status: 'complete',
-    assessor_name: '李护士',
+    assessor_name: '李某',
     assessed_at: assessedAt,
     scores: [{
       score_name: '总分',
