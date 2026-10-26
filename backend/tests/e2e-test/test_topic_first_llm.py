@@ -14,7 +14,7 @@ from medagent.agents.service_agent.schedule_agent import QuestionTask
 from medagent.providers import create_chat_model
 
 from app.configs.app_config import get_app_config
-from app.services.voice_gateway import VoiceGateway
+from app.services.voice_gateway import VOICE_TOOLS, VoiceGateway
 
 
 @pytest.mark.asyncio
@@ -138,3 +138,53 @@ async def test_continuous_topics_across_six_turns(voice):
         if n > 2:
             assert not any(word in answer for word in ("走多远", "经常步行", "起身需要"))
         history.append({"role": "assistant", "content": answer})
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_llm
+@pytest.mark.parametrize("voice", [False, True])
+async def test_game_topic_is_brief_and_asks_one_question_per_turn(voice):
+    if os.getenv("RUN_TOPIC_LLM") != "1":
+        pytest.skip("设置 RUN_TOPIC_LLM=1 才调用真实模型")
+    model = create_chat_model(get_app_config().get_agent_model_config("dialog_agent"))
+    generation_model = model.bind_tools(VOICE_TOOLS) if voice else model
+    question = QuestionTask(
+        question_id=1,
+        question_code="vision",
+        question_name="视力",
+        patient_text="看近处屏幕上的字是否清楚",
+        question_type="文本",
+        required=True,
+        sort_no=1,
+    )
+    system = (
+        VoiceGateway._build_remaining_assessment_instructions({}, [question])
+        if voice
+        else build_system_prompt({}, [question])
+    )
+    history = [AIMessage(content="您平时喜欢做什么？")]
+    for n, user in enumerate(["喜欢打游戏。", "手机上玩斗地主。", "屏幕上的字看得清楚。"]):
+        history.append(HumanMessage(content=user))
+        messages = [SystemMessage(content=system)]
+        if not voice:
+            messages.append(
+                SystemMessage(content=build_topic_turn_instruction(question, introduce=n == 0))
+            )
+        messages.extend(history)
+        response = await generation_model.ainvoke(messages)
+        answer = str(response.content)
+        if response.tool_calls:
+            assert voice and n == 2
+            assert all(call["name"] == "request_assessment_finish" for call in response.tool_calls)
+            assert not answer.strip()
+            print("\n语音提示模拟：原生结束检查工具调用，无患者可见旁白", flush=True)
+            continue
+        print(f"\n{'语音提示模拟' if voice else '文字'}游戏第{n + 1}轮：{answer}", flush=True)
+        assert len(answer) <= 60, "普通回复超过60字符"
+        assert answer.count("？") + answer.count("?") <= 1
+        if n == 1:
+            assert not ("清楚" in answer and any(x in answer for x in ["放大", "眼镜", "累"]))
+        assert not any(
+            x in answer for x in ["患者回答后", "下一个评估话题", "（", "(", "另外", "心态很年轻"]
+        )
+        history.append(AIMessage(content=answer))

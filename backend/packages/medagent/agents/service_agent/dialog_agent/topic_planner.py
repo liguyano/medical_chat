@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..schedule_agent import QuestionTask
+from .prompt import BRIEF_TURN_RULES
 
 
 class TopicTurnPlan(BaseModel):
@@ -32,6 +33,7 @@ class TopicTurnPlan(BaseModel):
                 if self.mode == "introduce"
                 else ""
             )
+            + BRIEF_TURN_RULES
         )
 
 

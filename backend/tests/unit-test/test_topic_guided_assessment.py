@@ -54,6 +54,12 @@ def test_topic_policy_requires_interest_first_then_wait():
         assert rule in prompt
 
 
+def test_each_response_has_one_short_question_and_no_stage_directions():
+    prompt = build_system_prompt({}, [task()])
+    for rule in ("一次只问一个实际问题", "最多60字", "患者回答后", "不要把括号", "问完立即停下"):
+        assert rule in prompt
+
+
 def test_sensation_topic_is_not_mistaken_for_direct_pain_assessment():
     sensation = task().model_copy(
         update={
