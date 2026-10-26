@@ -402,6 +402,12 @@ class VoiceGateway:
                 voice=voice_config.voice or "longanqian",
                 timeout=voice_config.timeout,
             )
+            # 新建上游连接也可能是页面重进或进程重启，恢复持久化交流而非重复开场。
+            recent = await DialogHistoryManager().get_latest_messages(session_no, count=16)
+            for item in recent:
+                role = "assistant" if item.role_type in {"AI","assistant"} else "user"
+                if item.role_type in {"AI","assistant","患者","家属","user"}:
+                    client.remember_turn(role, item.content_text or item.asr_text or "")
             voice_extra = voice_config.model_extra or {}
             turn_detection = str(voice_extra.get("turn_detection") or "server_vad")
             await client.connect(
@@ -999,6 +1005,7 @@ class VoiceGateway:
             asr_text=text,
             creator="patient",
         )
+        session.client.remember_turn("user",text)
         session.publisher.publish(
             PatientAnswerEvent(
                 session_id=session.session_no,
@@ -1274,6 +1281,7 @@ class VoiceGateway:
             tts_text=generation.text,
             creator="dialog_agent_voice",
         )
+        session.client.remember_turn("assistant",generation.text)
         session.publisher.publish(
             DialogMessageEvent(
                 session_id=session.session_no,

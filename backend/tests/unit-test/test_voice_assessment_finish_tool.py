@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -41,9 +42,10 @@ class FakeClient:
 
 
 class FakeRealtimeClientForConnect:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, **_kwargs):
+        self.remember_turn = Mock()
         async def connect_impl(**kwargs):
             self.instructions = kwargs["instructions"]
 
@@ -97,6 +99,7 @@ async def create_voice_session(
     progress,
     next_question=None,
 ):
+    monkeypatch.setattr(voice_gateway_module.DialogHistoryManager, "get_latest_messages", AsyncMock(return_value=[]))
     voice_config = SimpleNamespace(
         websocket_url="wss://example.invalid/realtime",
         model="qwen-test",

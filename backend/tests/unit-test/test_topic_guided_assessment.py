@@ -229,7 +229,15 @@ async def test_answer_after_intro_expands_same_target_in_real_runner():
             prefer_current=prefer_current,
         )
 
-    runner._select_next_question = Mock(side_effect=select)
+    async def plan(**kwargs):
+        question, exhausted = select(
+            current_index=kwargs["current_index"],
+            questions=kwargs["questions"],
+            prefer_current=True,
+        )
+        return question, exhausted, None
+
+    runner._plan_topic_turn = AsyncMock(side_effect=plan)
     agent = SimpleNamespace(
         handle_patient_input=AsyncMock(return_value="这顿面条是自己拿筷子吃的吗？"),
         close=AsyncMock(),

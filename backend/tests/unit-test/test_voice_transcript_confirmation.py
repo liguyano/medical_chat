@@ -11,6 +11,7 @@ from app.services.voice_gateway import VoiceGateway, VoiceSession
 
 class FakeClient:
     def __init__(self) -> None:
+        self.remember_turn = Mock()
         self.create_response = Mock()
         self.update_instructions = Mock()
 

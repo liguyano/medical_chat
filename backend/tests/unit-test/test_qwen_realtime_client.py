@@ -238,6 +238,9 @@ async def test_qwen_client_reconnects_and_retries_send_after_connection_closed()
         timeout=0.1,
     )
     await client.connect(instructions="问候患者", tools=[], turn_detection="server_vad")
+    await client.update_instructions("只问剩余项目")
+    client.remember_turn("user", "喜欢散步，回来坐一会儿")
+    client.remember_turn("assistant", "坐下再起来方便吗？")
     first.fail_next_send = True
 
     await client.append_audio(b"input")
@@ -247,3 +250,8 @@ async def test_qwen_client_reconnects_and_retries_send_after_connection_closed()
         "input_audio_buffer.append",
     ]
     assert base64.b64decode(second.sent[-1]["audio"]) == b"input"
+    instructions = second.sent[0]["session"]["instructions"]
+    assert "只问剩余项目" in instructions
+    assert "喜欢散步" in instructions
+    assert "不要重新自我介绍" in instructions
+    assert "问候患者" not in instructions

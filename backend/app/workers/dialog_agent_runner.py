@@ -22,6 +22,7 @@ from medagent.agents.service_agent.dialog_agent.prompt import (
     build_topic_turn_instruction,
     suggest_patient_salutation,
 )
+from medagent.agents.service_agent.dialog_agent.topic_planner import TopicTurnPlan, plan_topic_turn
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
 from sqlalchemy import func, select
 
@@ -456,13 +457,14 @@ class DialogAgentRunner:
         if not patient_answer:
             raise RuntimeError(f"患者答案为空: {source_message_id}")
 
-        previous_ai = self._find_ai_message(turn_no=patient_message.turn_no)
-        continuing_topic = getattr(previous_ai, "intent_type", None) == "话题引入"
-        next_question, plan_exhausted = self._select_next_question(
-            current_index=current_index,
-            questions=questions,
-            prefer_current=continuing_topic,
-        )
+        try:
+            next_question, plan_exhausted, topic_plan = await self._plan_topic_turn(
+                questions=questions, current_index=current_index, patient_answer=patient_answer,
+            )
+        except Exception as exc:
+            generation_id, message_id = self._generation_ids(source_message_id)
+            self._mark_generation_failed(message_id=message_id,generation_id=generation_id,exc=exc)
+            raise
         next_index = self._question_index(next_question.question_id, questions)
         next_turn = patient_message.turn_no + 1
         generation_id, message_id = self._generation_ids(source_message_id)
@@ -490,7 +492,8 @@ class DialogAgentRunner:
                 patient_answer=patient_answer,
                 next_question=next_question,
                 plan_exhausted=plan_exhausted,
-                introduce_topic=(next_index != current_index and allows_topic_intro(next_question)),
+                introduce_topic=bool(topic_plan and topic_plan.mode == "introduce" and allows_topic_intro(next_question)),
+                topic_plan=topic_plan,
                 text_delta_sink=text_delta_sink,
             )
             generated_text = await agent.handle_patient_input(
@@ -891,14 +894,8 @@ class DialogAgentRunner:
         # 后续下一题仍以真实结构化答案缺口为依据，不因关联缺失中断对话。
         return 0
 
-    def _select_next_question(
-        self,
-        *,
-        current_index: int,
-        questions: list[QuestionTask],
-        prefer_current: bool = False,
-    ) -> tuple[QuestionTask, bool]:
-        """仅以有效结构化答案选择下一道待收集题目。"""
+    def _remaining_questions(self, questions: list[QuestionTask]) -> list[QuestionTask]:
+        """读取有效结构化答案缺口；顺序仅用于展示，不决定下一轮交流。"""
         if model_base.SessionLocal is None:
             raise RuntimeError("数据库未初始化")
         with model_base.SessionLocal() as db:
@@ -918,12 +915,18 @@ class DialogAgentRunner:
                     )
                 ).all()
             )
-        return self._select_unanswered_question(
-            questions=questions,
-            current_index=current_index,
-            answered_question_ids=answered_question_ids,
-            prefer_current=prefer_current,
-        )
+        return [q for q in questions if q.question_id not in answered_question_ids]
+
+    async def _plan_topic_turn(self, *, questions: list[QuestionTask], current_index: int, patient_answer: str):
+        """在全部权威缺项中按最近话题选择目标，历史由 PostgreSQL 恢复。"""
+        remaining = self._remaining_questions(questions)
+        if not remaining:
+            return questions[current_index], True, None
+        history = await self.history.get_dialog_history(self.session_id)
+        formatted = self.history.format_for_langchain(history)
+        plan = await plan_topic_turn(self.model, remaining, formatted, patient_answer)
+        target = next(q for q in remaining if q.question_id == plan.question_id)
+        return target, False, plan
 
     @staticmethod
     def _select_unanswered_question(
@@ -982,6 +985,7 @@ class DialogAgentRunner:
         plan_exhausted: bool,
         text_delta_sink: Callable[[str, dict[str, Any]], Awaitable[None]],
         introduce_topic: bool = False,
+        topic_plan: TopicTurnPlan | None = None,
     ):
         """按 PostgreSQL 历史重建单轮文本 Agent。"""
         from app.workers.dialog_agent_runtime import get_runtime_dependencies
@@ -1009,6 +1013,8 @@ class DialogAgentRunner:
             for item in history
         )
         agent.topic_intro = introduce_topic
+        if topic_plan and topic_plan.mode == "introduce" and not introduce_topic:
+            topic_plan = topic_plan.model_copy(update={"mode":"continue"})
         formatted = self.history.format_for_langchain(history)
         if (
             formatted
@@ -1032,6 +1038,11 @@ class DialogAgentRunner:
                 build_topic_turn_instruction(next_question, introduce=introduce_topic)
                 + "先用一小句回应，不得一次询问多个主题。"
             )
+        if topic_plan:
+            turn_instruction = topic_plan.instructions() + (
+                "" if topic_plan.mode == "communication" else turn_instruction
+            )
+        turn_instruction += "这是持续中的会话，不要重新自我介绍或询问是否开始；听得到吗仅作通话确认。"
         schedule_prompt = str(guidance.get("constraint_prompt") or "").strip()
         await agent.engine.update_session(
             instructions=(

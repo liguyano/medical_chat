@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -28,6 +29,7 @@ class FakeClient:
         self.cancel_response = AsyncMock()
         self.update_instructions = AsyncMock()
         self.send_tool_result = AsyncMock()
+        self.remember_turn = Mock()
 
     async def append_audio(self, data: bytes) -> None:
         self.appended.append(data)
@@ -1087,9 +1089,10 @@ async def test_voice_gateway_keeps_non_education_schedule_guidance(
 
 
 class FakeRealtimeClientForConnect:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, **_kwargs):
+        self.remember_turn = Mock()
         async def connect_impl(**kwargs):
             self.instructions = kwargs["instructions"]
 
@@ -1127,6 +1130,7 @@ def _mock_voice_gateway_connect_dependencies(
     next_question,
     remaining_questions=None,
 ):
+    monkeypatch.setattr(voice_gateway_module.DialogHistoryManager, "get_latest_messages", AsyncMock(return_value=[]))
     voice_config = SimpleNamespace(
         websocket_url="wss://example.invalid/realtime",
         model="qwen-test",
