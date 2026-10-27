@@ -188,3 +188,55 @@ async def test_game_topic_is_brief_and_asks_one_question_per_turn(voice):
             x in answer for x in ["患者回答后", "下一个评估话题", "（", "(", "另外", "心态很年轻"]
         )
         history.append(AIMessage(content=answer))
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_llm
+@pytest.mark.parametrize("voice", [False, True])
+async def test_switch_from_game_to_eating_uses_food_and_actual_actions(voice):
+    if os.getenv("RUN_TOPIC_LLM") != "1":
+        pytest.skip("设置 RUN_TOPIC_LLM=1 才调用真实模型")
+    model = create_chat_model(get_app_config().get_agent_model_config("dialog_agent"))
+    generation = model.bind_tools(VOICE_TOOLS) if voice else model
+    question = QuestionTask(
+        question_id=2,
+        question_code="eating",
+        question_name="进食",
+        patient_text="平时自己吃饭需要帮忙吗？",
+        question_type="文本",
+        required=True,
+        sort_no=2,
+    )
+    system = (
+        VoiceGateway._build_remaining_assessment_instructions({}, [question])
+        if voice
+        else build_system_prompt({}, [question])
+    )
+    history = [AIMessage(content="您玩游戏时，屏幕上的字看得清吗？")]
+    for n, user in enumerate(
+        ["看得清。", "喜欢吃面条。", "吃面条用筷子。", "筷子拿得稳，面都是自己夹着吃的。"]
+    ):
+        history.append(HumanMessage(content=user))
+        messages = [SystemMessage(content=system)]
+        if not voice:
+            messages.append(
+                SystemMessage(content=build_topic_turn_instruction(question, introduce=n == 0))
+            )
+        messages.extend(history)
+        response = await generation.ainvoke(messages)
+        answer = str(response.content)
+        if response.tool_calls:
+            assert voice and n == 3 and not answer.strip()
+            assert all(c["name"] == "request_assessment_finish" for c in response.tool_calls)
+            continue
+        print(f"\n{'语音提示模拟' if voice else '文字'}转进餐第{n + 1}轮：{answer}", flush=True)
+        assert len(answer) <= 60
+        assert answer.count("？") + answer.count("?") <= 1
+        assert not re.search(r"吃饭.{0,8}(帮忙|帮助|协助|自理)|能.{0,4}自己吃饭|独立进食", answer)
+        assert not any(x in answer for x in ["患者回答后", "评估表", "餐具说明能自理"])
+        if n == 0:
+            assert any(x in answer for x in ["吃", "饭", "食物", "口味"])
+            assert not any(x in answer for x in ["帮助", "帮忙", "筷子", "勺子"])
+        if n == 2:
+            assert any(x in answer for x in ["夹", "筷子", "送", "面条", "吃面"])
+        history.append(AIMessage(content=answer))

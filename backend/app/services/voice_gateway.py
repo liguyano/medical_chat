@@ -16,7 +16,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-from medagent.agents.service_agent.dialog_agent.prompt import build_system_prompt
+from medagent.agents.service_agent.dialog_agent.conversation_scenes import (
+    dialogue_reference,
+    question_conversation_context,
+)
+from medagent.agents.service_agent.dialog_agent.prompt import (
+    BRIEF_TURN_RULES,
+    TOPIC_GUIDANCE,
+    build_system_prompt,
+)
 from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS
 from medagent.agents.service_agent.schedule_agent import QuestionTask
 from sqlalchemy import func, select
@@ -228,7 +236,7 @@ class VoiceGateway:
                     "question_id": task.question_id,
                     "question_code": task.question_code,
                     "question_name": task.question_name,
-                    "patient_text": task.patient_text,
+                    **question_conversation_context(task),
                     "question_type": task.question_type,
                     "required": task.required,
                     "options": options,
@@ -1669,7 +1677,8 @@ class VoiceGateway:
             "8. 主动健康教育已关闭，不得主动扩展宣教、风险教育或 teach-back。\n"
             "9. 不得自行宣布评估完成或结束，等待系统完成状态。\n\n"
             "【当前唯一允许询问的问题】\n"
-            f"{question.patient_text}\n"
+            f"{dialogue_reference(question)}\n"
+            + TOPIC_GUIDANCE + BRIEF_TURN_RULES
         )
 
     @staticmethod
@@ -1841,7 +1850,7 @@ class VoiceGateway:
             "total": progress.total,
             "remaining_count": len(progress.remaining_question_ids),
             "remaining_question_ids": list(progress.remaining_question_ids),
-            "remaining_questions": [task.patient_text for task in remaining_tasks],
+            "remaining_questions": [dialogue_reference(task) for task in remaining_tasks],
             "message": (
                 "评估尚未完成，请自然完成系统重新提供的全部剩余项目；"
                 "完成后再次调用 request_assessment_finish。"

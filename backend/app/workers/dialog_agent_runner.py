@@ -15,6 +15,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from medagent.agents.factory import create_dialog_agent
 from medagent.agents.service_agent.dialog_agent.agent import GENERIC_ERROR_MESSAGE
+from medagent.agents.service_agent.dialog_agent.conversation_scenes import dialogue_reference
 from medagent.agents.service_agent.dialog_agent.engine import TextChatEngine
 from medagent.agents.service_agent.dialog_agent.prompt import (
     TOPIC_GUIDANCE,
@@ -564,7 +565,7 @@ class DialogAgentRunner:
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """使用真实模型流式生成首个问诊问题。"""
-        target_text = question.patient_text or question.question_name
+        target_text = dialogue_reference(question)
         model_name = getattr(self.model, "model_name", None) or getattr(
             self.model,
             "model",

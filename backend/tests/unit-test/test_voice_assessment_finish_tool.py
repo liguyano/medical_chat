@@ -4,6 +4,7 @@ from typing import ClassVar
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from medagent.agents.service_agent.dialog_agent.conversation_scenes import dialogue_reference
 
 import app.services.voice_gateway as voice_gateway_module
 from app.services.dialog_audio_store import DialogAudioStore
@@ -46,6 +47,7 @@ class FakeRealtimeClientForConnect:
 
     def __init__(self, **_kwargs):
         self.remember_turn = Mock()
+
         async def connect_impl(**kwargs):
             self.instructions = kwargs["instructions"]
 
@@ -99,7 +101,9 @@ async def create_voice_session(
     progress,
     next_question=None,
 ):
-    monkeypatch.setattr(voice_gateway_module.DialogHistoryManager, "get_latest_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        voice_gateway_module.DialogHistoryManager, "get_latest_messages", AsyncMock(return_value=[])
+    )
     voice_config = SimpleNamespace(
         websocket_url="wss://example.invalid/realtime",
         model="qwen-test",
@@ -117,9 +121,7 @@ async def create_voice_session(
     monkeypatch.setattr(
         voice_gateway_module,
         "ScheduleTaskStore",
-        lambda _redis: SimpleNamespace(
-            get_plan=lambda _session_no: SimpleNamespace(tasks=tasks)
-        ),
+        lambda _redis: SimpleNamespace(get_plan=lambda _session_no: SimpleNamespace(tasks=tasks)),
     )
     monkeypatch.setattr(
         voice_gateway_module,
@@ -193,10 +195,7 @@ async def test_voice_connection_only_exposes_authoritative_remaining_questions(
 
     client = FakeRealtimeClientForConnect.instances[-1]
     connect_kwargs = client.connect.await_args.kwargs
-    tool_names = [
-        item.get("function", {}).get("name")
-        for item in connect_kwargs["tools"]
-    ]
+    tool_names = [item.get("function", {}).get("name") for item in connect_kwargs["tools"]]
     instructions = connect_kwargs["instructions"]
 
     assert "request_assessment_finish" in tool_names
@@ -245,9 +244,11 @@ async def test_new_voice_connection_exposes_all_unanswered_questions(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("last_question_name", ["剩余的上下楼梯问题", "剩余的进食问题"])
 async def test_finish_check_tool_uses_database_recovered_remaining_questions(
     tmp_path: Path,
     monkeypatch,
+    last_question_name,
 ):
     gateway = VoiceGateway()
     session = make_session(tmp_path)
@@ -260,7 +261,7 @@ async def test_finish_check_tool_uses_database_recovered_remaining_questions(
             option_value="independent",
         )
     ]
-    q3 = question(3, "剩余的上下楼梯问题")
+    q3 = question(3, last_question_name)
     # 模拟现场：旧 Schedule Task-todo 只保留已完成题，剩余题由 PostgreSQL 恢复。
     session.task_list = [q1]
     execute = AsyncMock(return_value={"success": True, "completed": True})
@@ -318,7 +319,7 @@ async def test_finish_check_tool_uses_database_recovered_remaining_questions(
     assert tool_result["current"] == 1
     assert tool_result["total"] == 3
     assert tool_result["remaining_question_ids"] == [2, 3]
-    assert tool_result["remaining_questions"] == [q2.patient_text, q3.patient_text]
+    assert tool_result["remaining_questions"] == [dialogue_reference(q2), dialogue_reference(q3)]
 
     refreshed_prompt = session.client.update_instructions.await_args.args[0]
     assert q1.patient_text not in refreshed_prompt

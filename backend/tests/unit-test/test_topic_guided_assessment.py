@@ -4,6 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from medagent.agents.service_agent.dialog_agent.conversation_scenes import (
+    question_conversation_context,
+)
 from medagent.agents.service_agent.dialog_agent.prompt import (
     allows_topic_intro,
     build_system_prompt,
@@ -58,6 +61,30 @@ def test_each_response_has_one_short_question_and_no_stage_directions():
     prompt = build_system_prompt({}, [task()])
     for rule in ("一次只问一个实际问题", "最多60字", "患者回答后", "不要把括号", "问完立即停下"):
         assert rule in prompt
+
+
+def test_eating_reference_is_a_scene_not_a_bare_ability_question():
+    prompt = VoiceGateway._build_remaining_assessment_instructions({}, [task()])
+    assert "scene_guidance" in prompt
+    assert "餐具" in prompt and "送入口中" in prompt
+    assert "喜好或餐具不能证明自理" in prompt
+    assert "clinical_reference" in prompt
+
+
+def test_eating_scene_keeps_clinical_conditions_and_fixed_tests_unchanged():
+    feeding = task().model_copy(update={"patient_text": "过去24小时进食是否需要帮助？"})
+    context = question_conversation_context(feeding)
+    assert context["clinical_reference"] == "过去24小时进食是否需要帮助？"
+    fixed = feeding.model_copy(update={"scale_code": "MMSE"})
+    assert "scene_guidance" not in question_conversation_context(fixed)
+
+
+def test_voice_recovery_keeps_eating_scene_and_brief_rules():
+    prompt = VoiceGateway._build_recovery_question_instructions(
+        {}, task(), mode_label="恢复", transition_rule="自然衔接"
+    )
+    assert "scene_guidance" in prompt
+    assert "一次只问一个实际问题" in prompt
 
 
 def test_sensation_topic_is_not_mistaken_for_direct_pain_assessment():
@@ -194,7 +221,7 @@ async def test_followup_preserves_topic_guidance_and_actual_target(monkeypatch, 
     instructions = engine.update_session.call_args.kwargs["instructions"]
     assert ("本轮阶段：话题展开" if introduced else "本轮阶段：话题引入") in instructions
     assert agent.topic_intro is (not introduced)
-    assert "量表参考表达：进食是否需要帮助" in instructions
+    assert "clinical_reference" in instructions and "进食是否需要帮助" in instructions
     assert "不主动展开宣教" in instructions
 
 

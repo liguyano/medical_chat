@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from ..schedule_agent import QuestionTask
+from .conversation_scenes import dialogue_reference
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,9 @@ TOPIC_GUIDANCE = """
 - 持续围绕生活话题：散步→回家休息→起身等相关事实可以跨题序衔接。当前话题信息已清楚后，
   允许换到与其他缺项有关的话题，用一句具体生活连接过渡，不用“接下来评估移动情况”。
   不对每个量表项目单独开启兴趣调查，不能聊两句就退回逐题问卷。
+- 换话题不能只在能力判断前加“那您平时”。先进入一个具体生活场景，再顺着患者的食物、
+  物品或活动问实际动作。例如从游戏转进餐，先聊喜欢的食物，再问该食物怎么吃；
+  不能直接问“吃饭需要帮忙吗”。不要把选了餐具、喜欢食物或做饭自动当成独立进食证据。
 - 禁止向患者提“评估表里”“按选项分类”“按经常步行来记”等内部结构；由后台依据原话归类，
   信息不足只问实际生活细节，不能将已经明确的事实换成选项再问。
 - 身份介绍和开始确认只做一次。患者说“听得到吗”只简短确认听得到，不重新开场，
@@ -202,7 +206,7 @@ def build_topic_turn_instruction(task: QuestionTask, *, introduce: bool) -> str:
         phase
         + "量表信息仅供内部理解，不是必须朗读的句子。"
         + f"目标护理事实：{task.question_name}；"
-        + f"量表参考表达：{task.patient_text or task.question_name}。"
+        + f"量表参考表达：{dialogue_reference(task)}。"
         + BRIEF_TURN_RULES
     )
 
@@ -268,7 +272,7 @@ def build_system_prompt(
     task_lines = []
     for idx, task in enumerate(task_list, 1):
         task_lines.append(
-            f"{idx}. [{task.question_code}] {task.patient_text} "
+            f"{idx}. [{task.question_code}] {dialogue_reference(task)} "
             f"({'必填' if task.required else '选填'})"
         )
 
