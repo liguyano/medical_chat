@@ -330,9 +330,10 @@ class ScheduleAgent:
                 prompts.append(analysis.suggested_action)
             elif remaining_questions:
                 prompts.append(
-                    f"请结束无关话题，并自然引导患者回答："
-                    f"{self.question_map[remaining_questions[0]].patient_text}"
+                    "请简短接住患者当前内容，再从相关生活场景了解尚不明确的事实；"
+                    f"内部参考目标：{self.question_map[remaining_questions[0]].question_name}。"
                 )
+            prompts.append("以上是内部采集目标，不是患者问句；一般交流不要照读原题、播报项目切换或重复开场，每轮只问一个具体事实；固定施测原句、规定操作及必要安全说明优先。")
 
         for tool in missing_tools:
             if "tobacco" in tool:

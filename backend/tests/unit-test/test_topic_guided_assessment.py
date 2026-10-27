@@ -63,6 +63,24 @@ def test_each_response_has_one_short_question_and_no_stage_directions():
         assert rule in prompt
 
 
+def test_effective_prompts_remove_old_questionnaire_examples_and_scripts():
+    for prompt in [
+        build_system_prompt({}, [task()]),
+        VoiceGateway._build_remaining_assessment_instructions({}, [task()]),
+        VoiceGateway._build_recovery_question_instructions(
+            {}, task(), mode_label="恢复", transition_rule="自然衔接"
+        ),
+    ]:
+        for old in [
+            "这顿是自己拿勺吃的，还是有人帮忙",
+            "【话术模板】",
+            "再自然过渡到下一项护理问题",
+            "按 Task-todo 一次只收集一个主题",
+        ]:
+            assert old not in prompt
+        assert "不能把“好”改写为“吃饭没问题”" in prompt
+
+
 def test_eating_reference_is_a_scene_not_a_bare_ability_question():
     prompt = VoiceGateway._build_remaining_assessment_instructions({}, [task()])
     assert "scene_guidance" in prompt

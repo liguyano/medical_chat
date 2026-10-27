@@ -599,7 +599,7 @@ class DialogAgentRunner:
                     f"当前住院诊断快照（仅供内部理解，不得向患者宣告）："
                     f"{json.dumps(self.patient_info.get('diagnosis_snapshot') or {}, ensure_ascii=False)}。"
                     f"第一项需要了解的护理事实：{question.question_name}。"
-                    f"量表参考表达：{target_text}"
+                    f"后台事实范围（禁止照读，固定施测要求除外）：{target_text}"
                 )
             ),
         ]

@@ -38,11 +38,29 @@ def test_system_prompt_requires_completed_question_evidence():
     assert "get_education_material" not in DEVIATION_CHECK_SYSTEM_PROMPT
 
 
+def test_schedule_does_not_restore_old_questionnaire_or_repeated_opening():
+    prompt = build_deviation_check_prompt([make_task(1)], [], 5)
+    assert "待完成的量表问题（按顺序）" not in prompt
+    assert "提醒AI回到量表问题：您是否吸烟" not in prompt
+    assert "重复开场" in DEVIATION_CHECK_SYSTEM_PROMPT
+
+
+def test_deviation_constraint_preserves_fixed_administration_exception():
+    from medagent.agents.service_agent.schedule_agent.agent import ScheduleAgent
+    from medagent.agents.service_agent.schedule_agent.models import ScheduleAnalysis
+
+    agent = ScheduleAgent.__new__(ScheduleAgent)
+    prompt = agent._build_constraint_prompt(
+        analysis=ScheduleAnalysis(is_deviation=True, suggested_action="核对规定原句"),
+        missing_tools=[],
+        remaining_questions=[],
+    )
+    assert "固定施测原句、规定操作及必要安全说明优先" in prompt
+
+
 def test_remaining_tasks_include_required_optional_and_options():
     """任务文本应包含必答标记、选答标记和选项。"""
-    text = _format_remaining_tasks(
-        [make_task(1), make_task(2, required=False)]
-    )
+    text = _format_remaining_tasks([make_task(1), make_task(2, required=False)])
     assert "【必答】" in text
     assert "【可选】" in text
     assert "可选项：是" in text

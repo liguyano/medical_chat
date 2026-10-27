@@ -193,6 +193,41 @@ async def test_game_topic_is_brief_and_asks_one_question_per_turn(voice):
 @pytest.mark.asyncio
 @pytest.mark.real_llm
 @pytest.mark.parametrize("voice", [False, True])
+async def test_old_ai_question_and_vague_ok_do_not_become_patient_facts(voice):
+    if os.getenv("RUN_TOPIC_LLM") != "1":
+        pytest.skip("设置 RUN_TOPIC_LLM=1 才调用真实模型")
+    model = create_chat_model(get_app_config().get_agent_model_config("dialog_agent"))
+    task = QuestionTask(
+        question_id=1,
+        question_code="eating",
+        question_name="进食",
+        patient_text="吃饭需要帮忙吗？",
+        question_type="文本",
+        required=True,
+        sort_no=1,
+    )
+    system = (
+        VoiceGateway._build_remaining_assessment_instructions({}, [task])
+        if voice
+        else build_system_prompt({}, [task])
+    )
+    messages = [
+        SystemMessage(content=system),
+        AIMessage(content="您刚才玩游戏看得清，那您平时自己吃饭需要帮忙吗？"),
+        HumanMessage(content="好。"),
+    ]
+    answer = str((await model.ainvoke(messages)).content)
+    print(f"\n{'语音提示模拟' if voice else '文字'}模糊回应：{answer}", flush=True)
+    assert len(answer) <= 60
+    assert "吃饭没问题" not in answer
+    assert not any(word in answer for word in ["帮忙", "帮助", "自理", "能吃", "独立进食"])
+    assert not re.search(r"吃饭.{0,6}(需要帮|要帮|能自理)|独立进食", answer)
+    assert not any(x in answer for x in ["可以开始吗", "我是AI护理助手", "已记录", "记下了"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_llm
+@pytest.mark.parametrize("voice", [False, True])
 async def test_switch_from_game_to_eating_uses_food_and_actual_actions(voice):
     if os.getenv("RUN_TOPIC_LLM") != "1":
         pytest.skip("设置 RUN_TOPIC_LLM=1 才调用真实模型")
