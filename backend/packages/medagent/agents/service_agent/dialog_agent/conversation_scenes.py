@@ -5,13 +5,54 @@ import json
 from ..schedule_agent import QuestionTask
 
 
+def supports_life_scene(task: QuestionTask) -> bool:
+    """普通交谈默认用场景，固定施测和必须直接核实的项目优先。"""
+    name = getattr(task, "question_name", "")
+    text = f"{name} {getattr(task, 'section_name', None) or ''}"
+    if (getattr(task, "scale_code", None) or "").lower() in {"mmse", "moca", "mini-cog"}:
+        return False
+    if name.strip().lower() in {"bp", "t", "p", "r", "spo2", "hr"}:
+        return False
+    return not any(
+        word in text
+        for word in (
+            "过敏",
+            "疼痛",
+            "意识",
+            "定向",
+            "记忆",
+            "复述",
+            "命名",
+            "计算",
+            "认知",
+            "注意力",
+            "指令",
+            "画钟",
+            "回忆",
+            "阅读",
+            "书写",
+            "血压",
+            "体温",
+            "脉搏",
+            "血氧",
+            "呼吸",
+            "胸痛",
+        )
+    )
+
+
 def question_conversation_context(task: QuestionTask) -> dict[str, str]:
-    """为进餐目标提供具体动作路径，其余目标保持原有参考；不改变题目或计分。"""
+    """所有普通目标都带生活场景要求，进餐额外提供动作路径；不改变题目或计分。"""
     reference = task.patient_text or task.question_name
     name = f"{getattr(task, 'question_name', '')} {task.question_code}".lower()
     context = {"clinical_reference": reference}
-    fixed_scale = (getattr(task, "scale_code", None) or "").lower() in {"mmse", "moca", "mini-cog"}
-    if not fixed_scale and any(word in name for word in ("进食", "吃饭", "feeding", "eating")):
+    if not supports_life_scene(task):
+        return context
+    context["scene_guidance"] = (
+        "此事实必须融入相关生活场景话题，通过具体经历和动作了解；"
+        "不能聊完兴趣再切回量表问法，不只给能力判断加过渡；原题只作后台条件，缺少明确证据不填答案。"
+    )
+    if any(word in name for word in ("进食", "吃饭", "feeding", "eating")):
         context["scene_guidance"] = (
             "进餐场景：转入本话题时先聊喜欢的食物或最近一顿饭，等回答后，顺着患者说的食物聊餐具和实际进餐动作。"
             "例如喜欢面条→吃面条用筷子还是勺子→夹面送入口中时顺手吗；每次只选一个问题，等回答再继续。"
@@ -27,7 +68,7 @@ def question_conversation_context(task: QuestionTask) -> dict[str, str]:
 
 
 def dialogue_reference(task: QuestionTask) -> str:
-    """普通题保持原问法参考，进餐题显式区分后台条件和场景路径。"""
+    """所有普通题区分后台事实与生活场景，固定施测保留原句。"""
     context = question_conversation_context(task)
     return (
         json.dumps(context, ensure_ascii=False)

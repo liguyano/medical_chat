@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from ..schedule_agent import QuestionTask
-from .conversation_scenes import dialogue_reference
+from .conversation_scenes import dialogue_reference, supports_life_scene
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,10 @@ BRIEF_TURN_RULES = """
 
 TOPIC_GUIDANCE = """
 【生活话题引导】
+- 总原则：所有可通过交谈了解的评估问题，都必须融合到相关的生活场景话题里面问。
+  通过患者讲述具体生活经历、物品和动作获得所需事实；不是先聊兴趣、再切回量表问法，
+  也不是给能力判断题加一句过渡。这个原则贯穿整段对话，不只适用于进餐。
+  固定施测原句、规定操作、紧急安全核实优先；原题时间范围和判断条件不得改变。
 - 持续围绕生活话题：散步→回家休息→起身等相关事实可以跨题序衔接。当前话题信息已清楚后，
   允许换到与其他缺项有关的话题，用一句具体生活连接过渡，不用“接下来评估移动情况”。
   不对每个量表项目单独开启兴趣调查，不能聊两句就退回逐题问卷。
@@ -157,40 +161,8 @@ TOPIC_GUIDANCE = """
 
 
 def allows_topic_intro(task: QuestionTask) -> bool:
-    """保守排除需直接核实或固定施测的目标，其他生活事实允许先引入话题。"""
-    # 以目标题名判断；感觉题举例提到“疼痛”不能误当成疼痛评分。
-    text = f"{task.question_name} {task.section_name or ''}"
-    if (task.scale_code or "").lower() in {"mmse", "moca", "mini-cog"}:
-        return False
-    if task.question_name.strip().lower() in {"bp", "t", "p", "r", "spo2", "hr"}:
-        return False
-    return not any(
-        word in text
-        for word in (
-            "过敏",
-            "疼痛",
-            "意识",
-            "定向",
-            "记忆",
-            "复述",
-            "命名",
-            "计算",
-            "认知",
-            "注意力",
-            "指令",
-            "画钟",
-            "回忆",
-            "阅读",
-            "书写",
-            "血压",
-            "体温",
-            "脉搏",
-            "血氧",
-            "呼吸困难",
-            "呼吸",
-            "胸痛",
-        )
-    )
+    """话题引入与逐题场景上下文共用固定施测和直接核实边界。"""
+    return supports_life_scene(task)
 
 
 def build_topic_turn_instruction(task: QuestionTask, *, introduce: bool) -> str:

@@ -97,6 +97,21 @@ def test_eating_scene_keeps_clinical_conditions_and_fixed_tests_unchanged():
     assert "scene_guidance" not in question_conversation_context(fixed)
 
 
+@pytest.mark.parametrize("name", ["睡眠", "穿衣", "洗澡", "排泄", "视力", "行走"])
+def test_all_conversational_questions_have_life_scene_guidance(name):
+    question = task().model_copy(
+        update={
+            "question_name": name,
+            "question_code": "generic",
+            "patient_text": f"{name}是否需要帮助？",
+        }
+    )
+    context = question_conversation_context(question)
+    assert "scene_guidance" in context
+    assert "生活场景" in context["scene_guidance"]
+    assert context["clinical_reference"] == question.patient_text
+
+
 def test_voice_recovery_keeps_eating_scene_and_brief_rules():
     prompt = VoiceGateway._build_recovery_question_instructions(
         {}, task(), mode_label="恢复", transition_rule="自然衔接"
