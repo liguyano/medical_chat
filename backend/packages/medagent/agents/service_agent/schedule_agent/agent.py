@@ -85,6 +85,12 @@ class ScheduleAgent:
             ):
                 ordered_codes.append(task.question_code)
 
+        if draft.topic_route:
+            route_codes = [code for topic in draft.topic_route for code in topic.question_codes]
+            ordered_codes = list(
+                dict.fromkeys([code for code in route_codes if code in grouped] + ordered_codes)
+            )
+
         planned_tasks: list[QuestionTask] = []
         for code in ordered_codes:
             sources = grouped[code]
@@ -97,11 +103,19 @@ class ScheduleAgent:
                     }
                 )
             )
+        if draft.topic_route:
+            draft.topic_route[-1] = draft.topic_route[-1].model_copy(
+                update={
+                    "transition_to_next": "检查尚缺事实并等待后台确认；只有系统确认完成后才能结束，不提前告别。"
+                }
+            )
         return ScheduleTaskTodo(
             session_id=self.session_id,
             tasks=planned_tasks,
             opening_guidance=draft.opening_guidance,
             planning_reason=draft.planning_reason,
+            topic_route=draft.topic_route,
+            plan_version="2.0",
         )
 
     async def _plan_task_todo(
@@ -120,7 +134,7 @@ class ScheduleAgent:
         ]
         try:
             structured = self.model.with_structured_output(SchedulePlanDraft)
-            result = await structured.ainvoke(messages)
+            result = await structured.ainvoke(messages, max_tokens=6000)
             return (
                 result
                 if isinstance(result, SchedulePlanDraft)
@@ -193,9 +207,7 @@ class ScheduleAgent:
     ) -> ScheduleAnalysis:
         """调用 OpenAI 兼容接口执行语义判断。"""
         remaining_tasks = [
-            self.question_map[code]
-            for code in remaining_questions
-            if code in self.question_map
+            self.question_map[code] for code in remaining_questions if code in self.question_map
         ]
         prompt = build_deviation_check_prompt(
             remaining_tasks=remaining_tasks,
@@ -302,14 +314,14 @@ class ScheduleAgent:
         for keywords, negative_phrases, tool_name, expected_arguments, label in requirements:
             has_positive_feature = any(
                 keyword in recent_user_text for keyword in keywords
-            ) and not any(
-                negative in recent_user_text for negative in negative_phrases
-            )
+            ) and not any(negative in recent_user_text for negative in negative_phrases)
             if not has_positive_feature:
                 continue
             matched = any(
                 call.name == tool_name
-                and all(call.arguments.get(key) == value for key, value in expected_arguments.items())
+                and all(
+                    call.arguments.get(key) == value for key, value in expected_arguments.items()
+                )
                 for call in tool_calls
             )
             if not matched:
@@ -333,7 +345,9 @@ class ScheduleAgent:
                     "请简短接住患者当前内容，再从相关生活场景了解尚不明确的事实；"
                     f"内部参考目标：{self.question_map[remaining_questions[0]].question_name}。"
                 )
-            prompts.append("以上是内部采集目标，不是患者问句；一般交流不要照读原题、播报项目切换或重复开场，每轮只问一个具体事实；固定施测原句、规定操作及必要安全说明优先。")
+            prompts.append(
+                "以上是内部采集目标，不是患者问句；一般交流不要照读原题、播报项目切换或重复开场，每轮只问一个具体事实；固定施测原句、规定操作及必要安全说明优先。"
+            )
 
         for tool in missing_tools:
             if "tobacco" in tool:
@@ -362,9 +376,7 @@ class ScheduleAgent:
         remaining = self._remaining_codes()
         total = len(self.task_list)
         progress = round(len(completed) / total * 100, 2) if total else 100.0
-        next_question = (
-            self.question_map[remaining[0]].patient_text if remaining else ""
-        )
+        next_question = self.question_map[remaining[0]].patient_text if remaining else ""
         return ScheduleAgentOutput(
             checked=checked,
             is_deviation=is_deviation,

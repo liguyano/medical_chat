@@ -1,5 +1,7 @@
 'use client';
 
+import { VoiceDiagnosticsPanel } from '@/components/patient/VoiceDiagnosticsPanel';
+import type { VoiceCaptureDiagnostics } from '@/lib/audio/voiceCaptureStats';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
@@ -246,6 +248,7 @@ export default function PatientDialoguePage() {
   );
   const saveConsent = useTaskStore((state) => state.saveConsent);
   const setStreaming = useChatStore((state) => state.setStreaming);
+  const [voiceDiagnostics, setVoiceDiagnostics] = useState<VoiceCaptureDiagnostics | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isHandoffSubmitting, setIsHandoffSubmitting] = useState(false);
@@ -767,6 +770,7 @@ export default function PatientDialoguePage() {
   };
 
   const startVoice = async () => {
+    setConnectionError('');
     showVoiceOverlay();
     setPendingVoiceTranscript('');
     setPendingVoiceTranscriptId('');
@@ -783,22 +787,23 @@ export default function PatientDialoguePage() {
     }
     if (
       voiceClientRef.current &&
-      voiceState === 'paused'
+      voiceClientRef.current.isPaused
     ) {
       await voiceClientRef.current.resume();
       return;
     }
     await voiceClientRef.current?.close();
     const client = new VoiceSocketClient({
+      onDiagnostics: setVoiceDiagnostics,
       taskId,
       sessionId: currentSession.id,
       onStateChange: (state) => {
         setVoiceState(state);
         setIsRecording(
-          state === 'listening' ||
-            state === 'transcribing' ||
-            state === 'thinking' ||
-            state === 'speaking'
+          !voiceClientRef.current?.isPaused && (
+            state === 'listening' || state === 'transcribing' ||
+            state === 'thinking' || state === 'speaking'
+          )
         );
         if (
           state === 'connecting' ||
@@ -1029,6 +1034,7 @@ export default function PatientDialoguePage() {
     <PatientLayout
       title="AI智能评估"
       desktopAside={<RecordedAnswersPanel answers={answers} />}
+      rightAside={<VoiceDiagnosticsPanel data={voiceDiagnostics} />}
       showBack
       onBack={() => router.push(`/patient/tasks/${taskId}`)}
       headerRight={
@@ -1285,7 +1291,7 @@ export default function PatientDialoguePage() {
               aria-label="语音状态"
             >
               <div className="pointer-events-auto w-full max-w-[360px] rounded-[28px] border border-white/80 bg-[#fffaf6]/92 px-4 py-5 shadow-[0_18px_60px_rgba(94,67,48,.18)] backdrop-blur-md">
-                <VoiceOrb state={visualVoiceState} />
+                <VoiceOrb state={visualVoiceState} errorMessage={connectionError} />
                 {(voiceState === 'listening' || isRecording) && (
                   <button
                     type="button"

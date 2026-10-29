@@ -4,7 +4,6 @@ from typing import ClassVar
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from medagent.agents.service_agent.dialog_agent.conversation_scenes import dialogue_reference
 
 import app.services.voice_gateway as voice_gateway_module
 from app.services.dialog_audio_store import DialogAudioStore
@@ -200,7 +199,7 @@ async def test_voice_connection_only_exposes_authoritative_remaining_questions(
 
     assert "request_assessment_finish" in tool_names
     assert "request_assessment_finish" in instructions
-    assert "不得直接宣布评估完成" in instructions
+    assert "只有completed=true才结束" in instructions
     assert q1.patient_text not in instructions
     assert q2.patient_text in instructions
     assert q3.patient_text in instructions
@@ -319,17 +318,16 @@ async def test_finish_check_tool_uses_database_recovered_remaining_questions(
     assert tool_result["current"] == 1
     assert tool_result["total"] == 3
     assert tool_result["remaining_question_ids"] == [2, 3]
-    assert tool_result["remaining_questions"] == [dialogue_reference(q2), dialogue_reference(q3)]
+    assert tool_result["remaining_questions"] == [q2.patient_text, q3.patient_text]
 
     refreshed_prompt = session.client.update_instructions.await_args.args[0]
     assert q1.patient_text not in refreshed_prompt
     assert q2.patient_text in refreshed_prompt
     assert q3.patient_text in refreshed_prompt
     assert '"question_id": 2' in refreshed_prompt
-    assert '"question_name": "剩余的床椅转移问题"' in refreshed_prompt
-    assert '"question_type": "单选"' in refreshed_prompt
-    assert '"option_code": "independent"' in refreshed_prompt
-    assert '"option_label": "可独立完成"' in refreshed_prompt
+    assert q2.patient_text in refreshed_prompt
+    assert '"label": "可独立完成"' in refreshed_prompt
+    assert "option_code" not in refreshed_prompt
     assert "当前唯一允许询问的问题" not in refreshed_prompt
     assert "request_assessment_finish" in refreshed_prompt
     assert session.instructions == refreshed_prompt

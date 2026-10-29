@@ -17,10 +17,23 @@ TASK_TODO_SYSTEM_PROMPT = """你是住院护理评估的 Schedule Agent。
    在此基础上将相关生活话题聚集：吃饭与进食协助、走动与活动能力、起居与自理、睡眠与休息、家人陪伴。
    不改变题目含义、时间范围或固定施测要求，不用话题分组省略任何必需事实。
 4. 相同问题编码只安排一次对话采集，后端会把同一事实写入多个量表。
-5. opening_guidance 应提示 Dialog Agent 按 CICARE 完成接触、自我介绍、流程说明，然后自然进入第一题。
+5. opening_guidance 应提示 Dialog Agent 按 CICARE 简短开场，然后从第一个话题入口开始，不朗读第一道量表题。
 6. 不输出面向患者的诊断结论，不把评分、护理计划或交班内容伪装成患者自述问题。
 7. 患者基础信息中的 diagnosis_snapshot 仅用于内部理解疾病背景和安排评估顺序，
    不得把诊断快照作为患者自述，不得向患者宣告诊断结论。
+8. 同次生成topic_route，把全部必填编码串成少量生活话题；每个编码归属且仅归属一个话题，不能遗漏或虚构。
+   按自然关联安排主题顺序，例如娱乐视听→日常餐食→饭后活动/起身→夜间休息；依实际题目调整，不能套固定主题清单。
+9. 每个话题包含topic_id、title、question_codes、entry_question、follow_up_guidance、answer_branches、evidence_rules、transition_to_next。
+   entry_question只问一个生活事实，不是复合问句；进餐入口先问最近一顿吃什么或喜欢食物，不能同轮问筷子勺子、协助或能力。
+   视听入口先聊节目/游戏等兴趣；睡眠入口先聊晚间生活习惯。固定测试或必要直接核实例外。
+   follow_up_guidance描述等患者回答后如何逐次了解动作或经历，不能写成直接能力问卷；每轮至多一个问题、普通回复最多60字。
+   answer_branches说明不感兴趣/拒答/回答转向时如何接话；evidence_rules说明哪些信息不能作为答案，以及缺项如何具体澄清。
+   transition_to_next描述连接方式，不是固定台词，不假设当前时间；不要用“咱们再聊某评估”充当连接。
+   最后话题只描述检查缺项、等待后台确认，不能宣布完成、告别或让患者休息。
+10. 路线不能预设每个兴趣都马上转成能力测试；分支必须允许跟随患者刚说的具体经历，不能固定兴趣→餐具→自理三连问。
+    不输出量表评分标准或期待答案，不诱导回答、不隐瞒评估用途。
+    路线是引导不是固定台词；固定施测/必要直接核实单独安排、保留原句规范。手动医护项目不得要求患者代答。
+    每个话题简洁，不重复原题全文；不要从喜欢食物、餐具、做饭推断自理，模糊“好”不能当明确事实。
 """
 
 
@@ -30,6 +43,8 @@ def build_task_todo_prompt(
     questions: list[QuestionTask],
 ) -> str:
     """构建 Schedule Agent 任务规划提示词。"""
+    from ..dialog_agent.conversation_scenes import question_conversation_context
+
     fields = [
         {
             "question_id": item.question_id,
@@ -39,6 +54,7 @@ def build_task_todo_prompt(
             "required": item.required,
             "section_name": item.section_name,
             "scale_code": item.scale_code,
+            **question_conversation_context(item),
         }
         for item in questions
         if item.required
@@ -48,9 +64,10 @@ def build_task_todo_prompt(
         f"{json.dumps(patient_info, ensure_ascii=False)}\n\n"
         "## 可规划量表字段\n"
         f"{json.dumps(fields, ensure_ascii=False)}\n\n"
-        "请严格输出一个 json 对象，字段为 ordered_question_codes、opening_guidance、planning_reason；"
+        "请严格输出一个 json 对象，字段为 ordered_question_codes、opening_guidance、planning_reason、topic_route；"
         "不要输出 Markdown、解释文字或 json 代码围栏。"
     )
+
 
 DEVIATION_CHECK_SYSTEM_PROMPT = """你是一个医疗评估调度助手，负责监控 AI 与患者的对话是否按照量表问题进行。
 
@@ -173,8 +190,7 @@ def _format_remaining_tasks(tasks: list[QuestionTask]) -> str:
         options = "、".join(option.option_label for option in task.options)
         option_text = f"；可选项：{options}" if options else ""
         lines.append(
-            f"{idx}. {required_mark} {task.patient_text} "
-            f"(编码: {task.question_code}{option_text})"
+            f"{idx}. {required_mark} {task.patient_text} (编码: {task.question_code}{option_text})"
         )
 
     if len(tasks) > 5:

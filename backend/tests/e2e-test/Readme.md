@@ -23,3 +23,7 @@ $env:DIALOG_TEST_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 豆包全双工语音 E2E 还需要真实 API Key、App ID、Resource ID 和与当前事件协议匹配的
 WebSocket endpoint。条件不完整时禁止使用 Fake WebSocket 冒充真实语音 E2E。
+
+### 任务话题路线生成
+
+显式设置 `RUN_TOPIC_LLM=1` 后运行 `test_task_topic_route_llm.py`，使用当前 Schedule 模型及虚构题目，需先获模型外发授权。可选 `TOPIC_ROUTE_PLAN_OUT` 保存合成路线。只验证真实路线生成，不证明真实语音对话效果。

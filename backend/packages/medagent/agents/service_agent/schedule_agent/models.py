@@ -4,7 +4,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class QuestionOption(BaseModel):
@@ -35,12 +35,27 @@ class QuestionTask(BaseModel):
     source_question_ids: list[int] = Field(default_factory=list)
 
 
+class TopicRouteStep(BaseModel):
+    """任务级生活话题路线；是引导策略，不是逐句台词或临床答案。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    topic_id: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=80)
+    question_codes: list[str] = Field(min_length=1)
+    entry_question: str = Field(min_length=1, max_length=160)
+    follow_up_guidance: list[str] = Field(min_length=1)
+    answer_branches: list[str] = Field(default_factory=list)
+    evidence_rules: list[str] = Field(min_length=1)
+    transition_to_next: str = Field(min_length=1, max_length=240)
+
+
 class SchedulePlanDraft(BaseModel):
     """Schedule Agent 生成的问诊计划草稿。"""
 
     ordered_question_codes: list[str] = Field(default_factory=list)
     opening_guidance: str = ""
     planning_reason: str = ""
+    topic_route: list[TopicRouteStep] = Field(default_factory=list)
 
 
 class ScheduleTaskTodo(BaseModel):
@@ -51,6 +66,19 @@ class ScheduleTaskTodo(BaseModel):
     opening_guidance: str = ""
     planning_reason: str = ""
     plan_version: str = "1.0"
+    topic_route: list[TopicRouteStep] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_topic_coverage(self):
+        """新版计划必须完整且唯一覆盖任务编码，拒绝遗漏/虚构目标。"""
+        if self.plan_version != "2.0":
+            return self
+        expected = {q.question_code for q in self.tasks if q.required}
+        codes = [code for topic in self.topic_route for code in topic.question_codes]
+        ids = [topic.topic_id for topic in self.topic_route]
+        if set(codes) != expected or len(codes) != len(set(codes)) or len(ids) != len(set(ids)):
+            raise ValueError("话题路线必须完整且唯一覆盖全部必填编码，不能包含未知编码或重复话题ID")
+        return self
 
 
 class ToolCallRecord(BaseModel):

@@ -111,6 +111,17 @@ async def test_prepare_task_todo_uses_model_order_and_deduplicates_shared_fields
             "ordered_question_codes": ["weight_kg", "height_cm"],
             "opening_guidance": "先完成 CICARE 开场",
             "planning_reason": "先了解体重",
+            "topic_route": [
+                {
+                    "topic_id": "measure",
+                    "title": "基础测量",
+                    "question_codes": ["weight_kg", "height_cm"],
+                    "entry_question": "先按规范完成基础测量",
+                    "follow_up_guidance": ["按原题和测量要求执行"],
+                    "evidence_rules": ["不能猜测体重身高"],
+                    "transition_to_next": "测量后检查其余缺项",
+                }
+            ],
         }
     )
     agent = ScheduleAgent("session-1", questions, llm, check_interval=1)
@@ -221,9 +232,7 @@ async def test_completed_progress_accumulates_across_checks():
 @pytest.mark.asyncio
 async def test_unknown_completed_code_is_ignored():
     """模型不得凭空完成当前量表不存在的问题。"""
-    agent, _ = make_agent(
-        {"completed_questions": ["unknown"], "is_deviation": False}
-    )
+    agent, _ = make_agent({"completed_questions": ["unknown"], "is_deviation": False})
     result = await agent.evaluate([], force=True)
     assert result.completed_questions == []
 
@@ -329,12 +338,8 @@ async def test_alias_keywords_do_not_duplicate_missing_tool():
         [{"role": "user", "content": "我抽烟，也有吸烟史"}],
         force=True,
     )
-    assert result.missing_tool_calls.count(
-        "get_education_material(category='tobacco')"
-    ) == 1
-    assert result.missing_tool_calls.count(
-        "trigger_consent_form(form_type='tobacco')"
-    ) == 1
+    assert result.missing_tool_calls.count("get_education_material(category='tobacco')") == 1
+    assert result.missing_tool_calls.count("trigger_consent_form(form_type='tobacco')") == 1
 
 
 @pytest.mark.asyncio
@@ -389,9 +394,7 @@ async def test_empty_task_list_is_complete():
 def test_state_dump_and_restore():
     """运行态应可跨 Celery 重启恢复。"""
     agent, _ = make_agent()
-    agent.restore_state(
-        {"turn_counter": 9, "completed_questions": ["smoking", "unknown"]}
-    )
+    agent.restore_state({"turn_counter": 9, "completed_questions": ["smoking", "unknown"]})
     assert agent.dump_state() == {
         "turn_counter": 9,
         "completed_questions": ["smoking"],

@@ -1,6 +1,7 @@
 """日志系统配置
 作用：根据 AppConfig.logging 初始化全局日志（文本或 JSON 格式，可选写文件）。
 """
+
 from __future__ import annotations
 
 import json
@@ -67,3 +68,8 @@ def setup_logging(config: LoggingConfig | None = None) -> None:
     root.handlers.clear()
     for h in handlers:
         root.addHandler(h)
+
+    # 语音排障独立轮转文件，仅包含连接元数据。
+    from app.services.voice_diagnostics import setup_voice_diagnostics
+
+    setup_voice_diagnostics()

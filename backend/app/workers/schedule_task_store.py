@@ -39,12 +39,20 @@ class ScheduleTaskStore:
     def get_plan(self, session_id: str) -> ScheduleTaskTodo | None:
         """读取 Task-todo。"""
         payload = self.redis.get(self.plan_key(session_id))
-        if not isinstance(payload, dict):
+        if isinstance(payload, dict):
+            try:
+                return ScheduleTaskTodo.model_validate(payload)
+            except ValidationError:
+                pass
+        from app.services.task_preparation_service import load_prepared_plan_payload
+
+        snapshot = load_prepared_plan_payload(session_id)
+        if snapshot is None:
             return None
-        try:
-            return ScheduleTaskTodo.model_validate(payload)
-        except ValidationError:
-            return None
+        # 持久化快照若已损坏则明确失败，不能悄悄丢掉新版路线。
+        plan = ScheduleTaskTodo.model_validate(snapshot)
+        self.save_plan(plan)
+        return plan
 
     def save_guidance(self, session_id: str, guidance: dict[str, Any]) -> None:
         """保存最近一次非阻塞调度建议。"""

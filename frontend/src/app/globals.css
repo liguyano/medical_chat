@@ -570,3 +570,12 @@ h1, h2 {
     height: 0;
   }
 }
+
+.patient-diagnostics-aside { margin: 16px 12px; }
+@media (min-width: 1024px) {
+  .patient-dialogue-shell.patient-dialogue-with-diagnostics {
+    grid-template-columns: minmax(200px, 300px) minmax(0, 640px) 260px;
+    max-width: 1280px; gap: 16px;
+  }
+  .patient-diagnostics-aside { position: sticky; top: 16px; margin: 16px 0 0; }
+}

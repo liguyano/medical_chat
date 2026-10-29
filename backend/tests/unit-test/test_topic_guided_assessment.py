@@ -66,7 +66,6 @@ def test_each_response_has_one_short_question_and_no_stage_directions():
 def test_effective_prompts_remove_old_questionnaire_examples_and_scripts():
     for prompt in [
         build_system_prompt({}, [task()]),
-        VoiceGateway._build_remaining_assessment_instructions({}, [task()]),
         VoiceGateway._build_recovery_question_instructions(
             {}, task(), mode_label="恢复", transition_rule="自然衔接"
         ),
@@ -81,12 +80,11 @@ def test_effective_prompts_remove_old_questionnaire_examples_and_scripts():
         assert "不能把“好”改写为“吃饭没问题”" in prompt
 
 
-def test_eating_reference_is_a_scene_not_a_bare_ability_question():
+def test_voice_keeps_original_eating_question_without_scene_script():
     prompt = VoiceGateway._build_remaining_assessment_instructions({}, [task()])
-    assert "scene_guidance" in prompt
-    assert "餐具" in prompt and "送入口中" in prompt
-    assert "喜好或餐具不能证明自理" in prompt
-    assert "clinical_reference" in prompt
+    assert task().patient_text in prompt
+    assert "scene_guidance" not in prompt
+    assert "clinical_reference" not in prompt
 
 
 def test_eating_scene_keeps_clinical_conditions_and_fixed_tests_unchanged():
@@ -163,14 +161,12 @@ def test_topic_intro_keeps_unanswered_target_then_skips_real_answers(answered, e
     assert exhausted is False
 
 
-def test_voice_remaining_prompt_inherits_topic_policy():
-    prompt = VoiceGateway._build_remaining_assessment_instructions(
-        patient_info={}, remaining_tasks=[task()]
-    )
-    assert "【生活话题引导】" in prompt
+def test_voice_remaining_prompt_is_independent_of_text_topic_policy():
+    prompt = VoiceGateway._build_remaining_assessment_instructions({}, [task()])
+    assert "【生活话题引导】" not in prompt
     assert "completed=true" in prompt
-    assert "先选话题" in prompt
-    assert "等待患者回答" in prompt
+    assert "自主决定问题顺序和问法" in prompt
+
 
 
 @pytest.mark.asyncio

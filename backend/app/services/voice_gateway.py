@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,22 +19,21 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from medagent.agents.service_agent.dialog_agent.conversation_scenes import (
     dialogue_reference,
-    question_conversation_context,
+    supports_life_scene,
 )
 from medagent.agents.service_agent.dialog_agent.prompt import (
     BRIEF_TURN_RULES,
     TOPIC_GUIDANCE,
-    build_system_prompt,
 )
-from medagent.agents.service_agent.dialog_agent.tools import DIALOG_TOOLS
 from medagent.agents.service_agent.schedule_agent import QuestionTask
+from medagent.agents.service_agent.schedule_agent.models import TopicRouteStep
+from medagent.agents.service_agent.schedule_agent.topic_route import render_topic_route
 from sqlalchemy import func, select
 
 from app.configs.app_config import get_app_config
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
 from app.managers.dialog_history_manager import DialogHistoryManager
-from app.managers.keyword_matcher import get_keyword_matcher
 from app.models import base as model_base
 from app.models.interaction import InteractionMessage, InteractionSession
 from app.schemas.events import (
@@ -52,6 +52,9 @@ from app.services.dialog_tool_executor import execute_tool
 from app.services.manual_question_service import filter_manual_tasks
 from app.services.qwen_realtime_client import QwenRealtimeClient
 from app.services.tool_interaction_service import publish_tool_result
+from app.services.voice_diagnostics import log_voice_event
+from app.services.voice_provisional import VoiceProvisionalState
+from app.services.voice_simple_prompt import build_voice_question_prompt
 from app.services.voice_turn_guard import VoiceTurnGuard
 from app.utils.redis_client import RedisClient, get_redis
 from app.workers.event_publisher import DialogEventPublisher
@@ -83,7 +86,30 @@ VOICE_ASSESSMENT_FINISH_TOOL = {
         },
     },
 }
-VOICE_TOOLS = [*DIALOG_TOOLS, VOICE_ASSESSMENT_FINISH_TOOL]
+VOICE_HEARD_TOOL_NAME = "mark_patient_response_heard"
+VOICE_HEARD_TOOL = {
+    "type": "function",
+    "function": {
+        "name": VOICE_HEARD_TOOL_NAME,
+        "description": "患者看起来已回应某个生活事实时先调用，临时放下该项继续聊天；不是正式答案。引用当前患者原话，模糊答复可以暂放，但不能据此填答案或宣布完成。固定施测和紧急安全核实不使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question_ids": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
+                "quote": {"type": "string", "minLength": 1},
+            },
+            "required": ["question_ids", "quote"],
+            "additionalProperties": False,
+        },
+    },
+}
+VOICE_TOOLS = [VOICE_ASSESSMENT_FINISH_TOOL]
+VOICE_PROVISIONAL_RULES = (
+    "\n【交流推进与正式答案分离】患者看起来回应了生活问题时，调用mark_patient_response_heard并引用原话，"
+    "先接话或转向相关内容，不立即重复核实；这只是暂时放下，不是记分或正式完成。"
+    "证据不足由后台保留缺项，之后换具体场景补问。转写语义不通先澄清，不编造原话。"
+    "没有新的可聊事实时只简短回应并等待后台，不宣布完成；结束仍须request_assessment_finish确认。\n"
+)
 VOICE_ASSESSMENT_FINISH_RULES = (
     "【实时语音结束确认规则】\n"
     "当你认为当前护理评估已经全部问完，准备宣布完成、告别、请患者休息或结束本次评估前，"
@@ -130,6 +156,13 @@ class VoiceSession:
     audio_store: DialogAudioStore
     publisher: DialogEventPublisher
     task_list: list[QuestionTask] = field(default_factory=list)
+    topic_route: list[TopicRouteStep] = field(default_factory=list)
+    authoritative_remaining_ids: set[int] | None = None
+    provisional: VoiceProvisionalState = field(default_factory=VoiceProvisionalState)
+    provisional_tool_tasks: set[Any] = field(default_factory=set)
+    progress_sync_task: Any | None = None
+    progress_sync_version: int = 0
+    scope_update_version: int = 0
     turn_detection: str = "server_vad"
     connected_clients: set[WebSocket] = field(default_factory=set)
     input_audio: bytearray = field(default_factory=bytearray)
@@ -190,10 +223,10 @@ class VoiceGateway:
         """识别 Qwen 在取消/重复触发响应竞态下返回的可恢复错误。"""
         message = str(error.get("message") or "").lower()
         code = str(error.get("code") or "").lower()
-        return (
-            "conversation has no active response" in message
-            or code in {"no_active_response", "conversation_no_active_response"}
-        )
+        return "conversation has no active response" in message or code in {
+            "no_active_response",
+            "conversation_no_active_response",
+        }
 
     @staticmethod
     def _select_remaining_tasks(
@@ -218,49 +251,11 @@ class VoiceGateway:
     def _build_remaining_assessment_instructions(
         patient_info: dict[str, Any],
         remaining_tasks: list[QuestionTask],
+        *,
+        topic_route: list[TopicRouteStep] | None = None,
     ) -> str:
-        """只把当前权威 remaining 列表交给 Realtime，之后由模型自然推进。"""
-        question_details = []
-        for index, task in enumerate(remaining_tasks, 1):
-            options = [
-                {
-                    "option_code": option.option_code,
-                    "option_label": option.option_label,
-                    "option_value": option.option_value,
-                }
-                for option in (task.options or [])
-            ]
-            question_details.append(
-                {
-                    "order": index,
-                    "question_id": task.question_id,
-                    "question_code": task.question_code,
-                    "question_name": task.question_name,
-                    **question_conversation_context(task),
-                    "question_type": task.question_type,
-                    "required": task.required,
-                    "options": options,
-                }
-            )
-        return (
-            build_system_prompt(
-                patient_info=patient_info,
-                task_list=remaining_tasks,
-            )
-            + "\n\n【剩余题完整结构】\n"
-            + json.dumps(question_details, ensure_ascii=False, indent=2)
-            + "\n\n"
-            + VOICE_ASSESSMENT_FINISH_RULES
-            + "\n\n【实时语音剩余评估范围】\n"
-            "上面的评估任务列表就是系统当前确认仍未完成的全部患者可回答项目。"
-            "请结合当前实时对话自然完成这些项目，不要求逐字朗读，也不要求固定顺序。\n"
-            "开始新话题前，先从剩余事实里选一个适合日常聊天的目标，在内部构思兴趣入口。"
-            "引入轮只问兴趣或经历，等待患者回答后再展开细节，不能同轮把两个阶段合并。"
-            "已处在相关话题时继续展开；患者要求直接问或涉及紧急不适、固定施测时按优先要求执行。\n"
-            "已经不在上面列表中的评估项目视为已完成，不要主动回头重问或重新核对。\n"
-            "当你认为上面的剩余项目都已经完成时，再次调用 request_assessment_finish；"
-            "只有工具返回 completed=true 后才能结束评估。"
-        )
+        """语音只接收一份完整可问问题，自主交流，不注入文字策略或路线。"""
+        return build_voice_question_prompt(patient_info, remaining_tasks)
 
     async def _maybe_create_response(self, session: VoiceSession) -> None:
         """在工具结果写回后，等待当前响应结束再幂等触发下一轮响应。"""
@@ -307,9 +302,7 @@ class VoiceGateway:
                 return existing
             from medagent.configs.model_config import ModelType
 
-            voice_config = get_app_config().get_agent_model_config(
-                "dialog_agent", ModelType.VOICE
-            )
+            voice_config = get_app_config().get_agent_model_config("dialog_agent", ModelType.VOICE)
             if voice_config is None or not voice_config.websocket_url:
                 raise AppError(
                     ErrorCode.ERR_DIALOG_001,
@@ -336,8 +329,7 @@ class VoiceGateway:
                 )
             except Exception:
                 logger.exception(
-                    "建立语音会话前读取结构化进度失败，拒绝根据未知状态构建题表: "
-                    "session=%s",
+                    "建立语音会话前读取结构化进度失败，拒绝根据未知状态构建题表: session=%s",
                     session_no,
                 )
                 raise
@@ -356,19 +348,14 @@ class VoiceGateway:
                     initial_decision.progress.remaining_question_ids,
                 )
                 if unmapped_ids or not remaining_tasks:
-                    fallback_remaining = tuple(
-                        getattr(initial_decision, "remaining_questions", ())
-                    )
-                    expected_ids = list(
-                        initial_decision.progress.remaining_question_ids
-                    )
-                    fallback_ids = [
-                        question.question_id for question in fallback_remaining
-                    ]
+                    fallback_remaining = tuple(getattr(initial_decision, "remaining_questions", ()))
+                    expected_ids = list(initial_decision.progress.remaining_question_ids)
+                    fallback_ids = [question.question_id for question in fallback_remaining]
                     if fallback_ids == expected_ids:
                         connect_instructions = self._build_remaining_assessment_instructions(
                             patient_info,
                             list(fallback_remaining),
+                            topic_route=getattr(plan, "topic_route", []),
                         )
                         logger.warning(
                             "建立语音会话时 Redis plan 无法完整映射 remaining，"
@@ -393,6 +380,7 @@ class VoiceGateway:
                     connect_instructions = self._build_remaining_assessment_instructions(
                         patient_info,
                         remaining_tasks,
+                        topic_route=getattr(plan, "topic_route", []),
                     )
                     logger.info(
                         "建立语音会话，仅向 Realtime 暴露当前 remaining 列表: "
@@ -410,11 +398,12 @@ class VoiceGateway:
                 voice=voice_config.voice or "longanqian",
                 timeout=voice_config.timeout,
             )
+            client.diagnostic_session_id = session_no
             # 新建上游连接也可能是页面重进或进程重启，恢复持久化交流而非重复开场。
             recent = await DialogHistoryManager().get_latest_messages(session_no, count=16)
             for item in recent:
-                role = "assistant" if item.role_type in {"AI","assistant"} else "user"
-                if item.role_type in {"AI","assistant","患者","家属","user"}:
+                role = "assistant" if item.role_type in {"AI", "assistant"} else "user"
+                if item.role_type in {"AI", "assistant", "患者", "家属", "user"}:
                     client.remember_turn(role, item.content_text or item.asr_text or "")
             voice_extra = voice_config.model_extra or {}
             turn_detection = str(voice_extra.get("turn_detection") or "server_vad")
@@ -423,9 +412,7 @@ class VoiceGateway:
                 tools=VOICE_TOOLS,
                 turn_detection=turn_detection,
                 vad_threshold=float(voice_extra.get("vad_threshold", 0.1)),
-                silence_duration_ms=int(
-                    voice_extra.get("silence_duration_ms", 900)
-                ),
+                silence_duration_ms=int(voice_extra.get("silence_duration_ms", 900)),
                 max_history_turns=int(voice_extra.get("max_history_turns", 50)),
             )
             gateway_session = VoiceSession(
@@ -440,6 +427,8 @@ class VoiceGateway:
                 audio_store=DialogAudioStore(),
                 publisher=DialogEventPublisher(session_no),
                 task_list=task_list,
+                authoritative_remaining_ids=set(initial_decision.progress.remaining_question_ids),
+                topic_route=getattr(plan, "topic_route", []),
                 turn_detection=turn_detection,
                 recovery_mode_active=False,
                 recovery_current_question_id=None,
@@ -487,34 +476,25 @@ class VoiceGateway:
         """从 Redis 恢复进程内不存在的转写草稿索引。"""
         if not session.require_transcript_confirmation or session.pending_transcript_id:
             return
-        transcript_id = session.redis.get(
-            f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
-        )
+        transcript_id = session.redis.get(f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}")
         if not transcript_id:
             return
         transcript_id = str(transcript_id)
-        draft = session.redis.get(
-            f"voice_transcript_draft:{session.session_no}:{transcript_id}"
-        )
+        draft = session.redis.get(f"voice_transcript_draft:{session.session_no}:{transcript_id}")
         if not isinstance(draft, dict):
-            session.redis.delete(
-                f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
-            )
+            session.redis.delete(f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}")
             return
         session.pending_transcript_id = transcript_id
         session.pending_transcript_text = str(draft.get("text") or "")
         session.pending_transcript_turn_no = int(draft.get("turn_no") or 0)
-        session.pending_transcript_message_id = str(
-            draft.get("message_id") or ""
-        ) or None
-        session.pending_transcript_audio_url = str(
-            draft.get("audio_url") or ""
-        ) or None
+        session.pending_transcript_message_id = str(draft.get("message_id") or "") or None
+        session.pending_transcript_audio_url = str(draft.get("audio_url") or "") or None
 
     async def detach(self, session: VoiceSession, websocket: WebSocket) -> None:
         """解绑患者端；保留上游连接一段宽限期以支持重连。"""
         session.connected_clients.discard(websocket)
         if not session.connected_clients and not session.closed:
+
             async def delayed_close() -> None:
                 try:
                     await asyncio.sleep(VOICE_GRACE_SECONDS)
@@ -530,11 +510,7 @@ class VoiceGateway:
         if session.closed:
             raise RuntimeError("语音会话已关闭")
         if session.turn_detection == "server_vad":
-            target = (
-                session.input_audio
-                if session.speech_active
-                else session.input_pre_roll
-            )
+            target = session.input_audio if session.speech_active else session.input_pre_roll
             target.extend(data)
             if session.speech_active and len(target) > MAX_AUDIO_BUFFER_BYTES:
                 raise ValueError("单轮语音长度超过系统限制")
@@ -581,12 +557,8 @@ class VoiceGateway:
                 session.pending_transcript_id = transcript_id
                 session.pending_transcript_text = str(draft.get("text") or "")
                 session.pending_transcript_turn_no = int(draft.get("turn_no") or 0)
-                session.pending_transcript_message_id = str(
-                    draft.get("message_id") or ""
-                ) or None
-                session.pending_transcript_audio_url = str(
-                    draft.get("audio_url") or ""
-                ) or None
+                session.pending_transcript_message_id = str(draft.get("message_id") or "") or None
+                session.pending_transcript_audio_url = str(draft.get("audio_url") or "") or None
             else:
                 raise ValueError("转写草稿不存在或已过期")
         text = session.pending_transcript_text or ""
@@ -599,12 +571,8 @@ class VoiceGateway:
         session.pending_transcript_turn_no = 0
         session.pending_transcript_message_id = None
         session.pending_transcript_audio_url = None
-        session.redis.delete(
-            f"voice_transcript_draft:{session.session_no}:{transcript_id}"
-        )
-        session.redis.delete(
-            f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
-        )
+        session.redis.delete(f"voice_transcript_draft:{session.session_no}:{transcript_id}")
+        session.redis.delete(f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}")
         await self._broadcast_json(
             session,
             {"type": "transcript_confirmed", "transcript_id": transcript_id},
@@ -628,12 +596,8 @@ class VoiceGateway:
         session.pending_transcript_message_id = None
         session.pending_transcript_audio_url = None
         session.discarded_transcript_ids.add(transcript_id)
-        session.redis.delete(
-            f"voice_transcript_draft:{session.session_no}:{transcript_id}"
-        )
-        session.redis.delete(
-            f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}"
-        )
+        session.redis.delete(f"voice_transcript_draft:{session.session_no}:{transcript_id}")
+        session.redis.delete(f"{TRANSCRIPT_PENDING_KEY_PREFIX}{session.session_no}")
         session.transcript_received = False
         session.input_audio.clear()
         session.input_pre_roll.clear()
@@ -654,6 +618,10 @@ class VoiceGateway:
         if session is None or session.closed:
             return
         session.closed = True
+        if session.progress_sync_task is not None:
+            session.progress_sync_task.cancel()
+        for task in session.provisional_tool_tasks:
+            task.cancel()
         if session.receive_task is not None:
             session.receive_task.cancel()
         if session.recovery_task is not None:
@@ -667,10 +635,37 @@ class VoiceGateway:
         """消费 Qwen 上游事件。"""
         try:
             async for event in session.client.events():
-                await self._handle_event(session, event)
+                started = time.monotonic()
+                event_type = str(event.get("type") or "unknown")
+                traced = event_type not in {
+                    "response.audio.delta",
+                    "response.audio.delta.binary",
+                    "response.text.delta",
+                    "response.audio_transcript.delta",
+                }
+                if traced:
+                    log_voice_event(
+                        "gateway_event_start", session_id=session.session_no, last_event=event_type
+                    )
+                try:
+                    await self._handle_event(session, event)
+                finally:
+                    if traced:
+                        log_voice_event(
+                            "gateway_event_end",
+                            session_id=session.session_no,
+                            last_event=event_type,
+                            elapsed_ms=round((time.monotonic() - started) * 1000),
+                        )
         except asyncio.CancelledError:
             return
-        except Exception:
+        except Exception as exc:
+            log_voice_event(
+                "gateway_text_fallback",
+                session_id=session.session_no,
+                error_type=type(exc).__name__,
+                phase="upstream_consumer",
+            )
             logger.exception("实时语音上游消费失败: session=%s", session.session_no)
             session.publisher.publish(
                 AgentErrorEvent(
@@ -751,13 +746,30 @@ class VoiceGateway:
             )
             return
         if event_type == "response.function_call_arguments.done":
-            await self._handle_tool_call(
+            name = str(event.get("name") or "")
+            operation = self._handle_tool_call(
                 session,
                 call_id=str(event.get("call_id") or ""),
-                name=str(event.get("name") or ""),
+                name=name,
                 arguments=event.get("arguments") or "{}",
                 response_id=str(event.get("response_id") or "") or None,
+                source_message_no=session.input_message_id or session.provisional.message_no,
             )
+            if name == VOICE_HEARD_TOOL_NAME:
+
+                async def run_provisional_tool():
+                    try:
+                        await operation
+                    except asyncio.CancelledError:
+                        return
+                    except Exception:
+                        logger.exception("语音初判工具异步处理失败: session=%s", session.session_no)
+
+                task = asyncio.create_task(run_provisional_tool())
+                session.provisional_tool_tasks.add(task)
+                task.add_done_callback(session.provisional_tool_tasks.discard)
+            else:
+                await operation
             return
         if event_type == "response.audio_transcript.done":
             transcript = str(event.get("transcript") or "")
@@ -771,9 +783,7 @@ class VoiceGateway:
         if event_type == "response.done":
             response = event.get("response") or {}
             status = str(response.get("status") or event.get("status") or "")
-            response_id = (
-                str(response.get("id") or event.get("response_id") or "") or None
-            )
+            response_id = str(response.get("id") or event.get("response_id") or "") or None
             if status == "cancelled":
                 await self._cancel_generation(session, response_id=response_id)
             else:
@@ -917,11 +927,7 @@ class VoiceGateway:
             return
         await session.client.update_instructions(
             session.instructions
-            + (
-                "\n\n当前轮必须遵守的业务约束：\n" + guidance_prompt
-                if guidance_prompt
-                else ""
-            )
+            + ("\n\n当前轮必须遵守的业务约束：\n" + guidance_prompt if guidance_prompt else "")
         )
 
     async def _handle_patient_transcript(self, session: VoiceSession, text: str) -> None:
@@ -963,9 +969,7 @@ class VoiceGateway:
                 ex=TRANSCRIPT_DRAFT_TTL_SECONDS,
             )
             if not pending_saved:
-                session.redis.delete(
-                    f"voice_transcript_draft:{session.session_no}:{transcript_id}"
-                )
+                session.redis.delete(f"voice_transcript_draft:{session.session_no}:{transcript_id}")
                 await self._broadcast_json(
                     session,
                     {
@@ -998,8 +1002,16 @@ class VoiceGateway:
 
     async def _commit_transcript(self, session: VoiceSession, text: str) -> None:
         """把已确认转写写入正式历史并派发后台 Worker。"""
-        message_id = session.pending_transcript_message_id or session.input_message_id or f"MSG-PATIENT-{uuid.uuid4().hex.upper()}"
-        turn_no = session.pending_transcript_turn_no or session.input_turn_no or self._next_patient_message(session.session_no)[0]
+        message_id = (
+            session.pending_transcript_message_id
+            or session.input_message_id
+            or f"MSG-PATIENT-{uuid.uuid4().hex.upper()}"
+        )
+        turn_no = (
+            session.pending_transcript_turn_no
+            or session.input_turn_no
+            or self._next_patient_message(session.session_no)[0]
+        )
         audio_url = session.pending_transcript_audio_url or session.input_audio_url
         history = DialogHistoryManager()
         await history.save_message(
@@ -1013,7 +1025,8 @@ class VoiceGateway:
             asr_text=text,
             creator="patient",
         )
-        session.client.remember_turn("user",text)
+        session.provisional.begin_turn(message_id, text)
+        session.client.remember_turn("user", text)
         session.publisher.publish(
             PatientAnswerEvent(
                 session_id=session.session_no,
@@ -1025,21 +1038,6 @@ class VoiceGateway:
                 input_mode="voice",
             )
         )
-        matches = get_keyword_matcher().match(text)
-        constraint = "\n".join(
-            item.constraint_prompt for item in matches if item.constraint_prompt
-        )
-        if constraint:
-            instruction_base = (
-                session.client.instructions
-                if session.recovery_mode_active
-                else session.instructions
-            )
-            await session.client.update_instructions(
-                instruction_base
-                + "\n\n当前轮必须遵守的业务约束：\n"
-                + constraint
-            )
         dispatch_voice_answer_workers(
             session.session_no,
             task_id=session.task_id,
@@ -1060,10 +1058,7 @@ class VoiceGateway:
         session.input_message_id = None
         session.input_audio_url = None
         session.input_turn_no = 0
-        if (
-            session.turn_detection != "server_vad"
-            and not session.response_requested
-        ):
+        if session.turn_detection != "server_vad" and not session.response_requested:
             session.response_requested = True
             await session.client.create_response()
 
@@ -1090,10 +1085,7 @@ class VoiceGateway:
             message_id=message_id,
             turn_no=turn_no,
             response_id=response_id,
-            is_recovery=(
-                session.recovery_mode_active
-                or session.next_response_is_recovery
-            ),
+            is_recovery=(session.recovery_mode_active or session.next_response_is_recovery),
         )
         session.next_response_is_recovery = False
         session.current_generation = generation
@@ -1212,7 +1204,9 @@ class VoiceGateway:
         if len(generation.audio) >= 48_000:
             await self._flush_audio_segment(session, generation)
 
-    async def _flush_audio_segment(self, session: VoiceSession, generation: VoiceGeneration) -> None:
+    async def _flush_audio_segment(
+        self, session: VoiceSession, generation: VoiceGeneration
+    ) -> None:
         if not generation.audio:
             return
         data = bytes(generation.audio)
@@ -1263,9 +1257,8 @@ class VoiceGateway:
                 await self._maybe_create_response(session)
             return
         generation.completed = True
-        closing_candidate = (
-            not generation.is_recovery
-            and VoiceTurnGuard.has_closing_intent(generation.text)
+        closing_candidate = not generation.is_recovery and VoiceTurnGuard.has_closing_intent(
+            generation.text
         )
         await self._flush_audio_segment(session, generation)
         audio_url: str | None = None
@@ -1289,7 +1282,7 @@ class VoiceGateway:
             tts_text=generation.text,
             creator="dialog_agent_voice",
         )
-        session.client.remember_turn("assistant",generation.text)
+        session.client.remember_turn("assistant", generation.text)
         session.publisher.publish(
             DialogMessageEvent(
                 session_id=session.session_no,
@@ -1368,11 +1361,7 @@ class VoiceGateway:
         """处理官方 response.done(status=cancelled)，丢弃未完成响应。"""
         generation = self._generation_for_event(session, response_id)
         if generation is not None:
-            if (
-                response_id
-                and generation.response_id
-                and response_id != generation.response_id
-            ):
+            if response_id and generation.response_id and response_id != generation.response_id:
                 return
             self._remove_generation(session, generation)
             if generation.is_recovery and session.recovery_source_message_no is not None:
@@ -1398,9 +1387,7 @@ class VoiceGateway:
                 None,
             )
         if session.current_response_id == generation.response_id:
-            session.current_response_id = (
-                next(iter(session.generations), None)
-            )
+            session.current_response_id = next(iter(session.generations), None)
         session.responding = bool(session.active_response_ids)
 
     def _schedule_premature_close_recovery(
@@ -1413,11 +1400,48 @@ class VoiceGateway:
         if session.recovery_task is not None and not session.recovery_task.done():
             return
         session.recovery_task = asyncio.create_task(
-            self._recover_premature_close(
+            self._review_spoken_finish(
                 session,
                 response_id=response_id,
             )
         )
+
+    async def _review_spoken_finish(
+        self, session: VoiceSession, *, response_id: str | None
+    ) -> None:
+        """语音自称结束后核验整份抽取结果，不逐题接管聊天。"""
+        try:
+            result = await self._handle_assessment_finish_tool(session)
+            if (
+                session.closed
+                or session.speech_active
+                or session.responding
+                or session.response_requested
+            ):
+                return
+            if result.get("completed"):
+                return
+            elif result.get("remaining_questions"):
+                # finish工具已根据完整权威缺项重建简洁指令。
+                instructions = session.instructions
+            else:
+                # 抽取尚未完成或映射失败时等待，不擅自拿旧题单继续问。
+                instructions = (
+                    "后台正在核验刚才的回答，先简短回应并等待，不重复问问题，也不宣布完成。"
+                )
+            await session.client.update_instructions(instructions)
+            session.next_response_is_recovery = True
+            session.response_requested = True
+            try:
+                await session.client.create_response()
+            except Exception:
+                session.response_requested = False
+                session.next_response_is_recovery = False
+                raise
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("语音自行结束后的整单核验失败: session=%s", session.session_no)
 
     async def _recover_premature_close(
         self,
@@ -1476,9 +1500,9 @@ class VoiceGateway:
                 session.patient_info,
                 decision.next_question,
                 mode_label="提前结束恢复模式",
+                topic_route=session.topic_route,
                 transition_rule=(
-                    "先用一句自然、简短的话纠正刚才过早结束，"
-                    "然后立即询问下面这一项。"
+                    "先用一句自然、简短的话纠正刚才过早结束，然后立即询问下面这一项。"
                 ),
             )
             await session.client.update_instructions(recovery_instructions)
@@ -1607,10 +1631,8 @@ class VoiceGateway:
                 session.patient_info,
                 decision.next_question,
                 mode_label="持续恢复模式",
-                transition_rule=(
-                    "直接自然过渡到下面这一项，不要解释系统状态，"
-                    "也不要重复道歉。"
-                ),
+                topic_route=session.topic_route,
+                transition_rule=("直接自然过渡到下面这一项，不要解释系统状态，也不要重复道歉。"),
             )
             await session.client.update_instructions(recovery_instructions)
             session.recovery_current_question_id = decision.next_question.question_id
@@ -1648,6 +1670,7 @@ class VoiceGateway:
         *,
         mode_label: str,
         transition_rule: str,
+        topic_route: list[TopicRouteStep] | None = None,
     ) -> str:
         """构建只暴露一个 remaining/null 问题的恢复提示词。
 
@@ -1678,7 +1701,9 @@ class VoiceGateway:
             "9. 不得自行宣布评估完成或结束，等待系统完成状态。\n\n"
             "【当前唯一允许询问的问题】\n"
             f"{dialogue_reference(question)}\n"
-            + TOPIC_GUIDANCE + BRIEF_TURN_RULES
+            + TOPIC_GUIDANCE
+            + BRIEF_TURN_RULES
+            + render_topic_route(topic_route or [], [question], directions_only=True)
         )
 
     @staticmethod
@@ -1758,8 +1783,7 @@ class VoiceGateway:
                     "success": False,
                     "completed": False,
                     "message": (
-                        "最新回答仍在结构化处理中，当前不得宣布评估完成；"
-                        "请等待系统确认后再结束。"
+                        "最新回答仍在结构化处理中，当前不得宣布评估完成；请等待系统确认后再结束。"
                     ),
                 }
             await asyncio.sleep(VOICE_CLOSE_RECOVERY_POLL_SECONDS)
@@ -1803,8 +1827,7 @@ class VoiceGateway:
             session.recovery_instruction_active = False
             session.next_response_is_recovery = False
             logger.error(
-                "语音结束检查发现未完成项但无法完整映射题表: "
-                "session=%s remaining=%s unmapped=%s",
+                "语音结束检查发现未完成项但无法完整映射题表: session=%s remaining=%s unmapped=%s",
                 session.session_no,
                 list(progress.remaining_question_ids),
                 sorted(unmapped_ids),
@@ -1826,6 +1849,7 @@ class VoiceGateway:
         remaining_instructions = self._build_remaining_assessment_instructions(
             session.patient_info,
             remaining_tasks,
+            topic_route=session.topic_route,
         )
         await session.client.update_instructions(remaining_instructions)
         session.instructions = remaining_instructions
@@ -1850,11 +1874,122 @@ class VoiceGateway:
             "total": progress.total,
             "remaining_count": len(progress.remaining_question_ids),
             "remaining_question_ids": list(progress.remaining_question_ids),
-            "remaining_questions": [dialogue_reference(task) for task in remaining_tasks],
+            "remaining_questions": [
+                task.patient_text or task.question_name for task in remaining_tasks
+            ],
             "message": (
                 "评估尚未完成，请自然完成系统重新提供的全部剩余项目；"
                 "完成后再次调用 request_assessment_finish。"
             ),
+        }
+
+    def _schedule_progress_sync(self, session: VoiceSession) -> None:
+        session.progress_sync_version += 1
+        version = session.progress_sync_version
+        if session.progress_sync_task is not None:
+            session.progress_sync_task.cancel()
+        session.progress_sync_task = asyncio.create_task(self._sync_progress(session, version))
+
+    async def _refresh_conversation_scope(self, session: VoiceSession) -> None:
+        session.scope_update_version += 1
+        version = session.scope_update_version
+        decision = await asyncio.to_thread(
+            VoiceTurnGuard.build_recovery_decision, session.session_no, session.task_list
+        )
+        if (
+            session.closed
+            or version != session.scope_update_version
+            or session.recovery_mode_active
+            or session.recovery_instruction_active
+        ):
+            return
+        remaining = list(decision.remaining_questions)
+        ids = {q.question_id for q in remaining}
+        if ids != set(decision.progress.remaining_question_ids):
+            raise ValueError("权威剩余事实映射不完整")
+        session.authoritative_remaining_ids = ids
+        session.provisional.settle(ids, set())
+        available = session.provisional.available(ids)
+        instructions = self._build_remaining_assessment_instructions(
+            session.patient_info,
+            [q for q in remaining if q.question_id in available],
+            topic_route=session.topic_route,
+        )
+        held = sorted(ids - available)
+        instructions += "\n【暂放待核实，不能视为完成】" + json.dumps(held)
+        instructions += "；不要立即重问这些事项。若当前无其他事实可聊，简短回应并等待，不宣布完成。"
+        session.instructions = instructions
+        await session.client.update_instructions(instructions)
+
+    async def _sync_progress(self, session: VoiceSession, version: int) -> None:
+        try:
+            deadline = time.monotonic() + VOICE_CLOSE_RECOVERY_TIMEOUT_SECONDS
+            timed_out = False
+            await self._refresh_conversation_scope(session)
+            while not session.closed and version == session.progress_sync_version:
+                state = await asyncio.to_thread(
+                    session.redis.get, f"extraction_agent:state:{session.session_no}"
+                )
+                processed = (
+                    set(state.get("processed_message_ids", []))
+                    if isinstance(state, dict)
+                    else set()
+                )
+                expired = time.monotonic() >= deadline
+                processed_current = session.provisional.message_no in processed
+                if processed_current or (expired and not timed_out):
+                    decision = await asyncio.to_thread(
+                        VoiceTurnGuard.build_recovery_decision,
+                        session.session_no,
+                        session.task_list,
+                    )
+                    if session.closed or version != session.progress_sync_version:
+                        return
+                    session.provisional.settle(
+                        set(decision.progress.remaining_question_ids), processed, expired=expired
+                    )
+                    await self._refresh_conversation_scope(session)
+                    if processed_current:
+                        return
+                    timed_out = True
+                await asyncio.sleep(1.5 if timed_out else 0.25)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception(
+                "语音交流进度同步失败，保留后台完成校验: session=%s", session.session_no
+            )
+
+    async def _mark_response_heard(
+        self, session: VoiceSession, arguments: dict, *, source_message_no: str | None = None
+    ) -> dict:
+        source_message_no = source_message_no or session.provisional.message_no
+        deadline = time.monotonic() + 3.0
+        while source_message_no and source_message_no != session.provisional.message_no:
+            if session.closed or time.monotonic() >= deadline:
+                return {"success": False, "message": "当前轮转写尚未确认，不得引用旧轮内容初判"}
+            await asyncio.sleep(0.02)
+        if session.closed:
+            return {"success": False, "message": "会话已关闭"}
+        allowed = {q.question_id for q in session.task_list if supports_life_scene(q)}
+        ids = arguments.get("question_ids")
+        quote = arguments.get("quote")
+        if not isinstance(ids, list) or not isinstance(quote, str):
+            return {"success": False, "message": "必须提供题号列表与当前患者原话"}
+        try:
+            session.provisional.mark(ids, quote, allowed)
+        except ValueError as exc:
+            return {"success": False, "message": str(exc)}
+        self._schedule_progress_sync(session)
+        remaining = getattr(session, "authoritative_remaining_ids", None)
+        if remaining is None:
+            remaining = {q.question_id for q in session.task_list}
+        return {
+            "temporarily_held_question_ids": sorted(session.provisional.pending),
+            "continue_other_question_ids": sorted(session.provisional.available(remaining)),
+            "success": True,
+            "formal_answer": False,
+            "message": "仅暂时放下，不计分、不视为完成；先回应原话或聊其他相关内容，不立即重复问",
         }
 
     async def _handle_tool_call(
@@ -1865,6 +2000,7 @@ class VoiceGateway:
         name: str,
         arguments: Any,
         response_id: str | None = None,
+        source_message_no: str | None = None,
     ) -> None:
         if not call_id or not name:
             return
@@ -1887,7 +2023,11 @@ class VoiceGateway:
         if generation is not None:
             generation.tool_call_only = True
         try:
-            if name == VOICE_ASSESSMENT_FINISH_TOOL_NAME:
+            if name == VOICE_HEARD_TOOL_NAME:
+                result = await self._mark_response_heard(
+                    session, arguments, source_message_no=source_message_no
+                )
+            elif name == VOICE_ASSESSMENT_FINISH_TOOL_NAME:
                 result = await self._handle_assessment_finish_tool(session)
             else:
                 result = await execute_tool(name, arguments)
@@ -1898,36 +2038,25 @@ class VoiceGateway:
             ToolCallEvent(
                 session_id=session.session_no,
                 task_id=session.task_id,
-                message_id=(
-                    generation.message_id
-                    if generation
-                    else None
-                ),
-                turn_number=(
-                    generation.turn_no
-                    if generation
-                    else session.input_turn_no
-                ),
+                message_id=(generation.message_id if generation else None),
+                turn_number=(generation.turn_no if generation else session.input_turn_no),
                 call_id=call_id,
                 tool_name=name,
                 tool_args=arguments,
                 tool_result=result,
             )
         )
-        publish_tool_result(
-            session_no=session.session_no,
-            task_id=session.task_id,
-            message_no=(
-                generation.message_id
-                if generation
-                else None
-            ),
-            tool_name=name,
-            tool_args=arguments,
-            tool_result=result,
-            source_invocation_id=call_id,
-            publisher=session.publisher,
-        )
+        if name != VOICE_HEARD_TOOL_NAME:
+            publish_tool_result(
+                session_no=session.session_no,
+                task_id=session.task_id,
+                message_no=(generation.message_id if generation else None),
+                tool_name=name,
+                tool_args=arguments,
+                tool_result=result,
+                source_invocation_id=call_id,
+                publisher=session.publisher,
+            )
         await session.client.send_tool_result(call_id, result)
         # 多个 function call 只需要一个后续 response.create；等待当前工具响应
         # 完成后统一触发，避免快速停顿或工具链重入时重复创建响应。

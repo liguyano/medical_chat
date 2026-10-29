@@ -123,6 +123,30 @@ def get_preparation_status(session_no: str) -> str | None:
     return _with_session(read)
 
 
+def load_prepared_plan_payload(session_no: str) -> dict[str, Any] | None:
+    """从已完成的准备快照恢复Task-todo与话题路线，供Redis过期后读取。"""
+
+    def read(db: Session):
+        task = _load_task(db, session_no)
+        detail = getattr(task, "preparation_detail", None) if task is not None else None
+        if not isinstance(detail, dict):
+            return None
+        stage = detail.get("stages", {}).get("schedule_prepare", {})
+        output = stage.get("output", {})
+        if stage.get("status") != "completed" or not output.get("questions"):
+            return None
+        return {
+            "session_id": session_no,
+            "tasks": output["questions"],
+            "topic_route": output.get("topic_route", []),
+            "plan_version": output.get("plan_version", "1.0"),
+            "opening_guidance": output.get("opening_guidance", ""),
+            "planning_reason": output.get("planning_reason", ""),
+        }
+
+    return _with_session(read)
+
+
 def mark_stage_running(session_no: str, stage: str) -> bool:
     """记录某准备阶段开始执行。"""
     if stage not in PREPARATION_STAGES:
@@ -242,9 +266,7 @@ def preparation_payload(task: CareTask) -> dict[str, Any] | None:
         "attempt": int(task.preparation_attempt or 0),
         "error": task.preparation_error,
         "patient_visible_at": (
-            task.patient_visible_at.isoformat()
-            if task.patient_visible_at is not None
-            else None
+            task.patient_visible_at.isoformat() if task.patient_visible_at is not None else None
         ),
         "stages": detail.get("stages", {}),
     }

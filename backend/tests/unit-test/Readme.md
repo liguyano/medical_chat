@@ -45,3 +45,5 @@ uv run pytest tests/unit-test `
   --cov=app.configs.app_config `
   --cov-report=term-missing
 ```
+
+语音诊断回归：`test_voice_diagnostics.py` 覆盖白名单落盘及目录无权限降级；`test_qwen_realtime_client.py` 覆盖重连失败日志关联与敏感信息不落盘，全部使用fake连接。

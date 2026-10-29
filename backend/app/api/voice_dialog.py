@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -26,6 +28,7 @@ from app.models.patient_task import Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
 from app.services.agent_dispatch_service import build_session_agent_payload
 from app.services.dialog_audio_store import DialogAudioStore
+from app.services.voice_diagnostics import log_voice_event
 from app.services.voice_gateway import voice_gateway
 from app.utils.redis_client import get_redis
 
@@ -75,15 +78,21 @@ def _authenticate_patient_websocket(websocket: WebSocket) -> tuple[int, int]:
 @router.websocket("/api/ws/dialog/{session_no}/voice")
 async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
     """患者端实时语音 WebSocket。"""
+    connection_id = "browser-" + uuid.uuid4().hex
+    started = time.monotonic()
+    phase = "accept"
+    log_voice_event("browser_connect_start", session_id=session_no, connection_id=connection_id)
     await websocket.accept()
     session = None
     try:
+        phase = "authenticate"
         patient_id, _ = _authenticate_patient_websocket(websocket)
         task_id, session_patient_id, _encounter_id, patient_info, scale_codes = _load_session(
             session_no
         )
         if patient_id != session_patient_id:
             raise AppError(ErrorCode.ERR_DIALOG_004, "当前患者无权访问该语音会话")
+        phase = "upstream_connect"
         session = await voice_gateway.get_or_create(
             session_no=session_no,
             task_id=task_id,
@@ -91,11 +100,25 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
             patient_info=patient_info,
             scale_codes=scale_codes,
         )
+        phase = "stream"
         await voice_gateway.attach(session, websocket)
+        log_voice_event(
+            "browser_attached",
+            session_id=session_no,
+            connection_id=connection_id,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
 
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
+                log_voice_event(
+                    "browser_disconnected",
+                    session_id=session_no,
+                    connection_id=connection_id,
+                    close_code=message.get("code"),
+                    phase=phase,
+                )
                 break
             if message.get("bytes") is not None:
                 await voice_gateway.append_audio(session, bytes(message["bytes"]))
@@ -125,7 +148,11 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
                 transcript_id = str(payload.get("transcript_id") or "")
                 if not transcript_id:
                     await websocket.send_json(
-                        {"type": "error", "code": "INVALID_MESSAGE", "message": "缺少 transcript_id"}
+                        {
+                            "type": "error",
+                            "code": "INVALID_MESSAGE",
+                            "message": "缺少 transcript_id",
+                        }
                     )
                     continue
                 try:
@@ -138,7 +165,11 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
                 transcript_id = str(payload.get("transcript_id") or "")
                 if not transcript_id:
                     await websocket.send_json(
-                        {"type": "error", "code": "INVALID_MESSAGE", "message": "缺少 transcript_id"}
+                        {
+                            "type": "error",
+                            "code": "INVALID_MESSAGE",
+                            "message": "缺少 transcript_id",
+                        }
                     )
                     continue
                 try:
@@ -154,9 +185,22 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
                 await websocket.send_json(
                     {"type": "error", "code": "INVALID_MESSAGE", "message": "不支持的控制消息"}
                 )
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as exc:
+        log_voice_event(
+            "browser_disconnected",
+            session_id=session_no,
+            connection_id=connection_id,
+            close_code=exc.code,
+            phase=phase,
+        )
     except AppError as exc:
+        log_voice_event(
+            "browser_rejected",
+            session_id=session_no,
+            connection_id=connection_id,
+            provider_code=str(exc.code),
+            phase=phase,
+        )
         logger.warning("语音 WebSocket 业务拒绝: session=%s code=%s", session_no, exc.code)
         try:
             await websocket.send_json(
@@ -165,7 +209,14 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
         except RuntimeError:
             logger.debug("语音 WebSocket 已无法发送拒绝消息: session=%s", session_no)
         await websocket.close(code=4403)
-    except Exception:
+    except Exception as exc:
+        log_voice_event(
+            "browser_handler_failed",
+            session_id=session_no,
+            connection_id=connection_id,
+            error_type=type(exc).__name__,
+            phase=phase,
+        )
         logger.exception("语音 WebSocket 处理失败: session=%s", session_no)
         try:
             await websocket.send_json(
@@ -179,6 +230,13 @@ async def dialog_voice_socket(websocket: WebSocket, session_no: str) -> None:
             logger.debug("语音 WebSocket 已无法发送错误消息: session=%s", session_no)
         await websocket.close(code=1011)
     finally:
+        log_voice_event(
+            "browser_handler_end",
+            session_id=session_no,
+            connection_id=connection_id,
+            phase=phase,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
         if session is not None:
             await voice_gateway.detach(session, websocket)
 

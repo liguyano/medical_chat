@@ -255,3 +255,57 @@ async def test_qwen_client_reconnects_and_retries_send_after_connection_closed()
     assert "喜欢散步" in instructions
     assert "不要重新自我介绍" in instructions
     assert "问候患者" not in instructions
+
+
+@pytest.mark.asyncio
+async def test_reconnect_failure_has_correlated_safe_diagnostics(tmp_path):
+    import logging
+
+    from app.services.voice_diagnostics import setup_voice_diagnostics
+
+    path = tmp_path / "voice.jsonl"
+    handler = setup_voice_diagnostics(path)
+    first = ClosedOnFirstSendWebSocket()
+    calls = 0
+
+    async def connector(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise OSError("SECRET_PROVIDER_MESSAGE")
+        return first
+
+    client = QwenRealtimeClient(
+        api_key="SECRET_KEY",
+        model="test-model",
+        websocket_url="wss://example/realtime",
+        connector=connector,
+    )
+    client.diagnostic_session_id = "SESS-TEST"
+    try:
+        await client.connect(instructions="SECRET_PROMPT", tools=[])
+        first.fail_next_send = True
+        with pytest.raises(OSError):
+            await client.append_audio(b"SECRET_AUDIO")
+        handler.flush()
+        content = path.read_text(encoding="utf-8")
+        events = [json.loads(line) for line in content.splitlines()]
+        assert {e["event"] for e in events} >= {
+            "upstream_disconnected",
+            "upstream_reconnect_start",
+            "upstream_reconnect_failed",
+        }
+        failure = next(e for e in events if e["event"] == "upstream_reconnect_failed")
+        assert failure["error_type"] == "OSError"
+        assert failure["session_id"] == "SESS-TEST"
+        assert failure["elapsed_ms"] >= 0
+        starts = [e for e in events if e["event"] == "upstream_connect_start"]
+        assert len(starts) == 2
+        assert starts[0]["connection_id"] != starts[1]["connection_id"]
+        assert starts[1]["previous_connection_id"] == starts[0]["connection_id"]
+        assert starts[1]["last_event"] == "none"
+        assert starts[1]["received_bytes"] == 0
+        assert "SECRET" not in content
+    finally:
+        logging.getLogger("medical.voice.diagnostics").removeHandler(handler)
+        handler.close()

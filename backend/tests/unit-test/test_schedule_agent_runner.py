@@ -100,6 +100,17 @@ async def test_opening_prepares_recoverable_task_todo():
                     return_value=SchedulePlanDraft(
                         opening_guidance="自然开场",
                         planning_reason="测试规划",
+                        topic_route=[
+                            {
+                                "topic_id": "daily",
+                                "title": "日常活动",
+                                "question_codes": ["q1"],
+                                "entry_question": "您平时喜欢做些什么？",
+                                "follow_up_guidance": ["顺着活动经历补缺项"],
+                                "evidence_rules": ["兴趣不等于能力"],
+                                "transition_to_next": "检查是否仍有缺项",
+                            }
+                        ],
                     )
                 )
             )
@@ -117,9 +128,7 @@ async def test_opening_prepares_recoverable_task_todo():
 
     assert result["status"] == "prepared"
     assert result["question_count"] == 1
-    assert redis.values["schedule_agent:task_todo:session"]["tasks"][0][
-        "question_code"
-    ] == "q1"
+    assert redis.values["schedule_agent:task_todo:session"]["tasks"][0]["question_code"] == "q1"
 
 
 @pytest.mark.asyncio
@@ -131,9 +140,7 @@ async def test_single_turn_evaluates_real_schedule_agent(monkeypatch):
     redis = FakeRedis()
     agent = SimpleNamespace(
         restore_state=Mock(),
-        dump_state=Mock(
-            return_value={"turn_counter": 1, "completed_questions": []}
-        ),
+        dump_state=Mock(return_value={"turn_counter": 1, "completed_questions": []}),
         evaluate=AsyncMock(
             return_value=SimpleNamespace(
                 is_deviation=True,
@@ -167,10 +174,7 @@ async def test_single_turn_evaluates_real_schedule_agent(monkeypatch):
     assert redis.values["schedule_agent:state:session"]["processed_message_ids"] == [
         "patient-msg-1"
     ]
-    assert (
-        redis.values["schedule_agent:guidance:session"]["constraint_prompt"]
-        == "请继续量表问诊"
-    )
+    assert redis.values["schedule_agent:guidance:session"]["constraint_prompt"] == "请继续量表问诊"
 
 
 @pytest.mark.asyncio

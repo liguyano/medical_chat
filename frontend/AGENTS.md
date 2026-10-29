@@ -168,3 +168,19 @@ pnpm check
   `next start` 进程启动时间和 `.next/BUILD_ID` 写入时间，生产进程应晚于构建完成时间。
 
 涉及页面交互的修改还需使用真实浏览器验证桌面端和 390px 手机视图，并检查浏览器控制台无错误。
+
+## 语音连接诊断
+
+- VoiceSocketClient 在连接、关闭、麦克风失败、消息处理失败和文字降级时调用 voiceDiagnostics，仅写元数据白名单。
+- 当前标签 sessionStorage 的 `medical:voice-diagnostics` 最多保留100条，控制台使用 `[voice-diagnostic]` 标识；禁止存音频、交流文本、密钥、URL和原始错误消息。存储不可用不影响语音。
+- 浏览器与后端采用UTC时间和sessionId关联；浏览器不会自动上传这些诊断记录。
+
+- 语音错误文案由 `voiceFailure` 统一按阶段及已知错误码分类，未知原因明确待查，不展示供应商原文。VoiceOrb展示具体错误及编号；同次连接首个错误不被后续关闭覆盖，重新开启语音清除旧提示。
+
+- 语音暂停状态以VoiceSocketClient.isPaused表示实际采集暂停，不能被后端state覆盖；页面恢复采集不能依赖展示voiceState。后端播报/监听消息不代表麦克风已恢复，诊断记录microphone_paused/resumed。
+
+- response_completed只解除服务端响应等待，浏览器播放排空通知必须异步，不能阻塞WebSocket消息队列；新语音/打断/关闭使旧播放通知失效。任务完成关闭仍独立等待播放排空。
+
+- 对话右侧VoiceDiagnosticsPanel消费VoiceSocketClient实际采集链路的onDiagnostics，不额外创建麦克风或上传音频。每500ms采样状态，显示设备、音轨、AudioContext、实际采样率、PCM能量、采集帧/发送字节和末帧时间；关闭时清理采样定时器，手机布局置于对话下方。输入设备名称只在当前页面显示，不写诊断日志。
+
+- 音轨ended时同步停止处理器回调，VoiceSocketClient同次连接最多重新采集一次；暂停/关闭不恢复，失败明确MIC_TrackEnded降级。采集申请使用版本隔离，主动stop先卸载ended监听，避免迟到授权重开麦克风。该机制不证明设备意外结束原因已消除。

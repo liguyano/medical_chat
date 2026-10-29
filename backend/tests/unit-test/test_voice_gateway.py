@@ -184,11 +184,6 @@ async def test_server_vad_transcript_dispatches_schedule_and_extraction_without_
         "dispatch_voice_answer_workers",
         dispatch,
     )
-    monkeypatch.setattr(
-        voice_gateway_module,
-        "get_keyword_matcher",
-        lambda: SimpleNamespace(match=lambda _text: []),
-    )
 
     await gateway._handle_event(
         session,
@@ -665,11 +660,11 @@ async def test_visible_response_broadcasts_completion_marker_before_finalize(
 
 
 @pytest.mark.asyncio
-async def test_premature_close_recovers_after_extraction_with_only_one_question(
+async def test_premature_close_recovers_after_extraction_with_all_missing_questions(
     tmp_path: Path,
     monkeypatch,
 ):
-    """明确提前结束且结构化进度未完成时，只注入一题并自动创建恢复响应。"""
+    """明确提前结束且结构化进度未完成时，返回全部缺项，让语音自主补充。"""
     gateway = VoiceGateway()
     session = make_session(tmp_path)
     next_question = SimpleNamespace(
@@ -707,7 +702,7 @@ async def test_premature_close_recovers_after_extraction_with_only_one_question(
         lambda _redis, _session_no, _message_no: True,
     )
     progress = SimpleNamespace(
-        completed=False,
+        completed=False, current=0, total=2,
         remaining_question_ids=(21, 25),
     )
     monkeypatch.setattr(
@@ -716,6 +711,7 @@ async def test_premature_close_recovers_after_extraction_with_only_one_question(
         lambda _session_no, _tasks: SimpleNamespace(
             should_recover=True,
             next_question=next_question,
+            remaining_questions=(next_question, other_question),
             progress=progress,
         ),
     )
@@ -751,16 +747,11 @@ async def test_premature_close_recovers_after_extraction_with_only_one_question(
     session.client.create_response.assert_awaited_once()
     recovery_prompt = session.client.update_instructions.await_args_list[-1].args[0]
     assert "最近三个月具体下降了多少公斤" in recovery_prompt
-    assert "您平时吸烟吗" not in recovery_prompt
-    assert "提前结束恢复模式" in recovery_prompt
-    assert "当前唯一允许询问的问题" in recovery_prompt
-    assert "生活习惯" not in recovery_prompt
-    assert "Task-todo" not in recovery_prompt
-    assert "您平时吸烟吗" not in recovery_prompt
+    assert "您平时吸烟吗" in recovery_prompt
+    assert "当前唯一允许询问的问题" not in recovery_prompt
+    assert "生活话题引导" not in recovery_prompt
     assert session.next_response_is_recovery is True
-    assert session.recovery_instruction_active is True
-    assert session.recovery_mode_active is True
-    assert session.recovery_current_question_id == 21
+    assert session.recovery_mode_active is False
 
 
 @pytest.mark.asyncio

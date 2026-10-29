@@ -91,11 +91,6 @@ async def test_transcript_draft_is_not_persisted_or_dispatched_until_confirmed(
     dispatch = Mock()
     monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
     monkeypatch.setattr(voice_gateway_module, "dispatch_voice_answer_workers", dispatch)
-    monkeypatch.setattr(
-        voice_gateway_module,
-        "get_keyword_matcher",
-        lambda: SimpleNamespace(match=lambda _text: []),
-    )
 
     await gateway._handle_patient_transcript(session, "我有一点头晕")
 
@@ -136,11 +131,6 @@ async def test_transcript_is_committed_immediately_when_confirmation_is_disabled
     dispatch = Mock()
     monkeypatch.setattr(voice_gateway_module, "DialogHistoryManager", FakeHistory)
     monkeypatch.setattr(voice_gateway_module, "dispatch_voice_answer_workers", dispatch)
-    monkeypatch.setattr(
-        voice_gateway_module,
-        "get_keyword_matcher",
-        lambda: SimpleNamespace(match=lambda _text: []),
-    )
 
     await gateway._handle_patient_transcript(session, "我有一点头晕")
 

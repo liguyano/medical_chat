@@ -25,6 +25,7 @@ from medagent.agents.service_agent.dialog_agent.prompt import (
 )
 from medagent.agents.service_agent.dialog_agent.topic_planner import TopicTurnPlan, plan_topic_turn
 from medagent.agents.service_agent.schedule_agent.models import QuestionTask
+from medagent.agents.service_agent.schedule_agent.topic_route import render_topic_route
 from sqlalchemy import func, select
 
 from app.managers.assessment_loader import AssessmentQuestionLoader
@@ -102,6 +103,7 @@ class DialogAgentRunner:
         self.publisher = DialogEventPublisher(session_id, redis_client)
         self.output_store = DialogOutputStore(redis_client, ttl=state_ttl)
         self.task_id = 0
+        self.topic_route = []
         self.interaction_session_id = 0
 
     async def run(
@@ -121,6 +123,7 @@ class DialogAgentRunner:
         """
         task_store = ScheduleTaskStore(self.redis, ttl=self.state_ttl)
         plan = task_store.get_plan(self.session_id)
+        self.topic_route = plan.topic_route if plan is not None else []
         questions = (
             plan.tasks
             if plan is not None and plan.tasks
@@ -173,16 +176,19 @@ class DialogAgentRunner:
                     "progress_current": progress.current,
                     "progress_total": progress.total,
                 }
-            turn_no = int(
-                db.scalar(
-                    select(func.max(InteractionMessage.turn_no)).where(
-                        InteractionMessage.interaction_session_id
-                        == self.interaction_session_id,
-                        InteractionMessage.deleted == 0,
+            turn_no = (
+                int(
+                    db.scalar(
+                        select(func.max(InteractionMessage.turn_no)).where(
+                            InteractionMessage.interaction_session_id
+                            == self.interaction_session_id,
+                            InteractionMessage.deleted == 0,
+                        )
                     )
+                    or 0
                 )
-                or 0
-            ) + 1
+                + 1
+            )
 
         generation_id, message_id = self._generation_ids("completion")
         existing = self._find_message_by_no(message_id)
@@ -206,9 +212,7 @@ class DialogAgentRunner:
                     turn_number=turn_no,
                     question_id=None,
                 )
-                closing_text = await self._generate_completion_message(
-                    on_delta=on_delta
-                )
+                closing_text = await self._generate_completion_message(on_delta=on_delta)
                 message = await self.history.save_message(
                     self.session_id,
                     message_no=message_id,
@@ -259,9 +263,7 @@ class DialogAgentRunner:
                 )
             )
             return {
-                "status": (
-                    "already_completed" if existing is not None else "completed"
-                ),
+                "status": ("already_completed" if existing is not None else "completed"),
                 "session_id": self.session_id,
                 "message_id": message_id,
             }
@@ -410,9 +412,7 @@ class DialogAgentRunner:
         """消费一条已落库的患者答案并生成下一问。"""
         processed = list(state.get("processed_message_ids") or [])
         patient_message = self._load_patient_message(source_message_id)
-        current_index = self._resolve_current_question_index(
-            patient_message, questions, state
-        )
+        current_index = self._resolve_current_question_index(patient_message, questions, state)
 
         existing_next = self._find_ai_message(turn_no=patient_message.turn_no + 1)
         if source_message_id in processed or existing_next is not None:
@@ -439,9 +439,7 @@ class DialogAgentRunner:
                     else current_index
                 ),
                 turn_counter=(
-                    existing_next.turn_no
-                    if existing_next is not None
-                    else patient_message.turn_no
+                    existing_next.turn_no if existing_next is not None else patient_message.turn_no
                 ),
                 last_event_id=source_event_id or str(state.get("last_event_id") or "0-0"),
                 processed_message_ids=processed,
@@ -452,19 +450,21 @@ class DialogAgentRunner:
                 "source_message_id": source_message_id,
             }
 
-        patient_answer = str(
-            patient_message.content_text or patient_message.asr_text or ""
-        ).strip()
+        patient_answer = str(patient_message.content_text or patient_message.asr_text or "").strip()
         if not patient_answer:
             raise RuntimeError(f"患者答案为空: {source_message_id}")
 
         try:
             next_question, plan_exhausted, topic_plan = await self._plan_topic_turn(
-                questions=questions, current_index=current_index, patient_answer=patient_answer,
+                questions=questions,
+                current_index=current_index,
+                patient_answer=patient_answer,
             )
         except Exception as exc:
             generation_id, message_id = self._generation_ids(source_message_id)
-            self._mark_generation_failed(message_id=message_id,generation_id=generation_id,exc=exc)
+            self._mark_generation_failed(
+                message_id=message_id, generation_id=generation_id, exc=exc
+            )
             raise
         next_index = self._question_index(next_question.question_id, questions)
         next_turn = patient_message.turn_no + 1
@@ -493,7 +493,11 @@ class DialogAgentRunner:
                 patient_answer=patient_answer,
                 next_question=next_question,
                 plan_exhausted=plan_exhausted,
-                introduce_topic=bool(topic_plan and topic_plan.mode == "introduce" and allows_topic_intro(next_question)),
+                introduce_topic=bool(
+                    topic_plan
+                    and topic_plan.mode == "introduce"
+                    and allows_topic_intro(next_question)
+                ),
                 topic_plan=topic_plan,
                 text_delta_sink=text_delta_sink,
             )
@@ -532,12 +536,7 @@ class DialogAgentRunner:
             self._save_state(
                 current_question_index=next_index,
                 turn_counter=next_turn,
-                last_event_id=(
-                    completed_event_id
-                    or started_event_id
-                    or source_event_id
-                    or "0-0"
-                ),
+                last_event_id=(completed_event_id or started_event_id or source_event_id or "0-0"),
                 processed_message_ids=processed[-100:],
             )
             return {
@@ -590,6 +589,7 @@ class DialogAgentRunner:
                     "不要一次询问多个评估主题。"
                     + TOPIC_GUIDANCE
                     + build_topic_turn_instruction(question, introduce=allows_topic_intro(question))
+                    + render_topic_route(self.topic_route, [question])
                 )
             ),
             HumanMessage(
@@ -638,11 +638,7 @@ class DialogAgentRunner:
         """提取 LangChain 消息或消息分块中的文本。"""
         content = getattr(message, "content", "")
         if isinstance(content, list):
-            return "".join(
-                str(item.get("text", ""))
-                for item in content
-                if isinstance(item, dict)
-            )
+            return "".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
         return str(content or "")
 
     def _start_generation(
@@ -822,8 +818,7 @@ class DialogAgentRunner:
         with model_base.SessionLocal() as db:
             message = db.scalar(
                 select(InteractionMessage).where(
-                    InteractionMessage.interaction_session_id
-                    == self.interaction_session_id,
+                    InteractionMessage.interaction_session_id == self.interaction_session_id,
                     InteractionMessage.message_no == message_no,
                     InteractionMessage.role_type.in_(["患者", "家属", "user"]),
                     InteractionMessage.deleted == 0,
@@ -842,8 +837,7 @@ class DialogAgentRunner:
             message = db.scalar(
                 select(InteractionMessage)
                 .where(
-                    InteractionMessage.interaction_session_id
-                    == self.interaction_session_id,
+                    InteractionMessage.interaction_session_id == self.interaction_session_id,
                     InteractionMessage.turn_no == turn_no,
                     InteractionMessage.role_type.in_(["AI", "assistant"]),
                     InteractionMessage.deleted == 0,
@@ -861,8 +855,7 @@ class DialogAgentRunner:
         with model_base.SessionLocal() as db:
             message = db.scalar(
                 select(InteractionMessage).where(
-                    InteractionMessage.interaction_session_id
-                    == self.interaction_session_id,
+                    InteractionMessage.interaction_session_id == self.interaction_session_id,
                     InteractionMessage.message_no == message_no,
                     InteractionMessage.deleted == 0,
                 )
@@ -908,8 +901,7 @@ class DialogAgentRunner:
                         AssessmentSubmission.id == AssessmentAnswer.submission_id,
                     )
                     .where(
-                        AssessmentSubmission.interaction_session_id
-                        == self.interaction_session_id,
+                        AssessmentSubmission.interaction_session_id == self.interaction_session_id,
                         AssessmentSubmission.deleted == 0,
                         AssessmentAnswer.deleted == 0,
                         valid_assessment_answer_condition(),
@@ -918,14 +910,22 @@ class DialogAgentRunner:
             )
         return [q for q in questions if q.question_id not in answered_question_ids]
 
-    async def _plan_topic_turn(self, *, questions: list[QuestionTask], current_index: int, patient_answer: str):
+    async def _plan_topic_turn(
+        self, *, questions: list[QuestionTask], current_index: int, patient_answer: str
+    ):
         """在全部权威缺项中按最近话题选择目标，历史由 PostgreSQL 恢复。"""
         remaining = self._remaining_questions(questions)
         if not remaining:
             return questions[current_index], True, None
         history = await self.history.get_dialog_history(self.session_id)
         formatted = self.history.format_for_langchain(history)
-        plan = await plan_topic_turn(self.model, remaining, formatted, patient_answer)
+        plan = await plan_topic_turn(
+            self.model,
+            remaining,
+            formatted,
+            patient_answer,
+            topic_route_prompt=render_topic_route(self.topic_route, remaining),
+        )
         target = next(q for q in remaining if q.question_id == plan.question_id)
         return target, False, plan
 
@@ -945,8 +945,7 @@ class DialogAgentRunner:
         if prefer_current and questions[safe_index].question_id not in answered_question_ids:
             return questions[safe_index], False
         ordered_indexes = [
-            (safe_index + offset) % len(questions)
-            for offset in range(1, len(questions) + 1)
+            (safe_index + offset) % len(questions) for offset in range(1, len(questions) + 1)
         ]
         for index in ordered_indexes:
             question = questions[index]
@@ -1009,13 +1008,12 @@ class DialogAgentRunner:
         history = await self.history.get_dialog_history(self.session_id)
         # 已引入过的目标不再重复兴趣调查；从持久化消息恢复，不只依赖 Redis。
         introduce_topic = introduce_topic and not any(
-            item.related_question_id == next_question.question_id
-            and item.intent_type == "话题引入"
+            item.related_question_id == next_question.question_id and item.intent_type == "话题引入"
             for item in history
         )
         agent.topic_intro = introduce_topic
         if topic_plan and topic_plan.mode == "introduce" and not introduce_topic:
-            topic_plan = topic_plan.model_copy(update={"mode":"continue"})
+            topic_plan = topic_plan.model_copy(update={"mode": "continue"})
         formatted = self.history.format_for_langchain(history)
         if (
             formatted
@@ -1025,9 +1023,7 @@ class DialogAgentRunner:
             formatted = formatted[:-1]
         if isinstance(agent.engine, TextChatEngine):
             agent.engine.messages.extend(formatted)
-        guidance = ScheduleTaskStore(self.redis, ttl=self.state_ttl).get_guidance(
-            self.session_id
-        )
+        guidance = ScheduleTaskStore(self.redis, ttl=self.state_ttl).get_guidance(self.session_id)
         if plan_exhausted:
             turn_instruction = (
                 "Task-todo 中的主题都已经问过，但后台结构化抽取尚未确认全部完成。"
@@ -1043,7 +1039,11 @@ class DialogAgentRunner:
             turn_instruction = topic_plan.instructions() + (
                 "" if topic_plan.mode == "communication" else turn_instruction
             )
-        turn_instruction += "这是持续中的会话，不要重新自我介绍或询问是否开始；听得到吗仅作通话确认。"
+        if not plan_exhausted and not (topic_plan and topic_plan.mode == "communication"):
+            turn_instruction += render_topic_route(self.topic_route, [next_question])
+        turn_instruction += (
+            "这是持续中的会话，不要重新自我介绍或询问是否开始；听得到吗仅作通话确认。"
+        )
         schedule_prompt = str(guidance.get("constraint_prompt") or "").strip()
         await agent.engine.update_session(
             instructions=(
@@ -1072,8 +1072,7 @@ class DialogAgentRunner:
             latest = db.scalar(
                 select(InteractionMessage)
                 .where(
-                    InteractionMessage.interaction_session_id
-                    == self.interaction_session_id,
+                    InteractionMessage.interaction_session_id == self.interaction_session_id,
                     InteractionMessage.role_type.in_(["AI", "assistant"]),
                     InteractionMessage.deleted == 0,
                 )
@@ -1098,8 +1097,7 @@ class DialogAgentRunner:
             patient_message_ids = list(
                 db.scalars(
                     select(InteractionMessage.message_no).where(
-                        InteractionMessage.interaction_session_id
-                        == self.interaction_session_id,
+                        InteractionMessage.interaction_session_id == self.interaction_session_id,
                         InteractionMessage.role_type.in_(["患者", "家属", "user"]),
                         InteractionMessage.turn_no < latest.turn_no,
                         InteractionMessage.deleted == 0,
@@ -1184,8 +1182,7 @@ class DialogAgentRunner:
             message_no = db.scalar(
                 select(InteractionMessage.message_no)
                 .where(
-                    InteractionMessage.interaction_session_id
-                    == self.interaction_session_id,
+                    InteractionMessage.interaction_session_id == self.interaction_session_id,
                     InteractionMessage.turn_no == turn_no - 1,
                     InteractionMessage.role_type.in_(["患者", "家属", "user"]),
                     InteractionMessage.deleted == 0,

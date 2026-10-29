@@ -19,6 +19,7 @@ interface PatientLayoutProps {
   headerRight?: ReactNode;
   contentClassName?: string;
   desktopAside?: ReactNode;
+  rightAside?: ReactNode;
 }
 
 export default function PatientLayout({
@@ -30,6 +31,7 @@ export default function PatientLayout({
   headerRight,
   contentClassName,
   desktopAside,
+  rightAside,
 }: PatientLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -49,7 +51,7 @@ export default function PatientLayout({
 
   return (
     <div className="patient-app scrollbar-soft">
-      <div className={desktopAside ? 'patient-dialogue-shell' : undefined}>
+      <div className={desktopAside ? `patient-dialogue-shell${rightAside ? ' patient-dialogue-with-diagnostics' : ''}` : undefined}>
         {desktopAside && (
           <aside className="patient-dialogue-aside">{desktopAside}</aside>
         )}
@@ -129,6 +131,7 @@ export default function PatientLayout({
           </nav>
         )}
         </div>
+        {rightAside && <aside className="patient-diagnostics-aside">{rightAside}</aside>}
       </div>
     </div>
   );

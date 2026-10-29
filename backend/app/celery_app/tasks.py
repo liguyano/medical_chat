@@ -93,6 +93,12 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
                 output = {
                     "question_count": result.get("question_count", 0),
                     "opening_guidance": result.get("opening_guidance", ""),
+                    "topic_route": [
+                        item.model_dump(mode="json")
+                        for item in (plan.topic_route if plan is not None else [])
+                    ],
+                    "plan_version": plan.plan_version if plan is not None else "1.0",
+                    "planning_reason": plan.planning_reason if plan is not None else "",
                     "questions": [
                         item.model_dump(mode="json")
                         for item in (plan.tasks if plan is not None else [])
@@ -127,6 +133,7 @@ def schedule_agent_worker(self, session_id: str, task_config: dict):
 
 # ==================== Dialog Agent任务 ====================
 
+
 @celery_app.task(name="app.celery_app.tasks.dialog_agent_worker", bind=True)
 def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: dict):
     """Dialog Agent 后台任务
@@ -155,9 +162,8 @@ def dialog_agent_worker(self, session_id: str, patient_info: dict, task_config: 
     from app.utils.redis_client import get_redis
     from app.workers.dialog_agent_runner import DialogAgentRunner
 
-    is_opening_prepare = (
-        not task_config.get("source_message_id")
-        and not bool(task_config.get("finalize"))
+    is_opening_prepare = not task_config.get("source_message_id") and not bool(
+        task_config.get("finalize")
     )
     if is_opening_prepare:
         if get_preparation_status(session_id) == "failed":
@@ -564,10 +570,7 @@ def reconcile_pending_dialog_turns():
                 if latest_ai_turn is None:
                     dispatch_opening_workers(db, session)
                     dispatched += 1
-                elif (
-                    latest_patient is not None
-                    and latest_patient.turn_no >= latest_ai_turn
-                ):
+                elif latest_patient is not None and latest_patient.turn_no >= latest_ai_turn:
                     dispatch_answer_workers(
                         db,
                         session,

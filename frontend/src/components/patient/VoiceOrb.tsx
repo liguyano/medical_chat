@@ -8,11 +8,14 @@ import { cn } from '@/lib/utils';
 export function VoiceOrb({
   state,
   className,
+  errorMessage,
 }: {
   state: VoicePresentationState;
   className?: string;
+  errorMessage?: string;
 }) {
   const copy = getVoicePresentation(state);
+  const detail = (state === 'error' || state === 'text_fallback') && errorMessage ? errorMessage : copy.detail;
   const faceIcon =
     state === 'connecting'
       ? 'interrupt'
@@ -40,7 +43,7 @@ export function VoiceOrb({
       >
         {copy.title}
       </p>
-      <p className="mt-1 text-sm text-foreground-muted">{copy.detail}</p>
+      <p className="mt-1 text-sm text-foreground-muted">{detail}</p>
     </div>
   );
 }
