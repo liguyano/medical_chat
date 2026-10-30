@@ -19,7 +19,8 @@ from app.services.voice_provisional import VoiceProvisionalState
 
 @pytest.mark.asyncio
 @pytest.mark.real_llm
-async def test_actual_realtime_topics_with_synthetic_pcm():
+@pytest.mark.parametrize("resume_questionnaire", [False, True], ids=["fresh", "old-questionnaire"])
+async def test_actual_realtime_topics_with_synthetic_pcm(resume_questionnaire):
     if os.getenv("RUN_ACTUAL_VOICE") != "1":
         pytest.skip("需显式授权并设置RUN_ACTUAL_VOICE=1和合成音频目录")
     directory = Path(os.environ["SYNTHETIC_VOICE_DIR"])
@@ -66,6 +67,11 @@ async def test_actual_realtime_topics_with_synthetic_pcm():
     reader = None
     replies = []
     provisional = VoiceProvisionalState()
+    if resume_questionnaire:
+        # 仅使用虚构历史，故意保留旧AI无依据的转述，验证不沿用问卷惯性。
+        client.remember_turn("assistant", "最近一个月做饭能做到什么程度？请从选项里选。")
+        client.remember_turn("user", "你指的是什么？")
+        client.remember_turn("assistant", "您说可以自己做饭，那是否可以独立计划和准备饭菜？")
     try:
         await client.connect(
             instructions=VoiceGateway._build_remaining_assessment_instructions(
@@ -218,6 +224,11 @@ async def test_actual_realtime_topics_with_synthetic_pcm():
             )
             replies.append(reply)
             assert reply and audio_bytes > 0
+            if resume_questionnaire and n == 0:
+                assert not any(word in reply for word in ("独立计划", "准备饭菜", "做饭能做到"))
+                assert not any(word in reply for word in ("您说可以自己做饭", "您刚才说可以自己做饭"))
+            if resume_questionnaire and n == 5:
+                assert any(word in reply for word in ("听得", "听到", "听见", "清楚"))
         assert all(replies), "每个合成语音轮次都必须有真实回复"
         assert [tool["function"]["name"] for tool in VOICE_TOOLS] == ["request_assessment_finish"]
     finally:

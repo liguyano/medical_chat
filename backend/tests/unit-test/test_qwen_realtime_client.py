@@ -60,6 +60,40 @@ class ClosedOnFirstSendWebSocket(FakeWebSocket):
 
 
 @pytest.mark.asyncio
+async def test_resume_keeps_history_but_not_questionnaire_style_or_ai_claims():
+    from app.services.voice_simple_prompt import build_voice_question_prompt
+
+    websocket = FakeWebSocket()
+
+    async def connector(*_args, **_kwargs):
+        return websocket
+
+    client = QwenRealtimeClient(
+        api_key="test", model="test", websocket_url="wss://example/realtime",
+        connector=connector,
+    )
+    history = [
+        {"role": "assistant", "content": "请按选项回答做饭能力。"},
+        {"role": "user", "content": "你指的是什么？"},
+        {"role": "assistant", "content": "您说可以自己做饭。"},
+    ]
+    for turn in history:
+        client.remember_turn(turn["role"], turn["content"])
+    try:
+        await client.connect(instructions=build_voice_question_prompt({}, []), tools=[])
+        sent = websocket.sent[0]["session"]["instructions"]
+        prefix, encoded_history = sent.rsplit("\n", 1)
+        assert json.loads(encoded_history) == history
+        assert "保留事实，不沿用旧AI的问卷式问法" in prefix
+        assert "历史AI的转述、猜测和提问都不是患者回答的证据" in prefix
+        assert "听不清或答非所问时，先回应或简短澄清" in prefix
+        assert "续聊同样适用生活话题方式" in prefix
+        assert "必要安全核实和规定测试原句/操作必须保留" in prefix
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_qwen_client_uses_official_server_vad_session_config():
     websocket = FakeWebSocket()
     connected_url = ""
