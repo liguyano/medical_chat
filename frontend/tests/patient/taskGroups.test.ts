@@ -18,7 +18,7 @@ function task(id: string, taskStatus: CareTask['taskStatus']): CareTask {
     collectionMode: 'ai_dialogue',
     taskStatus,
     assignedNurseId: 'N001',
-    assignedNurseName: '李某',
+    assignedNurseName: '李白',
     createdAt: '2026-08-19T10:00:00Z',
   };
 }

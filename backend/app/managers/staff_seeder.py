@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _STAFF_SEEDS: list[dict[str, str]] = [
     {
         "staff_no": "N001",
-        "staff_name": "李某",
+        "staff_name": "李白",
         "role_code": "nurse",
         "department_name": "心内科",
         "password": "123456",

@@ -342,7 +342,7 @@ const MOCK_STAFF_USERS: Record<
       id: 'N001',
       username: 'N001',
       role: 'nurse',
-      name: '李某',
+      name: '李白',
       department: '心内科',
       avatar: '',
     },
