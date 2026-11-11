@@ -233,7 +233,7 @@ export default function TaskDetailPage() {
                   </div>
 
                   <div className="flex items-start space-x-3">
-                    {task.collectionMode === 'ai_dialogue' ? (
+                    {task.collectionMode !== 'traditional_form' ? (
                       <ChatBubbleLeftRightIcon className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                     ) : (
                       <DocumentTextIcon className="w-5 h-5 text-info flex-shrink-0 mt-0.5" />
@@ -241,7 +241,7 @@ export default function TaskDetailPage() {
                     <div className="flex-1">
                       <label className="text-xs text-foreground-muted">采集方式</label>
                       <p className="text-sm font-medium text-foreground mt-1">
-                        {task.collectionMode === 'ai_dialogue' ? 'AI 对话采集' : '传统表单'}
+                        {task.collectionMode === 'embedded_device' ? `嵌入式设备 ${task.deviceId ?? ''}` : task.collectionMode === 'ai_dialogue' ? 'AI 对话采集' : '传统表单'}
                       </p>
                     </div>
                   </div>
@@ -292,7 +292,7 @@ export default function TaskDetailPage() {
               </CardContent>
             </Card>
 
-            {task.collectionMode === 'ai_dialogue' && task.preparation && (
+            {task.collectionMode !== 'traditional_form' && task.preparation && (
               <Card padding="lg">
                 <CardHeader>
                   <CardTitle>AI 首问准备进度</CardTitle>
@@ -414,7 +414,7 @@ export default function TaskDetailPage() {
                   />
                     <p className="text-xs text-foreground-muted mt-3">
                     患者正在进行
-                    {task.collectionMode === 'ai_dialogue' ? ' AI 问诊' : '传统问卷填写'}，
+                    {task.collectionMode !== 'traditional_form' ? ' AI 问诊' : '传统问卷填写'}，
                     已完成 {progressCurrent}/{progressTotal}
                   </p>
                 </CardContent>
@@ -431,13 +431,13 @@ export default function TaskDetailPage() {
                   <div className="space-y-4">
                     <div className="p-4 bg-surface-secondary rounded-xl">
                         <h4 className="text-sm font-medium text-foreground mb-2">
-                          {task.collectionMode === 'ai_dialogue' ? 'AI评估摘要' : '患者问卷提交'}
+                          {task.collectionMode !== 'traditional_form' ? 'AI评估摘要' : '患者问卷提交'}
                         </h4>
                         <p className="text-sm leading-6">
                           {task.aiSummary ?? '患者已完成采集，等待护士查看原始回答并确认最终结果。'}
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                        {task.collectionMode === 'ai_dialogue' ? (
+                        {task.collectionMode !== 'traditional_form' ? (
                           <>
                             <Badge variant="info" size="sm">{structuredAnswers.filter(hasStructuredAnswerValue).length}项结构化答案 · 等待人工 {structuredAnswers.filter(isPendingManualAnswer).length}项</Badge>
                             <Badge variant={interactionEvents.some((event) => event.priority === 'high') ? 'danger' : 'warning'} size="sm">
@@ -453,7 +453,7 @@ export default function TaskDetailPage() {
                     </div>
 
                     <div className="flex items-center space-x-3">
-                      {task.collectionMode === 'ai_dialogue' && (
+                      {task.collectionMode !== 'traditional_form' && (
                         <Button
                           variant="outline"
                           onClick={() => router.push(`/nurse/monitor/${task.id}`)}
@@ -549,14 +549,14 @@ export default function TaskDetailPage() {
                        variant="outline"
                        onClick={() =>
                          router.push(
-                           task.collectionMode === 'ai_dialogue'
+                           task.collectionMode !== 'traditional_form'
                              ? `/nurse/monitor/${task.id}`
                              : `/nurse/tasks/${task.id}/review`
                          )
                        }
                        className="w-full"
                      >
-                       {task.collectionMode === 'ai_dialogue' ? '查看实时进度' : '查看问卷结果'}
+                       {task.collectionMode !== 'traditional_form' ? '查看实时进度' : '查看问卷结果'}
                      </Button>
                    )}
 

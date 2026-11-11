@@ -72,7 +72,7 @@ export default function NurseReviewPage() {
         ])
       );
     }
-    if (task?.collectionMode === 'ai_dialogue') {
+    if ((task && task.collectionMode !== 'traditional_form')) {
       return Object.fromEntries(
         (aiAnswers ?? []).filter(hasStructuredAnswerValue).map((answer) => [
           answer.questionId,
@@ -91,7 +91,7 @@ export default function NurseReviewPage() {
         question.manualRequired || Object.prototype.hasOwnProperty.call(sourceAnswers, question.id)
       );
     }
-    if (task?.collectionMode === 'ai_dialogue') {
+    if ((task && task.collectionMode !== 'traditional_form')) {
       return (aiAnswers ?? []).map((answer) => ({
         id: answer.questionId,
         questionText: answer.questionText,
@@ -179,7 +179,7 @@ export default function NurseReviewPage() {
           <div>
             <h1 className="text-3xl">护士<span className="text-primary italic">评估复核</span></h1>
             <p className="text-foreground-muted mt-1">
-              {task.patientName} · {task.bedNo} · {task.collectionMode === 'ai_dialogue' ? 'AI结构化结果' : '患者问卷提交'}
+              {task.patientName} · {task.bedNo} · {task.collectionMode !== 'traditional_form' ? 'AI结构化结果' : '患者问卷提交'}
             </p>
           </div>
           <div className="flex gap-2">
@@ -231,7 +231,7 @@ export default function NurseReviewPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-xl bg-surface-secondary p-4">
                   <p className="text-xs text-foreground-muted">
-                    {task.collectionMode === 'ai_dialogue' ? 'AI结构化答案' : '患者提交答案'}
+                    {task.collectionMode !== 'traditional_form' ? 'AI结构化答案' : '患者提交答案'}
                   </p>
                   <p className="font-medium mt-2">{source || (question.manualRequired ? '等待人工' : '未采集')}</p>
                   {sourceMessages?.length && (

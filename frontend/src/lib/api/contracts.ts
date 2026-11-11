@@ -257,6 +257,7 @@ export interface BackendTaskDto {
   encounter_status?: string;
   task_type?: string;
   collection_mode: CollectionMode;
+  device_id?: string | null;
   task_status: TaskStatus;
   preparation?: TaskPreparationDto | null;
   nurse_id?: ApiId;
@@ -362,6 +363,7 @@ export interface CreateTaskRequest {
   assigned_nurse_id?: number;
   scale_ids: number[];
   collection_mode: CollectionMode;
+  device_id?: string | null;
   participant_type: ParticipantType;
   assessment_scene: AssessmentScene;
   planned_start_time?: string;

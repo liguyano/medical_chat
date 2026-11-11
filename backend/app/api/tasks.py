@@ -44,6 +44,16 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 DbSession = Annotated[Session, Depends(get_db)]
 
 
+@router.get("/devices", summary="查询可用于任务分配的设备")
+async def list_devices(_: Annotated[StaffAccount, Depends(require_staff)]) -> dict:
+    from app.services.device_tcp import connections, registered_devices
+
+    return ok([
+        {"device_id": device_id, "online": device_id in connections}
+        for device_id in sorted(registered_devices())
+    ])
+
+
 @router.post("", response_model=ApiResponse[CreateTaskResponse], summary="创建评估任务")
 def create_task(
     req: CreateTaskRequest,

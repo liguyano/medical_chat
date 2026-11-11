@@ -9,7 +9,9 @@ import uuid
 from datetime import UTC, date, datetime
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from app.errors.codes import ErrorCode
 from app.errors.handlers import AppError
@@ -190,8 +192,8 @@ def _build_instance(
         assessment_scene=assessment_scene,
         instance_status="collecting",
         started_at=started_at,
-        assessor_type="ai" if task.collection_mode == "ai_dialogue" else "patient",
-        assessor_id=patient.id if task.collection_mode != "ai_dialogue" else None,
+        assessor_type="ai" if task.collection_mode in {"ai_dialogue", "embedded_device"} else "patient",
+        assessor_id=patient.id if task.collection_mode not in {"ai_dialogue", "embedded_device"} else None,
         patient_name_snapshot=patient.patient_name,
         sex_snapshot=patient.sex,
         age_snapshot=_calculate_age(patient.birthday),
@@ -231,8 +233,13 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         )
         if assigned_staff is None:
             raise AppError(ErrorCode.ERR_STAFF_003)
+    if req.device_id is not None:
+        from app.services.device_tcp import check_device_available
+
+        check_device_available(db, req.device_id)
     selected_versions = _load_selected_versions(db, req.scale_ids)
     now = datetime.now(UTC)
+    uses_ai = req.collection_mode in {"ai_dialogue", "embedded_device"}
     task = CareTask(
         task_no=_business_no("TASK"),
         patient_id=patient.id,
@@ -241,14 +248,15 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         task_name=req.task_name,
         task_source=req.task_source,
         collection_mode=req.collection_mode,
-        task_status="in_progress" if req.collection_mode == "ai_dialogue" else "pending",
+        device_id=req.device_id,
+        task_status="in_progress" if uses_ai else "pending",
         assigned_nurse_id=req.assigned_nurse_id,
         planned_start_time=req.planned_start_time,
-        started_at=now if req.collection_mode == "ai_dialogue" else None,
+        started_at=now if uses_ai else None,
         creator="system",
         updator="system",
     )
-    if req.collection_mode == "ai_dialogue":
+    if uses_ai:
         initialize_ai_preparation(task)
     else:
         initialize_traditional_preparation(task, now)
@@ -257,7 +265,7 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
     try:
         db.add(task)
         db.flush()
-        if req.collection_mode == "ai_dialogue":
+        if uses_ai:
             session = InteractionSession(
                 session_no=_business_no("SESS"),
                 task_id=task.id,
@@ -315,6 +323,11 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         db.refresh(task)
         if session is not None:
             db.refresh(session)
+    except IntegrityError as exc:
+        db.rollback()
+        if req.device_id and "uq_care_task_active_device" in str(exc.orig):
+            raise HTTPException(409, "设备已有评估任务") from exc
+        raise
     except Exception:
         db.rollback()
         logger.exception("创建评估任务事务失败")
@@ -366,7 +379,7 @@ def retry_task_preparation(
     )
     if task is None:
         raise AppError(ErrorCode.ERR_TASK_003)
-    if task.collection_mode != "ai_dialogue":
+    if task.collection_mode not in {"ai_dialogue", "embedded_device"}:
         raise AppError(
             ErrorCode.ERR_COMMON_003,
             "传统问卷任务不需要 AI 首问准备",
@@ -586,6 +599,7 @@ def _to_backend_task_dto(db: Session, task: CareTask) -> BackendTaskDto:
         admission_time=encounter.admission_time.isoformat() if encounter else None,
         encounter_status=encounter.encounter_status if encounter else None,
         task_type=task.task_type,
+        device_id=task.device_id,
         collection_mode=task.collection_mode or "traditional_form",
         task_status=task.task_status,
         preparation=preparation_payload(task),
@@ -654,7 +668,7 @@ def list_patient_tasks(
             CareTask.encounter_id == encounter_id,
             CareTask.deleted == 0,
             or_(
-                CareTask.collection_mode != "ai_dialogue",
+                CareTask.collection_mode.not_in(("ai_dialogue", "embedded_device")),
                 (
                     (CareTask.preparation_status == "ready")
                     & CareTask.patient_visible_at.is_not(None)

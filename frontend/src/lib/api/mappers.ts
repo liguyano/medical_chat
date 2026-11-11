@@ -92,9 +92,7 @@ export function toBackendCollectionMode(
 export function toCollectionMode(
   mode: BackendTaskDto['collection_mode']
 ): CollectionMode {
-  return mode === 'traditional_form'
-    ? 'traditional_form'
-    : 'ai_dialogue';
+  return mode;
 }
 
 export function mapCreateTaskRequest(
@@ -148,6 +146,7 @@ export function mapTaskDto(dto: BackendTaskDto): CareTask {
         ? '入院评估任务包'
         : dto.task_type ?? '入院评估任务包',
     collectionMode: toCollectionMode(dto.collection_mode),
+    deviceId: dto.device_id ?? undefined,
     taskStatus: dto.task_status,
     preparation: mapTaskPreparation(dto.preparation),
     assignedNurseId: id(dto.assigned_nurse_id ?? dto.nurse_id),

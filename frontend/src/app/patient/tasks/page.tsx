@@ -82,7 +82,7 @@ export default function PatientTasksPage() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[20px] font-black">{task.taskType}</h2>
               <span className="rounded-full border border-[#9bd9dc] bg-[#e8f7f8] px-2 py-0.5 text-xs font-bold text-[#24898f]">
-                {task.collectionMode === 'ai_dialogue' ? 'AI 对话' : '传统问卷'}
+                {task.collectionMode === 'ai_dialogue' ? 'AI 对话' : task.collectionMode === 'embedded_device' ? '嵌入式设备' : '传统问卷'}
               </span>
             </div>
             <p className="mt-1 text-sm text-foreground-muted">

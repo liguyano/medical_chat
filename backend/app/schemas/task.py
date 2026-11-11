@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateTaskRequest(BaseModel):
@@ -20,9 +20,12 @@ class CreateTaskRequest(BaseModel):
     patient_id: int = Field(..., description="患者ID")
     encounter_id: int = Field(..., description="住院记录ID")
     scale_ids: list[int] = Field(..., min_length=1, description="量表ID列表")
-    collection_mode: Literal["traditional_form", "ai_dialogue"] = Field(
+    collection_mode: Literal["traditional_form", "ai_dialogue", "embedded_device"] = Field(
         default="ai_dialogue",
         description="采集模式",
+    )
+    device_id: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
     )
     participant_type: Literal["patient", "family", "agent"] = Field(
         default="patient",
@@ -36,6 +39,15 @@ class CreateTaskRequest(BaseModel):
     task_type: str = Field(default="assessment", description="任务类型")
     task_name: str = Field(default="入院量表评估", description="任务名称")
     task_source: str = Field(default="manual", description="任务来源")
+
+
+    @model_validator(mode="after")
+    def validate_device_assignment(self) -> CreateTaskRequest:
+        if self.collection_mode == "embedded_device" and self.device_id is None:
+            raise ValueError("嵌入式设备任务必须指定设备 ID")
+        if self.collection_mode != "embedded_device" and self.device_id is not None:
+            raise ValueError("仅嵌入式设备任务可以指定设备 ID")
+        return self
 
 
 class TaskScaleProgressDto(BaseModel):
@@ -90,7 +102,8 @@ class BackendTaskDto(BaseModel):
     admission_time: str | None = None
     encounter_status: str | None = None
     task_type: str
-    collection_mode: Literal["traditional_form", "ai_dialogue"]
+    device_id: str | None = None
+    collection_mode: Literal["traditional_form", "ai_dialogue", "embedded_device"]
     task_status: str
     preparation: TaskPreparationDto | None = None
     assigned_nurse_id: int | None = None

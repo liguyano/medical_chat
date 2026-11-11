@@ -484,3 +484,9 @@ from medagent.configs.agent_config import get_agent_config
 - 每次转写派发提取后异步监测processed_message_ids，更新权威剩余范围；已确认移除，证据不足暂缓两轮，之后换角度补问。超时解除pending并继续低频监测迟到提取。
 - 指令更新使用版本隔离；关闭取消同步与初判任务，恢复模式不被普通范围更新覆盖。结束工具始终核对完整权威缺项，不能用临时暂放判完成。
 - 真实语音是否稳定调用该工具必须独立验证，不能把单元通过等同模型行为通过。
+
+## 嵌入式设备评估
+
+- 嵌入式设备任务使用 embedded_device 采集方式。任务记录保存 device_id，设备在任务待复核期间仍保留，防止退回任务时和新任务争用设备。
+- 设备 TCP 监听默认关闭，由单个 API 进程启动和关闭。设备凭据由 DEVICE_TCP_CREDENTIALS 提供，保存设备 ID 到 SHA-256 校验值的 JSON 映射。设备只可领取后台分给自己的任务。
+- 设备协议、启动及联调步骤见 docs/plan/embedded-device-assessment.md。

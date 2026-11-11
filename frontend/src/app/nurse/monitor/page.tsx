@@ -49,7 +49,7 @@ export default function NurseMonitorPage() {
               <Card hover padding="lg" className="mb-4">
                 <div className="flex flex-col md:flex-row md:items-center gap-4">
                   <div className="w-12 h-12 rounded-2xl bg-primary-tint flex items-center justify-center">
-                    {task.collectionMode === 'ai_dialogue' ? (
+                    {task.collectionMode !== 'traditional_form' ? (
                       <ChatBubbleLeftRightIcon className="w-6 h-6 text-primary" />
                     ) : (
                       <SignalIcon className="w-6 h-6 text-info" />
@@ -64,7 +64,7 @@ export default function NurseMonitorPage() {
                       {task.handoffRequired && <Badge variant="danger" size="sm">需人工介入</Badge>}
                     </div>
                     <p className="text-sm text-foreground-muted mt-1">
-                      {task.collectionMode === 'ai_dialogue' ? 'AI对话' : '传统问卷'} · 当前阶段 {task.currentStage ?? '采集中'}
+                      {task.collectionMode === 'ai_dialogue' ? 'AI对话' : task.collectionMode === 'embedded_device' ? '嵌入式设备' : '传统问卷'} · 当前阶段 {task.currentStage ?? '采集中'}
                     </p>
                     {task.handoffRequired && (
                       <p className="mt-2 text-sm text-red-700 flex items-center gap-1">

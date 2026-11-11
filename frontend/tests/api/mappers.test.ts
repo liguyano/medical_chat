@@ -31,6 +31,22 @@ describe('API mappers', () => {
     expect(request.scale_ids).toEqual([4]);
   });
 
+  it('保留嵌入式设备模式和设备 ID', () => {
+    expect(toCollectionMode('embedded_device')).toBe('embedded_device');
+    expect(mapCreateTaskRequest({
+      patient_id: '1',
+      encounter_id: '2',
+      scale_ids: ['4'],
+      collection_mode: 'embedded_device',
+      device_id: 'ESP32-001',
+      participant_type: 'patient',
+      assessment_scene: 'admission',
+    })).toMatchObject({
+      collection_mode: 'embedded_device',
+      device_id: 'ESP32-001',
+    });
+  });
+
   it('非数字护士编码不会冒充数据库主键', () => {
     const request = mapCreateTaskRequest({
       patient_id: '1',

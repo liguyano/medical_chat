@@ -32,6 +32,11 @@ const modeConfig = {
     icon: ChatBubbleLeftRightIcon,
     color: 'text-primary',
   },
+  embedded_device: {
+    label: '嵌入式设备',
+    icon: ChatBubbleLeftRightIcon,
+    color: 'text-primary',
+  },
   traditional_form: {
     label: '传统表单',
     icon: DocumentTextIcon,

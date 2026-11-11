@@ -70,7 +70,7 @@ export type TaskStatus =
   | 'cancelled';
 
 // 采集模式
-export type CollectionMode = 'traditional_form' | 'ai_dialogue';
+export type CollectionMode = 'traditional_form' | 'ai_dialogue' | 'embedded_device';
 export type ParticipantType = 'patient' | 'family' | 'agent';
 export type AssessmentScene = 'admission' | 'reassessment' | 'transfer' | 'discharge';
 export type PrototypeAnswerValue = string | string[] | number | boolean | null;
@@ -132,6 +132,7 @@ export interface CareTask {
   encounterStatus?: string;
   taskType: string;
   collectionMode: CollectionMode;
+  deviceId?: string;
   taskStatus: TaskStatus;
   assignedNurseId: string;
   assignedNurseName: string;

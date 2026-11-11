@@ -80,7 +80,7 @@ export default function PatientTaskDetailPage() {
               <p className="mt-0.5 text-sm text-foreground-muted">
                 {task.collectionMode === 'ai_dialogue'
                   ? 'AI 对话评估'
-                  : '传统问卷评估'}
+                  : task.collectionMode === 'embedded_device' ? '嵌入式设备评估' : '传统问卷评估'}
               </p>
             </div>
           </div>
@@ -205,6 +205,8 @@ export default function PatientTaskDetailPage() {
               </button>
             )}
           </div>
+        ) : task.collectionMode === 'embedded_device' ? (
+          <p className="patient-card p-4 text-center">请使用护士分配的设备完成评估</p>
         ) : (
           <button
             className="patient-primary-button w-full"

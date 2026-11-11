@@ -9,7 +9,7 @@ import { StarIcon } from '@heroicons/react/24/outline';
 
 export default function NurseQualityPage() {
   const allTasks = useTaskStore((state) => state.tasks);
-  const tasks = allTasks.filter((task) => task.collectionMode === 'ai_dialogue');
+  const tasks = allTasks.filter((task) => task.collectionMode !== 'traditional_form');
   const qualityReviews = useTaskStore((state) => state.qualityReviews);
 
   return (

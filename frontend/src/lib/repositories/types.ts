@@ -168,6 +168,7 @@ export interface CreateTaskInput {
   scaleIds: string[];
   scaleNames: string[];
   collectionMode: CareTask['collectionMode'];
+  deviceId?: string;
   participantType: NonNullable<CareTask['participantType']>;
   participantName: string;
   relationshipToPatient?: string;

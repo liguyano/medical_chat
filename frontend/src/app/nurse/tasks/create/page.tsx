@@ -8,7 +8,7 @@ import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Input } from '@/components/shared/Input';
 import { IntegrationStatus } from '@/components/shared/IntegrationStatus';
-import { abortRequest, isRequestCancelled } from '@/lib/api/httpClient';
+import { abortRequest, apiRequest, isRequestCancelled } from '@/lib/api/httpClient';
 import { mockEncounters, mockPatients, mockScales } from '@/lib/mock/data';
 import { careRepository } from '@/lib/repositories';
 import { runtimeConfig } from '@/lib/runtime/config';
@@ -57,6 +57,22 @@ function CreateTaskContent() {
     apiMode ? [] : ['1', '2', '3', '4', '5']
   );
   const [collectionMode, setCollectionMode] = useState<CollectionMode>('ai_dialogue');
+  const [deviceId, setDeviceId] = useState('');
+  const [devices, setDevices] = useState<{ device_id: string; online: boolean }[]>([]);
+  const [deviceError, setDeviceError] = useState('');
+
+  useEffect(() => {
+    if (!apiMode || collectionMode !== 'embedded_device') return;
+    const controller = new AbortController();
+    setDeviceError('');
+    apiRequest<{ device_id: string; online: boolean }[]>('/api/tasks/devices', {
+      signal: controller.signal,
+    }).then(setDevices).catch((error: unknown) => {
+      if (!isRequestCancelled(error)) setDeviceError('设备列表加载失败');
+    });
+    return () => controller.abort();
+  }, [apiMode, collectionMode]);
+
   const [consentRequired, setConsentRequired] = useState(!apiMode);
   const [educationTopics, setEducationTopics] = useState<string[]>(
     apiMode ? [] : ['药物过敏安全宣教', '防跌倒宣教']
@@ -139,11 +155,19 @@ function CreateTaskContent() {
       setError('请至少选择一张量表');
       return;
     }
+    if (step === 3 && collectionMode === 'embedded_device' && !deviceId) {
+      setError('请选择嵌入式设备');
+      return;
+    }
     setError('');
     setStep((value) => Math.min(value + 1, 4));
   };
 
   const createTask = async () => {
+    if (collectionMode === 'embedded_device' && !deviceId) {
+      setError('请选择嵌入式设备');
+      return;
+    }
     if (!patient || !encounter) {
       setError('患者或住院记录不完整，暂时无法创建任务');
       return;
@@ -170,6 +194,7 @@ function CreateTaskContent() {
         scaleIds: selectedScales.map((scale) => scale.id),
         scaleNames: selectedScales.map((scale) => scale.scaleName),
         collectionMode,
+        deviceId: collectionMode === 'embedded_device' ? deviceId : undefined,
         participantType,
         participantName:
           participantType === 'patient'
@@ -264,6 +289,11 @@ function CreateTaskContent() {
                   { value: 'patient', label: '患者本人' },
                   { value: 'family', label: '家属' },
                   { value: 'agent', label: '授权代理人' },
+                  ...(apiMode ? [{
+                    value: 'embedded_device',
+                    label: '嵌入式设备',
+                    detail: '由指定设备录音和播放评估对话',
+                  }] : []),
                 ].map((item) => (
                   <button
                     key={item.value}
@@ -347,6 +377,24 @@ function CreateTaskContent() {
                   </button>
                 ))}
               </div>
+              {collectionMode === 'embedded_device' && (
+                <label className="mt-4 block text-sm font-medium">
+                  选择设备
+                  <select
+                    className="mt-2 w-full rounded-xl border border-border bg-surface px-4 py-3"
+                    value={deviceId}
+                    onChange={(event) => setDeviceId(event.target.value)}
+                  >
+                    <option value="">请选择设备</option>
+                    {devices.map((device) => (
+                      <option key={device.device_id} value={device.device_id}>
+                        {device.device_id}（{device.online ? '在线' : '离线'}）
+                      </option>
+                    ))}
+                  </select>
+                  {deviceError && <span role="alert">{deviceError}</span>}
+                </label>
+              )}
             </Card>
 
             <Card padding="lg">
@@ -453,7 +501,7 @@ function CreateTaskContent() {
               </div>
               <div className="rounded-xl bg-surface-secondary p-4">
                 <p className="text-foreground-muted">采集方式</p>
-                <p className="font-medium mt-1">{collectionMode === 'ai_dialogue' ? 'AI对话采集' : '传统问卷'}</p>
+                <p className="font-medium mt-1">{collectionMode === 'embedded_device' ? `嵌入式设备 ${deviceId}` : collectionMode === 'ai_dialogue' ? 'AI对话采集' : '传统问卷'}</p>
               </div>
               <div className="rounded-xl bg-surface-secondary p-4">
                 <p className="text-foreground-muted">负责护士</p>

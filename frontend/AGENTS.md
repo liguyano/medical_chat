@@ -184,3 +184,8 @@ pnpm check
 - 对话右侧VoiceDiagnosticsPanel消费VoiceSocketClient实际采集链路的onDiagnostics，不额外创建麦克风或上传音频。每500ms采样状态，显示设备、音轨、AudioContext、实际采样率、PCM能量、采集帧/发送字节和末帧时间；关闭时清理采样定时器，手机布局置于对话下方。输入设备名称只在当前页面显示，不写诊断日志。
 
 - 音轨ended时同步停止处理器回调，VoiceSocketClient同次连接最多重新采集一次；暂停/关闭不恢复，失败明确MIC_TrackEnded降级。采集申请使用版本隔离，主动stop先卸载ended监听，避免迟到授权重开麦克风。该机制不证明设备意外结束原因已消除。
+
+## 嵌入式设备任务
+
+- 医护端任务创建页在 API 模式下提供「嵌入式设备」。选中时从 GET /api/tasks/devices 读取设备列表，允许分配离线设备。
+- 患者端设备任务详情展示状态和设备使用提示，评估收音和播放通过设备 TCP 完成。

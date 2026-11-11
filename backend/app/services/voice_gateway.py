@@ -14,9 +14,9 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocketDisconnect
 from medagent.agents.service_agent.dialog_agent.conversation_scenes import (
     dialogue_reference,
     supports_life_scene,
@@ -120,6 +120,10 @@ VOICE_ASSESSMENT_FINISH_RULES = (
 )
 
 
+class VoiceOutput(Protocol):
+    async def send_json(self, payload: dict[str, Any]) -> None: ...
+
+
 @dataclass
 class VoiceGeneration:
     """一轮模型响应的运行态。"""
@@ -164,7 +168,7 @@ class VoiceSession:
     progress_sync_version: int = 0
     scope_update_version: int = 0
     turn_detection: str = "server_vad"
-    connected_clients: set[WebSocket] = field(default_factory=set)
+    connected_clients: set[VoiceOutput] = field(default_factory=set)
     input_audio: bytearray = field(default_factory=bytearray)
     input_pre_roll: bytearray = field(default_factory=bytearray)
     input_turn_no: int = 0
@@ -295,6 +299,7 @@ class VoiceGateway:
         patient_id: int,
         patient_info: dict[str, Any],
         scale_codes: list[str],
+        manual_input: bool = False,
     ) -> VoiceSession:
         async with self._lock:
             existing = self._sessions.get(session_no)
@@ -406,7 +411,10 @@ class VoiceGateway:
                 if item.role_type in {"AI", "assistant", "患者", "家属", "user"}:
                     client.remember_turn(role, item.content_text or item.asr_text or "")
             voice_extra = voice_config.model_extra or {}
-            turn_detection = str(voice_extra.get("turn_detection") or "server_vad")
+            turn_detection = (
+                "manual" if manual_input
+                else str(voice_extra.get("turn_detection") or "server_vad")
+            )
             await client.connect(
                 instructions=connect_instructions,
                 tools=VOICE_TOOLS,
@@ -441,8 +449,8 @@ class VoiceGateway:
             )
             return gateway_session
 
-    async def attach(self, session: VoiceSession, websocket: WebSocket) -> None:
-        """绑定患者端 WebSocket。"""
+    async def attach(self, session: VoiceSession, websocket: VoiceOutput) -> None:
+        """绑定语音输出终端。"""
         session.connected_clients.add(websocket)
         if session.close_task is not None:
             session.close_task.cancel()
@@ -490,7 +498,7 @@ class VoiceGateway:
         session.pending_transcript_message_id = str(draft.get("message_id") or "") or None
         session.pending_transcript_audio_url = str(draft.get("audio_url") or "") or None
 
-    async def detach(self, session: VoiceSession, websocket: WebSocket) -> None:
+    async def detach(self, session: VoiceSession, websocket: VoiceOutput) -> None:
         """解绑患者端；保留上游连接一段宽限期以支持重连。"""
         session.connected_clients.discard(websocket)
         if not session.connected_clients and not session.closed:
@@ -2097,7 +2105,7 @@ class VoiceGateway:
             await self._send_json(websocket, payload)
 
     @staticmethod
-    async def _send_json(websocket: WebSocket, payload: dict[str, Any]) -> None:
+    async def _send_json(websocket: VoiceOutput, payload: dict[str, Any]) -> None:
         try:
             await websocket.send_json(payload)
         except (RuntimeError, WebSocketDisconnect):

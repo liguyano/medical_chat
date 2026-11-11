@@ -257,7 +257,7 @@ def reset_for_retry(db: Session, task: CareTask) -> None:
 
 def preparation_payload(task: CareTask) -> dict[str, Any] | None:
     """将 ORM 字段转换成任务 DTO 使用的准备状态载荷。"""
-    if task.collection_mode != "ai_dialogue":
+    if task.collection_mode not in {"ai_dialogue", "embedded_device"}:
         return None
     detail = deepcopy(task.preparation_detail or empty_preparation_detail())
     return {

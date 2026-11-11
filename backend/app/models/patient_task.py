@@ -4,6 +4,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
+    text,
     BigInteger,
     Boolean,
     Date,
@@ -123,6 +124,7 @@ class CareTask(BusinessBaseMixin, Base):
         nullable=True,
         comment="采集模式：traditional_form或ai_dialogue；子任务从父任务继承",
     )
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     task_status: Mapped[str] = mapped_column(String(32), nullable=False, comment="任务状态")
     preparation_status: Mapped[str] = mapped_column(
         String(32),
@@ -168,6 +170,14 @@ class CareTask(BusinessBaseMixin, Base):
     __table_args__ = (
         Index("idx_care_task_patient", "patient_id", "deleted"),
         Index("idx_care_task_encounter", "encounter_id", "deleted"),
+        Index(
+            "uq_care_task_active_device",
+            "device_id",
+            unique=True,
+            postgresql_where=text(
+                "device_id IS NOT NULL AND deleted = 0 AND task_status IN ('pending', 'in_progress', 'pending_review')"
+            ),
+        ),
         Index("idx_care_task_status", "task_status", "deleted"),
         Index("idx_care_task_parent", "parent_task_id"),
     )

@@ -24,7 +24,7 @@ from app.errors.handlers import AppError
 from app.models import base as model_base
 from app.models.base import get_db
 from app.models.interaction import InteractionSession
-from app.models.patient_task import Patient, PatientEncounter
+from app.models.patient_task import CareTask, Patient, PatientEncounter
 from app.models.staff_account import StaffAccount
 from app.services.agent_dispatch_service import build_session_agent_payload
 from app.services.dialog_audio_store import DialogAudioStore
@@ -38,7 +38,7 @@ router = APIRouter(tags=["voice-dialog"])
 DbSession = Annotated[Session, Depends(get_db)]
 
 
-def _load_session(session_no: str) -> tuple[int, int, int, dict, list[str]]:
+def _load_session(session_no: str, *, device: bool = False) -> tuple[int, int, int, dict, list[str]]:
     """加载会话主键、任务主键、患者主键和语音网关所需配置。"""
     if model_base.SessionLocal is None:
         raise RuntimeError("数据库未初始化")
@@ -53,6 +53,9 @@ def _load_session(session_no: str) -> tuple[int, int, int, dict, list[str]]:
             raise AppError(ErrorCode.ERR_DIALOG_001)
         if session.session_status not in {"pending", "active"}:
             raise AppError(ErrorCode.ERR_DIALOG_002)
+        task = db.get(CareTask, session.task_id)
+        if task is not None and (task.collection_mode == "embedded_device") != device:
+            raise AppError(ErrorCode.ERR_DIALOG_004, "语音终端与任务模式不匹配")
         patient_info, task_config = build_session_agent_payload(db, session)
         return (
             session.task_id,
