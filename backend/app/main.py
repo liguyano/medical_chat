@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -55,38 +53,17 @@ async def lifespan(_: FastAPI):
 
     logger.info(f"应用启动完成: env={config.env} app={config.app.name}")
 
-    server = None
-    handlers = set()
-    if os.getenv("DEVICE_TCP_ENABLED", "").lower() == "true":
-        from app.services.device_tcp import handle_device, registered_devices
+    from app.api.devices import stop_workers
+    from app.services.device_registry import registered_devices
+    from app.utils.redis_client import async_redis_client
 
-        registered_devices()
-
-        def accept_device(reader, writer):
-            task = asyncio.create_task(handle_device(reader, writer))
-            handlers.add(task)
-            task.add_done_callback(handlers.discard)
-
-        server = await asyncio.start_server(
-            accept_device,
-            os.getenv("DEVICE_TCP_HOST", "127.0.0.1"),
-            int(os.getenv("DEVICE_TCP_PORT", "9100")),
-        )
+    registered_devices()
     try:
         yield
     finally:
-        if server is not None:
-            server.close()
-            await server.wait_closed()
-            for task in handlers:
-                task.cancel()
-            await asyncio.gather(*handlers, return_exceptions=True)
-
-    # 关闭异步 Redis 连接
-    from app.utils.redis_client import async_redis_client
-
-    if async_redis_client is not None:
-        await async_redis_client.close()
+        await stop_workers()
+        if async_redis_client is not None:
+            await async_redis_client.close()
     logger.info("应用关闭，资源已释放")
 
 
@@ -124,6 +101,7 @@ def create_app() -> FastAPI:
     from app.api import (
         auth,
         consent,
+        devices,
         dialog,
         extraction,
         patient_portal,
@@ -138,6 +116,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(tasks.router)
+    app.include_router(devices.router)
     app.include_router(dialog.router)
     app.include_router(sse.router)
     app.include_router(patients.router)

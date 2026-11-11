@@ -234,7 +234,7 @@ def create_task(db: Session, req: CreateTaskRequest) -> CreateTaskResponse:
         if assigned_staff is None:
             raise AppError(ErrorCode.ERR_STAFF_003)
     if req.device_id is not None:
-        from app.services.device_tcp import check_device_available
+        from app.services.device_registry import check_device_available
 
         check_device_available(db, req.device_id)
     selected_versions = _load_selected_versions(db, req.scale_ids)

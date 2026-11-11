@@ -19,31 +19,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if defined DEVICE_TCP_CREDENTIALS if not defined DEVICE_TCP_ENABLED set "DEVICE_TCP_ENABLED=true"
-if /i "%DEVICE_TCP_ENABLED%"=="true" (
-    if not defined DEVICE_TCP_CREDENTIALS (
-        echo Set DEVICE_TCP_CREDENTIALS before enabling device TCP.
-        pause
-        exit /b 1
-    )
-    if not defined DEVICE_TCP_HOST set "DEVICE_TCP_HOST=0.0.0.0"
-    if not defined DEVICE_TCP_PORT set "DEVICE_TCP_PORT=9100"
-    echo Applying database migrations for device TCP...
-    pushd backend || exit /b 1
-    uv run alembic upgrade head
-    if errorlevel 1 (
-        popd
-        echo Database migration failed. Application services were not started.
-        pause
-        exit /b 1
-    )
+if defined DEVICE_HTTP_CREDENTIALS goto device_migration
+if not defined DEVICE_TCP_CREDENTIALS goto api_start
+:device_migration
+echo Applying database migrations for device HTTP...
+pushd backend || exit /b 1
+uv run alembic upgrade head
+if errorlevel 1 (
     popd
-) else (
-    echo Device TCP is disabled. Set DEVICE_TCP_CREDENTIALS to enable device integration.
+    echo Database migration failed. Application services were not started.
+    pause
+    exit /b 1
 )
+popd
 
+:api_start
+if not defined API_BIND_HOST set "API_BIND_HOST=127.0.0.1"
 echo [2/7] Starting FastAPI...
-start "medical_chat - API" powershell -NoExit -Command "Set-Location 'backend'; uv run uvicorn app.main:app --host 127.0.0.1 --port 8000"
+start "medical_chat - API" powershell -NoExit -Command "Set-Location 'backend'; uv run uvicorn app.main:app --host $env:API_BIND_HOST --port 8000"
 
 echo [3/7] Starting Dialog Worker...
 start "medical_chat - Dialog Worker" powershell -NoExit -Command "Set-Location 'backend'; uv run celery -A app.celery_app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat -Q dialog_queue -n dialog-real@%%h --loglevel=info"
@@ -65,7 +58,6 @@ echo ==========================================
 echo All service windows have been launched.
 echo Backend:  http://127.0.0.1:8000
 echo Health:   http://127.0.0.1:8000/health
-if /i "%DEVICE_TCP_ENABLED%"=="true" echo Device TCP: %DEVICE_TCP_HOST%:%DEVICE_TCP_PORT%
 echo Nurse:    http://localhost:3000/nurse
 echo Patient:  http://localhost:3000/patient
 echo ==========================================

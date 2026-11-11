@@ -45,11 +45,12 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 
 @router.get("/devices", summary="查询可用于任务分配的设备")
-async def list_devices(_: Annotated[StaffAccount, Depends(require_staff)]) -> dict:
-    from app.services.device_tcp import connections, registered_devices
+def list_devices(_: Annotated[StaffAccount, Depends(require_staff)]) -> dict:
+    from app.services.device_registry import heartbeat_key, registered_devices
+    from app.utils.redis_client import get_redis
 
     return ok([
-        {"device_id": device_id, "online": device_id in connections}
+        {"device_id": device_id, "online": bool(get_redis().exists(heartbeat_key(device_id)))}
         for device_id in sorted(registered_devices())
     ])
 

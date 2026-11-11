@@ -130,6 +130,7 @@ services:
     restart: unless-stopped
     environment:
       <<: *backend-environment
+      DEVICE_HTTP_CREDENTIALS: "${DEVICE_HTTP_CREDENTIALS:-}"
     ports:
       - "127.0.0.1:${API_BIND_PORT:-18000}:8000"
     volumes:
