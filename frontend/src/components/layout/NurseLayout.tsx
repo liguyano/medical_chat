@@ -36,6 +36,7 @@ const navigation = [
   { name: '工作台', href: '/nurse/dashboard', icon: HomeIcon },
   { name: '患者管理', href: '/nurse/patients', icon: UserGroupIcon },
   { name: '任务管理', href: '/nurse/tasks', icon: ClipboardDocumentListIcon },
+  { name: '设备管理', href: '/nurse/devices', icon: CpuChipIcon },
   { name: '实时监控', href: '/nurse/monitor', icon: ComputerDesktopIcon },
   { name: 'AI质评', href: '/nurse/quality', icon: StarIcon },
   { name: '系统配置', href: '/nurse/config', icon: Cog6ToothIcon },
