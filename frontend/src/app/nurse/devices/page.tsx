@@ -9,12 +9,17 @@ import { apiRequest } from '@/lib/api/httpClient';
 import { runtimeConfig } from '@/lib/runtime/config';
 
 type Device = { device_id: string; online: boolean };
-type Snapshot = { devices: Device[] } | { error: true };
+type Registration = { device_id: string; requested_at: string };
+type Snapshot = { devices: Device[]; registrations: Registration[] } | { error: true };
 
 export default function NurseDevicesPage() {
   const apiMode = runtimeConfig.dataMode === 'api';
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [refresh, setRefresh] = useState(0);
+  const [selected, setSelected] = useState<string>();
+  const [code, setCode] = useState('');
+  const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
 
   useEffect(() => {
     if (!apiMode) return;
@@ -23,11 +28,12 @@ export default function NurseDevicesPage() {
 
     async function load() {
       try {
-        const devices = await apiRequest<Device[]>('/api/tasks/devices', {
-          signal: controller.signal,
-          cache: 'no-store',
-        });
-        if (!controller.signal.aborted) setSnapshot({ devices });
+        const options = { signal: controller.signal, cache: 'no-store' as const };
+        const [devices, registrations] = await Promise.all([
+          apiRequest<Device[]>('/api/tasks/devices', options),
+          apiRequest<Registration[]>('/api/device/registrations', options),
+        ]);
+        if (!controller.signal.aborted) setSnapshot({ devices, registrations });
       } catch {
         if (!controller.signal.aborted) setSnapshot({ error: true });
       } finally {
@@ -43,7 +49,25 @@ export default function NurseDevicesPage() {
   }, [apiMode, refresh]);
 
   const devices = snapshot && 'devices' in snapshot ? snapshot.devices : undefined;
+  const registrations = snapshot && 'registrations' in snapshot ? snapshot.registrations : undefined;
   const online = devices?.filter((device) => device.online).length ?? 0;
+
+  async function approve(deviceId: string) {
+    setApproving(true);
+    setApprovalError('');
+    try {
+      await apiRequest(`/api/device/registrations/${encodeURIComponent(deviceId)}/approve`, {
+        method: 'POST',
+        body: { verification_code: code.trim() },
+      });
+      setSelected(undefined);
+      setRefresh((value) => value + 1);
+    } catch (error) {
+      setApprovalError(error instanceof Error ? error.message : '审批失败，请重试。');
+    } finally {
+      setApproving(false);
+    }
+  }
 
   return (
     <NurseLayout>
@@ -69,6 +93,56 @@ export default function NurseDevicesPage() {
             </Card>
           ))}
         </div>
+      )}
+
+      {registrations && (
+        <Card padding="lg" className="mb-6">
+          <h2 className="mb-4 text-xl">待登记申请</h2>
+          {registrations.length === 0 && <p className="text-foreground-muted">暂无待审批设备。</p>}
+          <ul className="divide-y divide-border">
+            {registrations.map((registration) => (
+              <li key={registration.device_id} className="py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{registration.device_id}</p>
+                    <p className="text-sm text-foreground-muted">
+                      {new Date(registration.requested_at).toLocaleString('zh-CN')}
+                    </p>
+                  </div>
+                  <Button variant="outline" disabled={approving} onClick={() => {
+                    setSelected(registration.device_id);
+                    setCode('');
+                    setApprovalError('');
+                  }}>
+                    审批
+                  </Button>
+                </div>
+                {selected === registration.device_id && (
+                  <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={(event) => {
+                    event.preventDefault();
+                    void approve(registration.device_id);
+                  }}>
+                    <label className="text-sm">
+                      设备核对码
+                      <input
+                        className="mt-1 block rounded-xl border border-border px-3 py-2"
+                        value={code}
+                        maxLength={8}
+                        autoComplete="off"
+                        onChange={(event) => setCode(event.target.value)}
+                        placeholder="输入设备显示的 8 位码"
+                      />
+                    </label>
+                    <Button type="submit" loading={approving} disabled={!/^[0-9a-f]{8}$/i.test(code.trim())}>
+                      同意登记
+                    </Button>
+                    {approvalError && <p role="alert" className="text-danger">{approvalError}</p>}
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       <Card padding="lg">

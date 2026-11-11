@@ -19,10 +19,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if defined DEVICE_HTTP_CREDENTIALS goto device_migration
-if not defined DEVICE_TCP_CREDENTIALS goto api_start
-:device_migration
-echo Applying database migrations for device HTTP...
+echo Applying database migrations...
 pushd backend || exit /b 1
 uv run alembic upgrade head
 if errorlevel 1 (
@@ -33,7 +30,6 @@ if errorlevel 1 (
 )
 popd
 
-:api_start
 if not defined API_BIND_HOST set "API_BIND_HOST=127.0.0.1"
 echo [2/7] Starting FastAPI...
 start "medical_chat - API" powershell -NoExit -Command "Set-Location 'backend'; uv run uvicorn app.main:app --host $env:API_BIND_HOST --port 8000"

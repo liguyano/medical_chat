@@ -10,5 +10,8 @@ describe('设备管理入口', () => {
     expect(page).toContain('当前没有设备连接');
     expect(page).toContain('尚未登记设备');
     expect(page).toContain('设备状态获取失败');
+    expect(page).toContain('待登记申请');
+    expect(page).toContain('同意登记');
+    expect(page).toContain('verification_code: code.trim()');
   });
 });

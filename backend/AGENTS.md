@@ -490,3 +490,4 @@ from medagent.configs.agent_config import get_agent_config
 - 嵌入式设备任务使用 embedded_device 采集方式。任务记录保存 device_id，设备在任务待复核期间仍保留，防止退回任务时和新任务争用设备。
 - 设备使用 /api/device HTTP 接口，凭据由 DEVICE_HTTP_CREDENTIALS 提供。心跳存 Redis，45 秒后失效。轮次暂存于单个 API 进程，设备只可领取后台分给自己的任务。
 - 设备协议与联调步骤见 docs/esp32-s3-device-integration.md。
+- 设备可以自行发起登记，护士输入设备显示的核对码批准。批准和摘要保存于 PostgreSQL，旧环境变量登记继续兼容。

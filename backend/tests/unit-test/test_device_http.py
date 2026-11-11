@@ -1,4 +1,5 @@
 import hashlib
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
@@ -9,15 +10,15 @@ from app.api import devices
 def test_device_auth_requires_the_matching_secret(monkeypatch):
     monkeypatch.setenv("DEVICE_HTTP_CREDENTIALS", '{"ESP32-001":"' +
                        hashlib.sha256(b"test-secret").hexdigest() + '"}')
-    assert devices.authenticate_device("ESP32-001", "test-secret") == "ESP32-001"
+    db = Mock()
+    db.get.return_value = None
+    assert devices.authenticate_device("ESP32-001", "test-secret", db) == "ESP32-001"
     with pytest.raises(HTTPException) as error:
-        devices.authenticate_device("ESP32-001", "wrong")
+        devices.authenticate_device("ESP32-001", "wrong", db)
     assert error.value.status_code == 401
 
 
 def test_heartbeat_sets_45_second_online_status(monkeypatch):
-    from unittest.mock import Mock
-
     redis = Mock()
     monkeypatch.setattr(devices, "get_redis", lambda: redis)
     assert devices.heartbeat("ESP32-001") == {"online": True}
@@ -68,6 +69,9 @@ def test_http_round_upload_poll_download_and_isolation(monkeypatch):
     monkeypatch.setattr(devices, "voice_gateway", FakeGateway())
     app = FastAPI()
     app.include_router(devices.router)
+    db = Mock()
+    db.get.return_value = None
+    app.dependency_overrides[devices.get_db] = lambda: db
     headers = {
         "X-Device-ID": "D1", "X-Device-Secret": "test-secret",
         "Content-Type": "application/octet-stream",

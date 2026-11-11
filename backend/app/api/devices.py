@@ -14,9 +14,23 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_staff
 from app.api.voice_dialog import _load_session
-from app.services.device_registry import current_task, heartbeat_key, registered_devices
+from app.models.base import get_db
+from app.models.staff_account import StaffAccount
+from app.schemas.response import ok
+from app.services.device_registry import (
+    approve_registration,
+    approved_digest,
+    credential_digest,
+    current_task,
+    heartbeat_key,
+    pending_registrations,
+    request_registration,
+)
 from app.services.voice_gateway import voice_gateway
 from app.utils.redis_client import get_redis
 
@@ -37,15 +51,40 @@ class DeviceRound:
 
 rounds: dict[tuple[str, str, str], DeviceRound] = {}
 workers: set[asyncio.Task] = set()
+DbSession = Annotated[Session, Depends(get_db)]
+Staff = Annotated[StaffAccount, Depends(require_staff)]
+DeviceId = Annotated[str, Header(alias="X-Device-ID", max_length=64)]
+DeviceSecret = Annotated[str, Header(alias="X-Device-Secret")]
+
+
+class ApprovalRequest(BaseModel):
+    verification_code: str = Field(pattern=r"^[0-9A-Fa-f]{8}$")
+
+
+@router.post("/registration")
+def register(device_id: DeviceId, secret: DeviceSecret, db: DbSession):
+    return request_registration(db, device_id, secret)
+
+
+@router.get("/registrations")
+def pending(db: DbSession, _: Staff):
+    return ok(pending_registrations(db))
+
+
+@router.post("/registrations/{device_id}/approve")
+def approve(device_id: str, body: ApprovalRequest, db: DbSession, staff: Staff):
+    approve_registration(db, device_id, body.verification_code.upper(), staff_id=staff.id)
+    return ok({"status": "approved"})
 
 
 def authenticate_device(
-    device_id: Annotated[str, Header(alias="X-Device-ID", max_length=64)],
-    secret: Annotated[str, Header(alias="X-Device-Secret")],
+    device_id: DeviceId,
+    secret: DeviceSecret,
+    db: DbSession,
 ) -> str:
-    expected = registered_devices().get(device_id)
+    expected = approved_digest(db, device_id)
     if expected is None or not 1 <= len(secret) <= 256 or not hmac.compare_digest(
-        hashlib.sha256(secret.encode()).hexdigest(), expected
+        credential_digest(secret), expected
     ):
         raise HTTPException(401, "设备凭据无效")
     return device_id

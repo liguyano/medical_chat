@@ -18,6 +18,7 @@ from app.models.assessment_template import (
     AssessmentSection,
 )
 from app.models.base import Base, BusinessBaseMixin, get_db, init_db
+from app.models.device_registration import DeviceRegistration
 from app.models.education import (
     EducationProgram,
     EducationProgramVersion,
