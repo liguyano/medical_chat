@@ -37,7 +37,11 @@
 - RECORD_START 得到 RECORDING 后发送 PCM 帧，以 RECORD_END 提交本轮。回复音频位于 PLAY_START 和 PLAY_END 之间。断线后重连并重新 START。
 - 首版使用局域网或私网和合成音频联调。真实患者数据需要加密传输。
 
-### PowerShell 启动示例
+### 一键启动
+
+在 PowerShell 会话中准备 `DEVICE_TCP_CREDENTIALS`，再从项目根目录运行 `.\start_medical_chat_all.bat`。脚本会等待 PostgreSQL 和 Redis 就绪，执行数据库迁移，再启动 API、Worker 和前端。设置凭据后默认开启设备 TCP，监听 `0.0.0.0:9100`。可在启动前覆盖监听地址和端口，也可显式设置 `DEVICE_TCP_ENABLED=false` 按普通模式启动。工作区需先准备本地配置和依赖。
+
+### 手动启动示例
 
 ```powershell
 cd backend

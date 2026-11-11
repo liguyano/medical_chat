@@ -15,7 +15,6 @@ import { runtimeConfig } from '@/lib/runtime/config';
 import { useTaskStore } from '@/lib/stores/useTaskStore';
 import { useUserStore } from '@/lib/stores/useUserStore';
 import type {
-  AssessmentScene,
   AssessmentScale,
   CollectionMode,
   Patient,
@@ -52,7 +51,7 @@ function CreateTaskContent() {
   );
   const [participantType, setParticipantType] = useState<ParticipantType>('patient');
   const [relationship, setRelationship] = useState('女儿');
-  const [scene, setScene] = useState<AssessmentScene>('admission');
+  const scene = 'admission';
   const [selectedScaleIds, setSelectedScaleIds] = useState<string[]>(
     apiMode ? [] : ['1', '2', '3', '4', '5']
   );
@@ -77,7 +76,6 @@ function CreateTaskContent() {
   const [educationTopics, setEducationTopics] = useState<string[]>(
     apiMode ? [] : ['药物过敏安全宣教', '防跌倒宣教']
   );
-  const [plannedStartTime, setPlannedStartTime] = useState('2026-08-16T14:00');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
   const [dataNotice, setDataNotice] = useState('');
@@ -205,7 +203,7 @@ function CreateTaskContent() {
         assessmentScene: scene,
         consentRequired: apiMode ? false : consentRequired,
         educationTopics: apiMode ? [] : educationTopics,
-        plannedStartTime,
+        plannedStartTime: new Date().toISOString(),
         notes,
       });
       addTask(task);
@@ -266,7 +264,7 @@ function CreateTaskContent() {
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedPatientId(item.id)}
-                    className={`rounded-2xl border-2 p-4 text-left ${
+                    className={`rounded-2xl border-2 p-4 text-left disabled:opacity-50 ${
                       selectedPatientId === item.id ? 'border-primary bg-primary-tint' : 'border-border'
                     }`}
                   >
@@ -289,11 +287,6 @@ function CreateTaskContent() {
                   { value: 'patient', label: '患者本人' },
                   { value: 'family', label: '家属' },
                   { value: 'agent', label: '授权代理人' },
-                  ...(apiMode ? [{
-                    value: 'embedded_device',
-                    label: '嵌入式设备',
-                    detail: '由指定设备录音和播放评估对话',
-                  }] : []),
                 ].map((item) => (
                   <button
                     key={item.value}
@@ -333,7 +326,7 @@ function CreateTaskContent() {
                           : [...current, scale.id]
                       )
                     }
-                    className={`rounded-2xl border-2 p-4 text-left ${
+                    className={`rounded-2xl border-2 p-4 text-left disabled:opacity-50 ${
                       selected ? 'border-primary bg-primary-tint' : 'border-border'
                     }`}
                   >
@@ -353,7 +346,7 @@ function CreateTaskContent() {
           <div className="space-y-4">
             <Card padding="lg">
               <h2 className="text-xl mb-4">执行方式</h2>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-3">
                 {[
                   {
                     value: 'ai_dialogue',
@@ -363,12 +356,18 @@ function CreateTaskContent() {
                       : '文字/语音模拟、实时抽取与宣教',
                   },
                   { value: 'traditional_form', label: '传统问卷', detail: '分组填写、自动保存与断点续答' },
+                  {
+                    value: 'embedded_device',
+                    label: '嵌入式设备',
+                    detail: apiMode ? '由指定设备录音和播放评估对话' : '连接后端后可分配设备',
+                  },
                 ].map((item) => (
                   <button
                     key={item.value}
                     type="button"
+                    disabled={!apiMode && item.value === 'embedded_device'}
                     onClick={() => setCollectionMode(item.value as CollectionMode)}
-                    className={`rounded-2xl border-2 p-4 text-left ${
+                    className={`rounded-2xl border-2 p-4 text-left disabled:opacity-50 ${
                       collectionMode === item.value ? 'border-primary bg-primary-tint' : 'border-border'
                     }`}
                   >
@@ -398,28 +397,6 @@ function CreateTaskContent() {
             </Card>
 
             <Card padding="lg">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                  <label className="block text-sm font-medium mb-2">评估场景</label>
-                  <select
-                    value={scene}
-                    onChange={(event) => setScene(event.target.value as AssessmentScene)}
-                    className="w-full rounded-xl border border-border bg-surface px-4 py-3"
-                  >
-                    <option value="admission">入院评估</option>
-                    <option value="reassessment">复评</option>
-                    <option value="transfer">转科评估</option>
-                    <option value="discharge">出院评估</option>
-                  </select>
-                </div>
-                <Input
-                  label="计划开始时间"
-                  type="datetime-local"
-                  value={plannedStartTime}
-                  onChange={(event) => setPlannedStartTime(event.target.value)}
-                />
-              </div>
-
               {!apiMode && (
                 <>
               <label className="mt-5 flex items-center gap-3 rounded-xl bg-surface-secondary p-4">
@@ -471,7 +448,7 @@ function CreateTaskContent() {
               )}
 
               <div className="mt-5">
-                <label className="block text-sm font-medium mb-2">护士备注</label>
+                <label className="block text-sm font-medium mb-2">备注</label>
                 <textarea
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
