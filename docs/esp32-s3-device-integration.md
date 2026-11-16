@@ -2,6 +2,18 @@
 
 适用于亚博智能 ESP32-S3-N16R8 和 ESP-IDF 固件。设备按轮上传录音，等待回复生成后下载 WAV 播放。
 
+## 0. 旧固件怎么改
+
+在固件工程里搜索 `/api/device/heartbeat` 和 `/api/device/task`，找到现在联网后直接发心跳和查任务的入口。在这两步之前插入登记阶段。沿用现有 Wi-Fi、按键和 ES8311 驱动。
+
+1. **准备设备身份**。沿用已有的唯一设备 ID。如果旧固件已经给每台板子配置了独立密钥，继续使用；否则联网后用 `esp_fill_random` 生成 32 字节，转成 64 个十六进制字符，写入 NVS 并提交。后续启动先读 NVS。NVS 写入失败时停止登记并提示错误，避免下次启动换一把密钥。 [ESP-IDF 随机数文档](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/system/random.html)
+2. **加登记请求**。复用现有 HTTPS 客户端，新增 `POST /api/device/registration`。用 `esp_http_client_set_header` 写入 `X-Device-ID` 和 `X-Device-Secret`，请求体为空。先检查 HTTP 状态码，再解析完整 JSON 响应。公网使用 HTTPS 并校验服务端证书。 [ESP-IDF HTTP 客户端文档](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/protocols/esp_http_client.html)
+3. **等待护士同意**。HTTP 200 且 `status=pending` 时，在串口或屏幕显示 `verification_code`，每 5 秒用同一套凭据再发一次登记请求。护士在网页输入板子显示的 8 位核对码，点「同意登记」。若 HTTP 409，停止频繁重试并提示检查设备 ID。网络或 5xx 错误退避重试。日志只记设备 ID、状态码和核对码。
+4. **批准后启动原逻辑**。收到 `status=approved` 后，立即发一次心跳，再启动原来的心跳和查任务逻辑。保持每 15 秒心跳，录音、上传、等回复和播放期间也要继续。只有任务返回 `ready=true` 才开放录音。
+5. **烧录验证**。后端先用新版一键脚本启动并完成迁移。在 ESP-IDF PowerShell 进入固件工程，执行 `idf.py -p COM5 build flash monitor`，把 `COM5` 换成板子的串口。保留 NVS。看到核对码就先验证护士端审批，再确认心跳 200 和设备在线，最后测试录放音。
+
+固件主流程可写成：`连 Wi-Fi → 读取或创建设备凭据 → 发登记 → 等审批 → 心跳与领任务 → 录音上传 → 查询轮次 → 下载播放`。
+
 ## 1. 联调准备
 
 - 后端提供完整的 API 基础地址。公网使用现有站点的 HTTPS 域名和 443 端口，固件校验服务端证书。局域网可使用后端团队提供的可达地址联调，使用合成音频。
